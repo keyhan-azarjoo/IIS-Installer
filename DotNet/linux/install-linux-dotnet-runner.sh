@@ -266,10 +266,24 @@ publish_local_source() {
   printf '%s\n' "${publish_path}"
 }
 
+find_published_app_path() {
+  local root_path="$1"
+  find "${root_path}" -name '*.runtimeconfig.json' ! -path '*/ref/*' ! -path '*/refs/*' 2>/dev/null | awk '
+    {
+      score=0
+      lower=tolower($0)
+      if (lower ~ /\/(publish|published)\//) score+=100
+      if (lower ~ /\/release\//) score+=50
+      if (lower ~ /\/debug\//) score-=25
+      print score "|" $0
+    }
+  ' | sort -t'|' -k1,1nr -k2,2 | head -n 1 | cut -d'|' -f2-
+}
+
 find_app_dll() {
   local deployment_path="$1"
   local runtime_config
-  runtime_config="$(find "${deployment_path}" -name '*.runtimeconfig.json' ! -path '*/ref/*' ! -path '*/refs/*' | head -n 1)"
+  runtime_config="$(find_published_app_path "${deployment_path}")"
 
   if [[ -n "${runtime_config}" ]]; then
     local base_name
@@ -509,6 +523,29 @@ server {
 EOF
 }
 
+ensure_backend_healthy() {
+  local attempts=15
+  local status
+
+  while (( attempts > 0 )); do
+    if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+      echo "The ${SERVICE_NAME} service is not running. Check 'systemctl status ${SERVICE_NAME}' and 'journalctl -u ${SERVICE_NAME} -n 100'." >&2
+      exit 1
+    fi
+
+    status="$(curl -k -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:${SERVICE_PORT}/" 2>/dev/null || true)"
+    if [[ -n "${status}" && "${status}" != "000" ]]; then
+      return
+    fi
+
+    sleep 2
+    attempts=$((attempts - 1))
+  done
+
+  echo "The ${SERVICE_NAME} service did not answer on http://127.0.0.1:${SERVICE_PORT}. Check 'journalctl -u ${SERVICE_NAME} -n 100' for the app startup error." >&2
+  exit 1
+}
+
 ensure_nginx_running() {
   if ! nginx -t >/dev/null 2>&1; then
     echo "Nginx configuration test failed. Run 'nginx -t' and 'journalctl -xeu nginx.service' for details." >&2
@@ -531,6 +568,16 @@ resolve_application_source() {
   local target_path="${target_root}/${app_name}"
 
   if [[ -d "${source_value}" ]]; then
+    local existing_published_path
+    existing_published_path="$(find_published_app_path "${source_value}")"
+    if [[ -n "${existing_published_path}" ]]; then
+      echo "Found published application under: ${existing_published_path}" >&2
+      rm -rf "${target_path}"
+      run_cmd cp -R "${existing_published_path}" "${target_path}"
+      printf '%s\n' "${target_path}"
+      return
+    fi
+
     local published_path
     published_path="$(publish_local_source "${source_value}" "${target_path}" || true)"
     if [[ -n "${published_path}" ]]; then
@@ -617,8 +664,10 @@ main() {
   write_nginx_config "${domain_name:-$resolved_host}" "${cert_file}" "${key_file}"
 
   run_cmd systemctl daemon-reload
-  run_cmd systemctl enable --now "${SERVICE_NAME}"
-  run_cmd systemctl enable --now nginx
+  run_cmd systemctl enable "${SERVICE_NAME}"
+  run_cmd systemctl restart "${SERVICE_NAME}"
+  ensure_backend_healthy
+  run_cmd systemctl enable nginx
   ensure_nginx_running
 
   echo "Deployment complete."
