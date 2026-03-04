@@ -7,11 +7,18 @@ This repository now includes two OS-specific installers under `DotNet`:
 
 ## Windows
 
-Run the PowerShell script from an elevated terminal:
+Fetch and run the PowerShell script from an elevated terminal:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\DotNet\windows\install-windows-dotnet-host.ps1
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/IIS-Installer/main/DotNet/windows/install-windows-dotnet-host.ps1" -OutFile ".\install-windows-dotnet-host.ps1"
+.\install-windows-dotnet-host.ps1
+```
+
+Repository folder:
+
+```text
+https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/windows
 ```
 
 What it does:
@@ -30,16 +37,24 @@ Defaults:
 Example with custom values:
 
 ```powershell
-.\DotNet\windows\install-windows-dotnet-host.ps1 -DotNetChannel 9.0 -SiteName MyApi -SitePort 8090
+.\install-windows-dotnet-host.ps1 -DotNetChannel 9.0 -SiteName MyApi -SitePort 8090
 ```
 
 ## Linux
 
-Run the shell script as root:
+Fetch and run the shell script as root:
 
 ```bash
-chmod +x ./DotNet/linux/install-linux-dotnet-runner.sh
-sudo ./DotNet/linux/install-linux-dotnet-runner.sh
+curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/IIS-Installer/main/DotNet/linux/install-linux-dotnet-runner.sh" -o ./install-linux-dotnet-runner.sh
+chmod +x ./install-linux-dotnet-runner.sh
+sudo ./install-linux-dotnet-runner.sh
+```
+
+Repository folders:
+
+```text
+Windows: https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/windows
+Linux:   https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/linux
 ```
 
 What it does:
@@ -57,7 +72,7 @@ Defaults:
 Example with custom values:
 
 ```bash
-sudo DOTNET_CHANNEL=9.0 SERVICE_NAME=my-api SERVICE_PORT=5050 ./DotNet/linux/install-linux-dotnet-runner.sh
+sudo DOTNET_CHANNEL=9.0 SERVICE_NAME=my-api SERVICE_PORT=5050 ./install-linux-dotnet-runner.sh
 ```
 
 ## Notes
