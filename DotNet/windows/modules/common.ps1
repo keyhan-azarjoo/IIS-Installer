@@ -478,7 +478,11 @@ function Get-StaticIPAddress {
         Where-Object { -not (Test-IsPrivateIPv4 -IPAddress $_.IPAddress) } |
         Select-Object -First 1
 
-    return $publicIp.IPAddress
+    if ($publicIp) {
+        return $publicIp.IPAddress
+    }
+
+    return $null
 }
 
 function Get-LocalIPAddress {
@@ -487,7 +491,11 @@ function Get-LocalIPAddress {
         Where-Object { Test-IsPrivateIPv4 -IPAddress $_.IPAddress } |
         Select-Object -First 1
 
-    return $privateIp.IPAddress
+    if ($privateIp) {
+        return $privateIp.IPAddress
+    }
+
+    return $null
 }
 
 function Resolve-HostName {
