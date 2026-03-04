@@ -132,9 +132,20 @@ aspnet_runtime_installed() {
   dotnet --list-runtimes 2>/dev/null | grep -Eq "^Microsoft\.AspNetCore\.App ${major_version}\."
 }
 
+netcore_runtime_installed() {
+  local major_version
+  major_version="$(dotnet_major_version)"
+
+  if ! command -v dotnet >/dev/null 2>&1; then
+    return 1
+  fi
+
+  dotnet --list-runtimes 2>/dev/null | grep -Eq "^Microsoft\.NETCore\.App ${major_version}\."
+}
+
 install_dotnet() {
-  if dotnet_sdk_installed && aspnet_runtime_installed; then
-    echo ".NET SDK and ASP.NET Core Runtime for channel ${DOTNET_CHANNEL} already installed."
+  if dotnet_sdk_installed && aspnet_runtime_installed && netcore_runtime_installed; then
+    echo ".NET SDK and required runtimes for channel ${DOTNET_CHANNEL} already installed."
     if [[ ! -x /usr/bin/dotnet ]]; then
       ln -sf "${DOTNET_ROOT}/dotnet" /usr/bin/dotnet
     fi
@@ -149,6 +160,7 @@ install_dotnet() {
 
   mkdir -p "${DOTNET_ROOT}"
   run_cmd "${installer}" --channel "${DOTNET_CHANNEL}" --install-dir "${DOTNET_ROOT}" --quality ga
+  run_cmd "${installer}" --channel "${DOTNET_CHANNEL}" --runtime dotnet --install-dir "${DOTNET_ROOT}" --quality ga
   run_cmd "${installer}" --channel "${DOTNET_CHANNEL}" --runtime aspnetcore --install-dir "${DOTNET_ROOT}" --quality ga
 
   ln -sf "${DOTNET_ROOT}/dotnet" /usr/bin/dotnet
@@ -296,6 +308,70 @@ find_best_runtimeconfig() {
       print score "|" $0
     }
   ' | sort -t'|' -k1,1nr -k2,2 | head -n 1 | cut -d'|' -f2-
+}
+
+runtime_framework_version() {
+  local runtimeconfig_path="$1"
+  local framework_name="$2"
+
+  awk -v framework="${framework_name}" '
+    index($0, "\"name\"") && index($0, framework) { in_framework=1; next }
+    in_framework && index($0, "\"version\"") {
+      if (match($0, /"[0-9]+\.[0-9]+\.[0-9]+"/)) {
+        version=substr($0, RSTART + 1, RLENGTH - 2)
+        print version
+        exit
+      }
+    }
+    in_framework && index($0, "\"name\"") && !index($0, framework) { in_framework=0 }
+  ' "${runtimeconfig_path}"
+}
+
+resolve_required_dotnet_channel() {
+  local deployment_path="$1"
+  local runtimeconfig_path
+  runtimeconfig_path="$(find_best_runtimeconfig "${deployment_path}")"
+  if [[ -z "${runtimeconfig_path}" ]]; then
+    return
+  fi
+
+  local framework_version
+  framework_version="$(runtime_framework_version "${runtimeconfig_path}" "Microsoft.NETCore.App")"
+  if [[ -z "${framework_version}" ]]; then
+    framework_version="$(runtime_framework_version "${runtimeconfig_path}" "Microsoft.AspNetCore.App")"
+  fi
+
+  if [[ -z "${framework_version}" ]]; then
+    return
+  fi
+
+  printf '%s\n' "${framework_version%%.*}.0"
+}
+
+ensure_required_app_runtime() {
+  local deployment_path="$1"
+  local required_channel
+  required_channel="$(resolve_required_dotnet_channel "${deployment_path}")"
+
+  if [[ -z "${required_channel}" || "${required_channel}" == "${DOTNET_CHANNEL}" ]]; then
+    return
+  fi
+
+  echo "Application requires .NET channel ${required_channel}. Installing matching runtime."
+  local previous_channel="${DOTNET_CHANNEL}"
+  DOTNET_CHANNEL="${required_channel}"
+
+  local installer
+  installer="$(mktemp)"
+  run_cmd curl -fsSL "${DOTNET_INSTALL_SCRIPT_URL}" -o "${installer}"
+  chmod +x "${installer}"
+  mkdir -p "${DOTNET_ROOT}"
+  run_cmd "${installer}" --channel "${DOTNET_CHANNEL}" --runtime dotnet --install-dir "${DOTNET_ROOT}" --quality ga
+  run_cmd "${installer}" --channel "${DOTNET_CHANNEL}" --runtime aspnetcore --install-dir "${DOTNET_ROOT}" --quality ga
+  ln -sf "${DOTNET_ROOT}/dotnet" /usr/bin/dotnet
+  rm -f "${installer}"
+
+  DOTNET_CHANNEL="${previous_channel}"
 }
 
 find_app_dll() {
@@ -678,6 +754,8 @@ main() {
   dll_name="$(basename "${dll_path}" .dll)"
   local publish_path
   publish_path="$(dirname "${dll_path}")"
+
+  ensure_required_app_runtime "${repo_path}"
 
   chown -R dotnetapp:dotnetapp "${repo_path}"
   write_service "${publish_path}" "${dll_name}"
