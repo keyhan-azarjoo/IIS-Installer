@@ -140,8 +140,52 @@ function Invoke-DockerDeployment {
         throw "docker build failed."
     }
 
-    & docker run -d --name $containerName -p "${HostPort}:8080" $imageName | Out-Host
-    if ($LASTEXITCODE -ne 0) {
+    $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+    $isClientWindows = $osInfo -and $osInfo.ProductType -eq 1
+    $runAttempts = @()
+
+    if ($isClientWindows) {
+        # Windows client hosts default to Hyper-V isolation. Prefer process isolation first
+        # to avoid Hyper-V/nested-virtualization requirements when the image matches the host.
+        $runAttempts += "process"
+        $runAttempts += "hyperv"
+    }
+    else {
+        $runAttempts += $null
+        $runAttempts += "hyperv"
+    }
+
+    $runSucceeded = $false
+    foreach ($isolation in $runAttempts) {
+        $runArgs = @("run", "-d", "--name", $containerName, "-p", "${HostPort}:8080")
+        if (-not [string]::IsNullOrWhiteSpace($isolation)) {
+            $runArgs += "--isolation=$isolation"
+            Write-Host "Starting Docker container with $isolation isolation"
+        }
+        else {
+            Write-Host "Starting Docker container"
+        }
+
+        $runArgs += $imageName
+        $runOutput = & docker @runArgs 2>&1
+        if ($runOutput) {
+            $runOutput | Out-Host
+        }
+
+        if ($LASTEXITCODE -eq 0) {
+            $runSucceeded = $true
+            break
+        }
+
+        if ($isolation -eq "process") {
+            Write-Host "Process-isolated Docker run failed. Retrying with Hyper-V isolation."
+        }
+        elseif ([string]::IsNullOrWhiteSpace($isolation)) {
+            Write-Host "Default Docker run failed. Retrying with Hyper-V isolation."
+        }
+    }
+
+    if (-not $runSucceeded) {
         throw "docker run failed."
     }
 
