@@ -593,5 +593,5 @@ Configure-IisSite `
 
 Write-Host "Deployment complete."
 Write-Host "Preferred host: $resolvedHost"
-Write-Host "HTTP URL: http://$resolvedHost:$SitePort"
-Write-Host "HTTPS URL: https://$resolvedHost:$HttpsPort"
+Write-Host "HTTP URL: http://${resolvedHost}:$SitePort"
+Write-Host "HTTPS URL: https://${resolvedHost}:$HttpsPort"
