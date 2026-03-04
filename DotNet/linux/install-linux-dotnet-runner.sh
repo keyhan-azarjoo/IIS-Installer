@@ -290,6 +290,14 @@ find_app_dll() {
   printf '%s\n' "${dll_path}"
 }
 
+is_private_ipv4() {
+  local ip="$1"
+  [[ "${ip}" =~ ^10\. ]] && return 0
+  [[ "${ip}" =~ ^192\.168\. ]] && return 0
+  [[ "${ip}" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]] && return 0
+  return 1
+}
+
 get_local_ip() {
   local local_ip
   local preferred_iface
@@ -322,14 +330,39 @@ get_local_ip() {
   printf '%s\n' "${local_ip}"
 }
 
+get_static_ip() {
+  local ip_list
+  ip_list="$(
+    ip -o -4 addr show up scope global 2>/dev/null | awk '
+      {
+        iface=$2
+        split($4,a,"/")
+        score=2
+        lower=tolower(iface)
+        if (lower ~ /^(eth|enp|eno|ens)/) score=0
+        else if (lower ~ /^(wlan|wlp|wifi)/) score=1
+        print score " " a[1]
+      }
+    ' | sort -n
+  )"
+
+  while read -r score candidate_ip; do
+    if [[ -n "${candidate_ip:-}" ]] && ! is_private_ipv4 "${candidate_ip}"; then
+      printf '%s\n' "${candidate_ip}"
+      return
+    fi
+  done <<< "${ip_list}"
+}
+
 resolve_host_name() {
   local domain_name="$1"
-  local static_ip="$2"
   if [[ -n "${domain_name}" ]]; then
     printf '%s\n' "${domain_name}"
     return
   fi
 
+  local static_ip
+  static_ip="$(get_static_ip)"
   if [[ -n "${static_ip}" ]]; then
     printf '%s\n' "${static_ip}"
     return
@@ -508,10 +541,9 @@ main() {
     exit 0
   fi
 
-  read -r -p "Enter a domain name for the site (leave blank to use an IP address): " domain_name
-  read -r -p "Enter a static/public IP address if you have one (leave blank to use the local LAN IP): " static_ip
+  read -r -p "Enter a domain name for the site (leave blank to auto-detect the best IP address): " domain_name
   local resolved_host
-  resolved_host="$(resolve_host_name "${domain_name}" "${static_ip}")"
+  resolved_host="$(resolve_host_name "${domain_name}")"
 
   mkdir -p "${APP_ROOT}"
 

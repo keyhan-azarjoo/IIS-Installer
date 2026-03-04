@@ -7,7 +7,6 @@ param(
     [string]$RemotePackageDirectory = "C:\Windows\Temp\IIS-Installer",
     [string]$DotNetChannel = "8.0",
     [string]$DomainName,
-    [string]$StaticIpAddress,
     [string]$SiteName = "DotNetApp",
     [int]$SitePort = 80,
     [int]$HttpsPort = 443
@@ -180,10 +179,6 @@ $remoteCommand = @(
 
 if (-not [string]::IsNullOrWhiteSpace($DomainName)) {
     $remoteCommand += @("-DomainName", (Quote-RemoteArg $DomainName))
-}
-
-if (-not [string]::IsNullOrWhiteSpace($StaticIpAddress)) {
-    $remoteCommand += @("-StaticIpAddress", (Quote-RemoteArg $StaticIpAddress))
 }
 
 $remoteCommandText = ($remoteCommand -join ' ')

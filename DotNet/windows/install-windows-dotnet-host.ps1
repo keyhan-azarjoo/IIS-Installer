@@ -7,7 +7,6 @@ param(
     [string]$GitHubToken,
     [string]$SourceValue,
     [string]$DomainName,
-    [string]$StaticIpAddress,
     [string]$SiteName = "DotNetApp",
     [int]$SitePort = 80,
     [int]$HttpsPort = 443
@@ -309,11 +308,17 @@ function Stop-IisDeploymentLocking {
     Import-Module WebAdministration
 
     if (Test-Path "IIS:\Sites\$WebsiteName") {
-        Stop-Website -Name $WebsiteName -ErrorAction SilentlyContinue | Out-Null
+        $site = Get-Website -Name $WebsiteName -ErrorAction SilentlyContinue
+        if ($site -and $site.State -eq "Started") {
+            Stop-Website -Name $WebsiteName | Out-Null
+        }
     }
 
     if (Test-Path "IIS:\AppPools\$WebsiteName") {
-        Stop-WebAppPool -Name $WebsiteName -ErrorAction SilentlyContinue | Out-Null
+        $appPool = Get-ChildItem "IIS:\AppPools\$WebsiteName" -ErrorAction SilentlyContinue
+        if ($appPool -and $appPool.State -eq "Started") {
+            Stop-WebAppPool -Name $WebsiteName | Out-Null
+        }
     }
 }
 
@@ -501,6 +506,15 @@ function Find-ApplicationAssembly {
 }
 
 function Get-LocalIPAddress {
+    $candidateIps = Get-PreferredIPv4Addresses
+    $privateIp = $candidateIps |
+        Where-Object { Test-IsPrivateIPv4 -IPAddress $_.IPAddress } |
+        Select-Object -First 1
+
+    return $privateIp.IPAddress
+}
+
+function Get-PreferredIPv4Addresses {
     $interfaceMap = @{}
     Get-NetIPInterface -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object {
         $interfaceMap[$_.InterfaceIndex] = $_
@@ -511,7 +525,7 @@ function Get-LocalIPAddress {
         $adapterMap[$_.InterfaceIndex] = $_
     }
 
-    $candidates = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    return Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object {
             $_.IPAddress -notlike "127.*" -and
             $_.IPAddress -notlike "169.254.*" -and
@@ -534,22 +548,45 @@ function Get-LocalIPAddress {
                 return 9999
             }
         }, SkipAsSource
+}
 
-    return ($candidates | Select-Object -First 1).IPAddress
+function Test-IsPrivateIPv4 {
+    param([Parameter(Mandatory = $true)][string]$IPAddress)
+
+    if ($IPAddress -match '^10\.') {
+        return $true
+    }
+
+    if ($IPAddress -match '^192\.168\.') {
+        return $true
+    }
+
+    if ($IPAddress -match '^172\.(1[6-9]|2[0-9]|3[0-1])\.') {
+        return $true
+    }
+
+    return $false
+}
+
+function Get-StaticIPAddress {
+    $candidateIps = Get-PreferredIPv4Addresses
+    $publicIp = $candidateIps |
+        Where-Object { -not (Test-IsPrivateIPv4 -IPAddress $_.IPAddress) } |
+        Select-Object -First 1
+
+    return $publicIp.IPAddress
 }
 
 function Resolve-HostName {
-    param(
-        [string]$DomainName,
-        [string]$StaticIpAddress
-    )
+    param([string]$DomainName)
 
     if (-not [string]::IsNullOrWhiteSpace($DomainName)) {
         return $DomainName.Trim()
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($StaticIpAddress)) {
-        return $StaticIpAddress.Trim()
+    $staticIp = Get-StaticIPAddress
+    if (-not [string]::IsNullOrWhiteSpace($staticIp)) {
+        return $staticIp
     }
 
     $localIp = Get-LocalIPAddress
@@ -723,9 +760,8 @@ if ([string]::IsNullOrWhiteSpace($sourceValue)) {
     exit 0
 }
 
-$domainName = if (-not [string]::IsNullOrWhiteSpace($DomainName)) { $DomainName } else { Read-Host "Enter a domain name for the site (leave blank to use an IP address)" }
-$staticIpAddress = if (-not [string]::IsNullOrWhiteSpace($StaticIpAddress)) { $StaticIpAddress } else { Read-Host "Enter a static/public IP address if you have one (leave blank to use the local LAN IP)" }
-$resolvedHost = Resolve-HostName -DomainName $domainName -StaticIpAddress $staticIpAddress
+$domainName = if (-not [string]::IsNullOrWhiteSpace($DomainName)) { $DomainName } else { Read-Host "Enter a domain name for the site (leave blank to auto-detect the best IP address)" }
+$resolvedHost = Resolve-HostName -DomainName $domainName
 $certificate = Ensure-ServerCertificate -HostName $resolvedHost
 
 $deploymentRoot = Join-Path $env:SystemDrive "inetpub\wwwroot"
