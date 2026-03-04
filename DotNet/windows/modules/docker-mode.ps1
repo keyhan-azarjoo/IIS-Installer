@@ -113,8 +113,12 @@ function Invoke-DockerDeployment {
     $imageName = ("{0}:latest" -f ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-'))
     $containerName = ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-')
 
-    & docker container inspect $containerName *> $null
-    if ($LASTEXITCODE -eq 0) {
+    $existingContainer = & docker ps -a --filter "name=^/$containerName$" --format "{{.Names}}" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to query existing Docker containers."
+    }
+
+    if ($existingContainer -contains $containerName) {
         & docker rm -f $containerName *> $null
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to remove existing Docker container '$containerName'."
