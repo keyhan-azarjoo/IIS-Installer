@@ -289,6 +289,16 @@ function Find-PublishedAppPath {
 
     $runtimeConfig = Get-ChildItem -Path $RootPath -Filter *.runtimeconfig.json -Recurse -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -notmatch '[\\/](ref|refs)[\\/]' } |
+        Sort-Object @{
+            Expression = {
+                $score = 0
+                if ($_.FullName -match '[\\/](publish|published)[\\/]') { $score += 100 }
+                if ($_.FullName -match '[\\/]Release[\\/]') { $score += 50 }
+                if ($_.FullName -match '[\\/]Debug[\\/]') { $score -= 25 }
+                $score
+            }
+            Descending = $true
+        }, FullName |
         Select-Object -First 1
 
     if (-not $runtimeConfig) {
@@ -551,6 +561,35 @@ function Configure-IisSite {
         $sslFlags = 1
     }
 
+    $resolvedHttpPort = $HttpPort
+    $resolvedHttpsPort = $HttpsPortNumber
+
+    if ([string]::IsNullOrWhiteSpace($hostHeader)) {
+        $httpConflict = Get-Website |
+            Where-Object {
+                $_.Name -ne $WebsiteName -and
+                $_.Bindings.Collection.bindingInformation -contains "*:$HttpPort:"
+            } |
+            Select-Object -First 1
+
+        if ($httpConflict) {
+            $resolvedHttpPort = 8080
+            Write-Host "HTTP port $HttpPort is already used by IIS site '$($httpConflict.Name)'. Using port $resolvedHttpPort instead."
+        }
+
+        $httpsConflict = Get-WebBinding -Protocol "https" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.ItemXPath -ne $null -and
+                $_.bindingInformation -eq "*:$HttpsPortNumber:"
+            } |
+            Select-Object -First 1
+
+        if ($httpsConflict) {
+            $resolvedHttpsPort = 8443
+            Write-Host "HTTPS port $HttpsPortNumber is already used by another IIS binding. Using port $resolvedHttpsPort instead."
+        }
+    }
+
     if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
         New-WebAppPool -Name $AppPoolName | Out-Null
     }
@@ -562,19 +601,19 @@ function Configure-IisSite {
         Remove-Website -Name $WebsiteName
     }
 
-    New-Website -Name $WebsiteName -Port $HttpPort -PhysicalPath $PublishPath -ApplicationPool $AppPoolName -HostHeader $hostHeader | Out-Null
+    New-Website -Name $WebsiteName -Port $resolvedHttpPort -PhysicalPath $PublishPath -ApplicationPool $AppPoolName -HostHeader $hostHeader | Out-Null
 
     if (-not (Get-WebBinding -Name $WebsiteName -Protocol "https" -ErrorAction SilentlyContinue)) {
-        New-WebBinding -Name $WebsiteName -Protocol "https" -Port $HttpsPortNumber -HostHeader $hostHeader -SslFlags $sslFlags | Out-Null
+        New-WebBinding -Name $WebsiteName -Protocol "https" -Port $resolvedHttpsPort -HostHeader $hostHeader -SslFlags $sslFlags | Out-Null
     }
 
     Push-Location IIS:\SslBindings
     try {
         if ($sslFlags -eq 1) {
-            $bindingPath = "0.0.0.0!$HttpsPortNumber!$hostHeader"
+            $bindingPath = "0.0.0.0!$resolvedHttpsPort!$hostHeader"
         }
         else {
-            $bindingPath = "0.0.0.0!$HttpsPortNumber"
+            $bindingPath = "0.0.0.0!$resolvedHttpsPort"
         }
 
         if (Test-Path $bindingPath) {
@@ -588,6 +627,10 @@ function Configure-IisSite {
     }
 
     Start-Website -Name $WebsiteName | Out-Null
+    return @{
+        HttpPort = $resolvedHttpPort
+        HttpsPort = $resolvedHttpsPort
+    }
 }
 
 Assert-Administrator
@@ -605,7 +648,7 @@ $domainName = Read-Host "Enter a domain name for the site (leave blank to use pu
 $resolvedHost = Resolve-HostName -DomainName $domainName
 $certificate = Ensure-ServerCertificate -HostName $resolvedHost
 
-$deploymentRoot = Join-Path $PSScriptRoot "deployments"
+$deploymentRoot = Join-Path $env:SystemDrive "inetpub\wwwroot"
 New-Item -ItemType Directory -Path $deploymentRoot -Force | Out-Null
 
 $deploymentPath = Resolve-DeploymentSource -SourceValue $sourceValue -TargetRoot $deploymentRoot
@@ -614,7 +657,7 @@ $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)
 $publishPath = Split-Path -Path $assemblyPath -Parent
 
 Ensure-WebConfig -PublishPath $publishPath -AssemblyName $assemblyName
-Configure-IisSite `
+$siteBinding = Configure-IisSite `
     -PublishPath $publishPath `
     -AppPoolName $SiteName `
     -WebsiteName $SiteName `
@@ -625,5 +668,5 @@ Configure-IisSite `
 
 Write-Host "Deployment complete."
 Write-Host "Preferred host: $resolvedHost"
-Write-Host "HTTP URL: http://${resolvedHost}:$SitePort"
-Write-Host "HTTPS URL: https://${resolvedHost}:$HttpsPort"
+Write-Host "HTTP URL: http://${resolvedHost}:$($siteBinding.HttpPort)"
+Write-Host "HTTPS URL: https://${resolvedHost}:$($siteBinding.HttpsPort)"

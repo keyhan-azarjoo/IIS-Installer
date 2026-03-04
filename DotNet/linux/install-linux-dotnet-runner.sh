@@ -9,7 +9,7 @@ SERVICE_NAME="${SERVICE_NAME:-dotnet-app}"
 SERVICE_PORT="${SERVICE_PORT:-5000}"
 HTTP_PORT="${HTTP_PORT:-80}"
 HTTPS_PORT="${HTTPS_PORT:-443}"
-APP_ROOT="/opt/dotnet-apps"
+APP_ROOT="/var/www"
 DOTNET_ROOT="/usr/share/dotnet"
 
 require_root() {

@@ -32,6 +32,7 @@ What it does:
 - Prompts for an optional domain name.
 - If no domain is provided, it tries to use the public IP first and falls back to the local LAN IP.
 - Creates both HTTP and HTTPS IIS bindings and generates a self-signed certificate when needed.
+- Deploys site files under `C:\inetpub\wwwroot\<site-or-package-name>`.
 - Skips IIS features and .NET installers that are already present.
 
 Defaults:
@@ -73,6 +74,7 @@ What it does:
 - If no domain is provided, it tries to use the public IP first and falls back to the local LAN IP.
 - Runs the app on local Kestrel and places Nginx in front of it for HTTP and HTTPS.
 - Generates a self-signed certificate when needed.
+- Deploys site files under `/var/www/<service-or-package-name>`.
 - Skips Linux packages and .NET installers that are already present.
 
 Defaults:
@@ -120,3 +122,4 @@ If the artifact is private on GitHub, the installers will prompt for a GitHub to
 - The Windows flow is intended for ASP.NET Core web apps hosted behind IIS.
 - The Linux flow runs the app behind Nginx with HTTP and HTTPS termination.
 - The generated certificates are self-signed. Browsers will warn until you replace them with a trusted certificate.
+- There is no macOS installer in this repository yet.
