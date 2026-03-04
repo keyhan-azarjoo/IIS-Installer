@@ -1,9 +1,12 @@
 # IIS / .NET App Installer
 
-This repository includes two OS-specific installers under `DotNet`:
+This repository includes OS-specific installers under `DotNet`:
 
 - `DotNet/windows/install-windows-dotnet-host.ps1`
 - `DotNet/windows/deploy-windows-over-ssh.ps1`
+- `DotNet/windows/modules/common.ps1`
+- `DotNet/windows/modules/iis-mode.ps1`
+- `DotNet/windows/modules/docker-mode.ps1`
 - `DotNet/linux/install-linux-dotnet-runner.sh`
 
 These installers deploy only from prebuilt published output.
@@ -18,6 +21,8 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/IIS-Ins
 .\install-windows-dotnet-host.ps1
 ```
 
+If you download only the main Windows script, it will automatically download its required module files into a local `modules` folder the first time it runs.
+
 Repository folder:
 
 ```text
@@ -26,15 +31,28 @@ https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/windows
 
 What it does:
 
-- Enables IIS and required modules, including WebSockets.
-- Prompts for the .NET release channel and installs the matching .NET SDK, ASP.NET Core Runtime, and Hosting Bundle.
+- Prompts for `IIS` or `Docker` deployment mode.
+- Prompts for the .NET release channel.
 - Prompts for a build artifact URL, a local source folder, a local published folder, or a local published `.zip`.
 - If a local source folder contains a `.csproj`, it runs `dotnet publish -c Release` first and deploys that build output.
 - Prompts for an optional domain name.
 - If no domain is provided, it auto-detects a reachable public/static IP when available; otherwise it uses the local LAN IP.
+
+In `IIS` mode:
+
+- Enables IIS and required modules, including WebSockets.
+- Installs the matching .NET SDK, ASP.NET Core Runtime, and Hosting Bundle.
 - Creates both HTTP and HTTPS IIS bindings and generates a self-signed certificate when needed.
 - Deploys site files under `C:\inetpub\wwwroot\<site-or-package-name>`.
 - Skips IIS features and .NET installers that are already present.
+
+In `Docker` mode:
+
+- Uses the same source detection and local publish flow.
+- Installs Docker Desktop if Docker is missing and `winget` is available.
+- Builds a container image from the prepared app files.
+- Runs the container on HTTP only by default.
+- Stores the Docker build context under `C:\ProgramData\IIS-Installer\docker\<site-or-package-name>`.
 
 Defaults:
 
@@ -46,7 +64,13 @@ Defaults:
 Example with custom values:
 
 ```powershell
-.\install-windows-dotnet-host.ps1 -DotNetChannel 10 -SiteName MyApi -SitePort 8080 -HttpsPort 8443
+.\install-windows-dotnet-host.ps1 -DeploymentMode IIS -DotNetChannel 10 -SiteName MyApi -SitePort 8080 -HttpsPort 8443
+```
+
+Example in Docker mode:
+
+```powershell
+.\install-windows-dotnet-host.ps1 -DeploymentMode Docker -DotNetChannel 10 -SiteName MyApi -DockerHostPort 8080
 ```
 
 ### Windows Over SSH
@@ -59,7 +83,7 @@ What it does:
 - Searches under the local path for an already published app first.
 - If no published app is found, searches for a `.csproj` and runs `dotnet publish -c Release` locally.
 - Packages the build as a `.zip`.
-- Copies the installer script and package to the remote Windows server with `scp`.
+- Copies the installer script, Windows modules, and package to the remote Windows server with `scp`.
 - Runs the server installer remotely over `ssh`.
 
 Example:
@@ -146,6 +170,7 @@ If the artifact is private on GitHub, the installers will prompt for a GitHub to
 - For local deployment, you can pass either raw source code (with a `.csproj`) or an already published output folder.
 - A script already running on a remote server cannot directly read a path from your local computer; for that workflow, use `deploy-windows-over-ssh.ps1`.
 - The Windows flow is intended for ASP.NET Core web apps hosted behind IIS.
+- Windows also supports Docker mode as an alternative to IIS.
 - The Linux flow runs the app behind Nginx with HTTP and HTTPS termination.
 - The generated certificates are self-signed. Browsers will warn until you replace them with a trusted certificate.
 - There is no macOS installer in this repository yet.

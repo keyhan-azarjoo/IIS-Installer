@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)][string]$RemoteHost,
     [Parameter(Mandatory = $true)][string]$RemoteUser,
     [string]$RemoteInstallerPath = "C:\Windows\Temp\install-windows-dotnet-host.ps1",
+    [string]$RemoteModuleDirectory = "C:\Windows\Temp",
     [string]$RemotePackageDirectory = "C:\Windows\Temp\IIS-Installer",
     [string]$DotNetChannel = "8.0",
     [string]$DomainName,
@@ -146,18 +147,28 @@ if (-not (Test-Path -LiteralPath $installerLocalPath)) {
     throw "Installer script not found: $installerLocalPath"
 }
 
+$moduleLocalPath = Join-Path $PSScriptRoot "modules"
+if (-not (Test-Path -LiteralPath $moduleLocalPath)) {
+    throw "Module directory not found: $moduleLocalPath"
+}
+
 $packageFileName = Split-Path -Path $packagePath -Leaf
 $remotePackagePath = "$RemotePackageDirectory\$packageFileName"
 $remoteTarget = "$RemoteUser@$RemoteHost"
 
-& ssh $remoteTarget "powershell -NoProfile -ExecutionPolicy Bypass -Command `"New-Item -ItemType Directory -Path $(Quote-RemoteArg $RemotePackageDirectory) -Force | Out-Null`""
+& ssh $remoteTarget "powershell -NoProfile -ExecutionPolicy Bypass -Command `"New-Item -ItemType Directory -Path $(Quote-RemoteArg $RemotePackageDirectory) -Force | Out-Null; New-Item -ItemType Directory -Path $(Quote-RemoteArg $RemoteModuleDirectory) -Force | Out-Null`""
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to create remote package directory."
+    throw "Failed to create remote directories."
 }
 
 & scp $installerLocalPath "${remoteTarget}:$RemoteInstallerPath"
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to copy installer script to remote host."
+}
+
+& scp -r $moduleLocalPath "${remoteTarget}:$RemoteModuleDirectory"
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to copy module scripts to remote host."
 }
 
 & scp $packagePath "${remoteTarget}:$remotePackagePath"
@@ -170,6 +181,7 @@ $remoteCommand = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-File", (Quote-RemoteArg $RemoteInstallerPath),
+    "-DeploymentMode", "IIS",
     "-DotNetChannel", (Quote-RemoteArg $DotNetChannel),
     "-SourceValue", (Quote-RemoteArg $remotePackagePath),
     "-SiteName", (Quote-RemoteArg $SiteName),
