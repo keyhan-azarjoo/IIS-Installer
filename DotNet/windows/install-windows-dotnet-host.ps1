@@ -5,6 +5,9 @@ param(
     [string]$AspNetRuntimeUrl,
     [string]$HostingBundleUrl,
     [string]$GitHubToken,
+    [string]$SourceValue,
+    [string]$DomainName,
+    [string]$StaticIpAddress,
     [string]$SiteName = "DotNetApp",
     [int]$SitePort = 80,
     [int]$HttpsPort = 443
@@ -437,13 +440,39 @@ function Find-ApplicationAssembly {
 }
 
 function Get-LocalIPAddress {
+    $interfaceMap = @{}
+    Get-NetIPInterface -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object {
+        $interfaceMap[$_.InterfaceIndex] = $_
+    }
+
+    $adapterMap = @{}
+    Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
+        $adapterMap[$_.InterfaceIndex] = $_
+    }
+
     $candidates = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object {
             $_.IPAddress -notlike "127.*" -and
             $_.IPAddress -notlike "169.254.*" -and
             $_.ValidLifetime -gt 0
         } |
-        Sort-Object SkipAsSource, InterfaceMetric
+        Sort-Object @{
+            Expression = {
+                $adapter = $adapterMap[$_.InterfaceIndex]
+                if (-not $adapter) { return 2 }
+
+                $name = "$($adapter.Name) $($adapter.InterfaceDescription)"
+                if ($name -match '(?i)\b(ethernet|gigabit|lan)\b') { return 0 }
+                if ($name -match '(?i)\b(wi-?fi|wireless|wlan)\b') { return 1 }
+                return 2
+            }
+        }, @{
+            Expression = {
+                $ipInterface = $interfaceMap[$_.InterfaceIndex]
+                if ($ipInterface) { return $ipInterface.InterfaceMetric }
+                return 9999
+            }
+        }, SkipAsSource
 
     return ($candidates | Select-Object -First 1).IPAddress
 }
@@ -627,14 +656,14 @@ $DotNetChannel = Resolve-DotNetChannel -Value $DotNetChannel
 Install-WindowsFeatureSet
 Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
 
-$sourceValue = Read-Host "Enter a build artifact URL, a local source folder, a local published folder, or a local published .zip path to deploy (leave blank to skip)"
+$sourceValue = if (-not [string]::IsNullOrWhiteSpace($SourceValue)) { $SourceValue } else { Read-Host "Enter a build artifact URL, a local source folder, a local published folder, or a local published .zip path to deploy (leave blank to skip)" }
 if ([string]::IsNullOrWhiteSpace($sourceValue)) {
     Write-Host "Setup completed. IIS and .NET prerequisites are installed."
     exit 0
 }
 
-$domainName = Read-Host "Enter a domain name for the site (leave blank to use an IP address)"
-$staticIpAddress = Read-Host "Enter a static/public IP address if you have one (leave blank to use the local LAN IP)"
+$domainName = if (-not [string]::IsNullOrWhiteSpace($DomainName)) { $DomainName } else { Read-Host "Enter a domain name for the site (leave blank to use an IP address)" }
+$staticIpAddress = if (-not [string]::IsNullOrWhiteSpace($StaticIpAddress)) { $StaticIpAddress } else { Read-Host "Enter a static/public IP address if you have one (leave blank to use the local LAN IP)" }
 $resolvedHost = Resolve-HostName -DomainName $domainName -StaticIpAddress $staticIpAddress
 $certificate = Ensure-ServerCertificate -HostName $resolvedHost
 

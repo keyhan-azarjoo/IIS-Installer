@@ -3,6 +3,7 @@
 This repository includes two OS-specific installers under `DotNet`:
 
 - `DotNet/windows/install-windows-dotnet-host.ps1`
+- `DotNet/windows/deploy-windows-over-ssh.ps1`
 - `DotNet/linux/install-linux-dotnet-runner.sh`
 
 These installers deploy only from prebuilt published output.
@@ -46,6 +47,30 @@ Example with custom values:
 
 ```powershell
 .\install-windows-dotnet-host.ps1 -DotNetChannel 10 -SiteName MyApi -SitePort 8080 -HttpsPort 8443
+```
+
+### Windows Over SSH
+
+If you are connecting to a Windows server over SSH and want to use a local file path from your own computer, use the local-side deploy script instead of running the server installer directly over SSH.
+
+What it does:
+
+- Runs on your local computer.
+- Searches under the local path for an already published app first.
+- If no published app is found, searches for a `.csproj` and runs `dotnet publish -c Release` locally.
+- Packages the build as a `.zip`.
+- Copies the installer script and package to the remote Windows server with `scp`.
+- Runs the server installer remotely over `ssh`.
+
+Example:
+
+```powershell
+.\DotNet\windows\deploy-windows-over-ssh.ps1 `
+  -LocalPath "C:\code\weight_system\api_weight_system" `
+  -RemoteHost "server.example.com" `
+  -RemoteUser "Administrator" `
+  -DotNetChannel "9.0" `
+  -SiteName "WeightApi"
 ```
 
 ## Linux
@@ -119,6 +144,7 @@ If the artifact is private on GitHub, the installers will prompt for a GitHub to
 
 - Remote downloads must already be published build artifacts.
 - For local deployment, you can pass either raw source code (with a `.csproj`) or an already published output folder.
+- A script already running on a remote server cannot directly read a path from your local computer; for that workflow, use `deploy-windows-over-ssh.ps1`.
 - The Windows flow is intended for ASP.NET Core web apps hosted behind IIS.
 - The Linux flow runs the app behind Nginx with HTTP and HTTPS termination.
 - The generated certificates are self-signed. Browsers will warn until you replace them with a trusted certificate.

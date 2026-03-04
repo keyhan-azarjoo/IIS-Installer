@@ -292,10 +292,33 @@ find_app_dll() {
 
 get_local_ip() {
   local local_ip
-  local_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="src") { print $(i+1); exit }}')"
+  local preferred_iface
+
+  preferred_iface="$(
+    ip -o -4 addr show up scope global 2>/dev/null | awk '
+      {
+        iface=$2
+        score=2
+        lower=tolower(iface)
+        if (lower ~ /^(eth|enp|eno|ens)/) score=0
+        else if (lower ~ /^(wlan|wlp|wifi)/) score=1
+        print score " " iface
+      }
+    ' | sort -n | head -n 1 | awk '{print $2}'
+  )"
+
+  if [[ -n "${preferred_iface}" ]]; then
+    local_ip="$(ip -o -4 addr show dev "${preferred_iface}" scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')"
+  fi
+
+  if [[ -z "${local_ip}" ]]; then
+    local_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="src") { print $(i+1); exit }}')"
+  fi
+
   if [[ -z "${local_ip}" ]]; then
     local_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
   fi
+
   printf '%s\n' "${local_ip}"
 }
 
