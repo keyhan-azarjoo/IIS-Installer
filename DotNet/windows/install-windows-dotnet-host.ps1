@@ -4,6 +4,7 @@ param(
     [string]$SdkInstallerUrl,
     [string]$AspNetRuntimeUrl,
     [string]$HostingBundleUrl,
+    [string]$GitHubToken,
     [string]$SiteName = "DotNetApp",
     [int]$SitePort = 8080
 )
@@ -22,6 +23,12 @@ function Test-Command {
     param([Parameter(Mandatory = $true)][string]$Name)
 
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Test-IsUrl {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return $Value -match '^(https?)://'
 }
 
 function Install-WindowsFeatureSet {
@@ -47,6 +54,12 @@ function Install-WindowsFeatureSet {
     )
 
     foreach ($featureName in $featureNames) {
+        $feature = Get-WindowsOptionalFeature -Online -FeatureName $featureName
+        if ($feature.State -eq "Enabled") {
+            Write-Host "Windows feature already enabled: $featureName"
+            continue
+        }
+
         Write-Host "Enabling Windows feature: $featureName"
         Enable-WindowsOptionalFeature -Online -FeatureName $featureName -All -NoRestart | Out-Null
     }
@@ -75,39 +88,6 @@ function Install-Executable {
     }
 }
 
-function Install-DotNetPrerequisites {
-    param(
-        [string]$Channel,
-        [string]$SdkUrl,
-        [string]$RuntimeUrl,
-        [string]$HostingUrl
-    )
-
-    if ([string]::IsNullOrWhiteSpace($SdkUrl)) {
-        $SdkUrl = "https://aka.ms/dotnet/$Channel/dotnet-sdk-win-x64.exe"
-    }
-
-    if ([string]::IsNullOrWhiteSpace($RuntimeUrl)) {
-        $RuntimeUrl = "https://aka.ms/dotnet/$Channel/aspnetcore-runtime-win-x64.exe"
-    }
-
-    if ([string]::IsNullOrWhiteSpace($HostingUrl)) {
-        $HostingUrl = "https://aka.ms/dotnet/$Channel/dotnet-hosting-win.exe"
-    }
-
-    Install-Executable -Url $SdkUrl `
-        -FileName "dotnet-sdk-win-x64.exe" `
-        -Arguments "/install /quiet /norestart"
-
-    Install-Executable -Url $RuntimeUrl `
-        -FileName "aspnetcore-runtime-win-x64.exe" `
-        -Arguments "/install /quiet /norestart"
-
-    Install-Executable -Url $HostingUrl `
-        -FileName "dotnet-hosting-win.exe" `
-        -Arguments "/install /quiet /norestart OPT_NO_ANCM=0"
-}
-
 function Resolve-DotNetChannel {
     param([string]$Value)
 
@@ -129,51 +109,181 @@ function Resolve-DotNetChannel {
     return $trimmed
 }
 
-function Ensure-Git {
-    if (Test-Command -Name "git") {
-        return
+function Get-DotNetMajorVersion {
+    param([Parameter(Mandatory = $true)][string]$Channel)
+
+    if ($Channel -match '^(\d+)') {
+        return $Matches[1]
     }
 
-    if (-not (Test-Command -Name "winget")) {
-        throw "Git is not installed and winget is unavailable. Install Git manually, then rerun the script."
+    throw "Unable to determine a .NET major version from '$Channel'. Use a major version like 8, 9, or 10 when idempotent install checks are required."
+}
+
+function Test-DotNetSdkInstalled {
+    param([Parameter(Mandatory = $true)][string]$MajorVersion)
+
+    if (-not (Test-Command -Name "dotnet")) {
+        return $false
     }
 
-    Write-Host "Installing Git with winget"
-    $process = Start-Process -FilePath "winget" `
-        -ArgumentList "install --id Git.Git --exact --accept-package-agreements --accept-source-agreements --silent" `
-        -Wait -PassThru -NoNewWindow
+    $sdkList = & dotnet --list-sdks 2>$null
+    return [bool]($sdkList | Where-Object { $_ -match "^$([regex]::Escape($MajorVersion))\." })
+}
 
-    if ($process.ExitCode -ne 0) {
-        throw "Git installation failed with exit code $($process.ExitCode)."
+function Test-AspNetRuntimeInstalled {
+    param([Parameter(Mandatory = $true)][string]$MajorVersion)
+
+    if (-not (Test-Command -Name "dotnet")) {
+        return $false
+    }
+
+    $runtimeList = & dotnet --list-runtimes 2>$null
+    return [bool]($runtimeList | Where-Object { $_ -match "^Microsoft\.AspNetCore\.App $([regex]::Escape($MajorVersion))\." })
+}
+
+function Test-HostingBundleInstalled {
+    param([Parameter(Mandatory = $true)][string]$MajorVersion)
+
+    $registryPaths = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+
+    foreach ($registryPath in $registryPaths) {
+        $match = Get-ItemProperty -Path $registryPath -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.DisplayName -like "Microsoft ASP.NET Core * Hosting Bundle*" -and
+                $_.DisplayVersion -match "^$([regex]::Escape($MajorVersion))\."
+            } |
+            Select-Object -First 1
+
+        if ($match) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Install-DotNetPrerequisites {
+    param(
+        [string]$Channel,
+        [string]$SdkUrl,
+        [string]$RuntimeUrl,
+        [string]$HostingUrl
+    )
+
+    $majorVersion = Get-DotNetMajorVersion -Channel $Channel
+
+    if ([string]::IsNullOrWhiteSpace($SdkUrl)) {
+        $SdkUrl = "https://aka.ms/dotnet/$Channel/dotnet-sdk-win-x64.exe"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($RuntimeUrl)) {
+        $RuntimeUrl = "https://aka.ms/dotnet/$Channel/aspnetcore-runtime-win-x64.exe"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($HostingUrl)) {
+        $HostingUrl = "https://aka.ms/dotnet/$Channel/dotnet-hosting-win.exe"
+    }
+
+    if (Test-DotNetSdkInstalled -MajorVersion $majorVersion) {
+        Write-Host ".NET SDK $majorVersion already installed."
+    }
+    else {
+        Install-Executable -Url $SdkUrl `
+            -FileName "dotnet-sdk-win-x64.exe" `
+            -Arguments "/install /quiet /norestart"
+    }
+
+    if (Test-AspNetRuntimeInstalled -MajorVersion $majorVersion) {
+        Write-Host "ASP.NET Core Runtime $majorVersion already installed."
+    }
+    else {
+        Install-Executable -Url $RuntimeUrl `
+            -FileName "aspnetcore-runtime-win-x64.exe" `
+            -Arguments "/install /quiet /norestart"
+    }
+
+    if (Test-HostingBundleInstalled -MajorVersion $majorVersion) {
+        Write-Host "ASP.NET Core Hosting Bundle $majorVersion already installed."
+    }
+    else {
+        Install-Executable -Url $HostingUrl `
+            -FileName "dotnet-hosting-win.exe" `
+            -Arguments "/install /quiet /norestart OPT_NO_ANCM=0"
     }
 }
 
-function Get-RepositoryName {
+function Get-ArtifactName {
     param([Parameter(Mandatory = $true)][string]$SourcePath)
 
     $normalizedPath = $SourcePath.TrimEnd('\', '/')
     $name = Split-Path -Path $normalizedPath -Leaf
-    if ($name.EndsWith(".git")) {
-        $name = $name.Substring(0, $name.Length - 4)
-    }
 
     if ([string]::IsNullOrWhiteSpace($name)) {
         throw "Unable to determine a folder name from '$SourcePath'."
     }
 
+    foreach ($suffix in @(".zip")) {
+        if ($name.EndsWith($suffix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $name = $name.Substring(0, $name.Length - $suffix.Length)
+            break
+        }
+    }
+
     return $name
 }
 
-function Resolve-ApplicationSource {
+function Get-DownloadHeaders {
+    param([Parameter(Mandatory = $true)][string]$SourceValue)
+
+    $headers = @{}
+    if ($SourceValue -match '^https://(github\.com|api\.github\.com|objects\.githubusercontent\.com|raw\.githubusercontent\.com)/') {
+        if ([string]::IsNullOrWhiteSpace($script:GitHubToken)) {
+            $script:GitHubToken = Read-Host "Enter GitHub token for private artifact access (leave blank for public download)"
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($script:GitHubToken)) {
+            $headers["Authorization"] = "Bearer $($script:GitHubToken)"
+        }
+    }
+
+    return $headers
+}
+
+function Expand-DeploymentPackage {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceFile,
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    if (Test-Path -LiteralPath $TargetPath) {
+        Remove-Item -LiteralPath $TargetPath -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $TargetPath -Force | Out-Null
+
+    $extension = [System.IO.Path]::GetExtension($SourceFile)
+    if ($extension -ieq ".zip") {
+        Expand-Archive -LiteralPath $SourceFile -DestinationPath $TargetPath -Force
+        return
+    }
+
+    throw "Unsupported package format '$extension'. Provide a published .zip package or a local published folder."
+}
+
+function Resolve-DeploymentSource {
     param(
         [Parameter(Mandatory = $true)][string]$SourceValue,
         [Parameter(Mandatory = $true)][string]$TargetRoot
     )
 
-    if (Test-Path -LiteralPath $SourceValue) {
+    $targetName = Get-ArtifactName -SourcePath $SourceValue
+    $targetPath = Join-Path $TargetRoot $targetName
+
+    if (Test-Path -LiteralPath $SourceValue -PathType Container) {
         $resolvedSource = (Resolve-Path -LiteralPath $SourceValue).Path
-        $targetName = Get-RepositoryName -SourcePath $resolvedSource
-        $targetPath = Join-Path $TargetRoot $targetName
 
         if (Test-Path -LiteralPath $targetPath) {
             Remove-Item -LiteralPath $targetPath -Recurse -Force
@@ -183,54 +293,64 @@ function Resolve-ApplicationSource {
         return $targetPath
     }
 
-    Ensure-Git
-
-    $repoName = Get-RepositoryName -SourcePath $SourceValue
-    $repoPath = Join-Path $TargetRoot $repoName
-
-    if (Test-Path $repoPath) {
-        Write-Host "Repository already exists. Pulling latest changes."
-        & git -C $repoPath pull
-        if ($LASTEXITCODE -ne 0) {
-            throw "git pull failed."
-        }
-    }
-    else {
-        & git clone $SourceValue $repoPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "git clone failed."
-        }
+    if (Test-Path -LiteralPath $SourceValue -PathType Leaf) {
+        Expand-DeploymentPackage -SourceFile (Resolve-Path -LiteralPath $SourceValue).Path -TargetPath $targetPath
+        return $targetPath
     }
 
-    return $repoPath
+    if (-not (Test-IsUrl -Value $SourceValue)) {
+        throw "The source path '$SourceValue' does not exist. Provide a valid local published folder, a local .zip package, or a downloadable artifact URL."
+    }
+
+    if ($SourceValue -match '^https://github\.com/[^/]+/[^/]+/?($|tree/|blob/)') {
+        throw "Provide a build artifact URL, not a GitHub repository page. Build the app first, package the published output, then use the artifact URL."
+    }
+
+    $downloadPath = Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName() + ".zip")
+    $headers = Get-DownloadHeaders -SourceValue $SourceValue
+
+    try {
+        Write-Host "Downloading deployment package: $SourceValue"
+        if ($headers.Count -gt 0) {
+            Invoke-WebRequest -Uri $SourceValue -OutFile $downloadPath -Headers $headers
+        }
+        else {
+            Invoke-WebRequest -Uri $SourceValue -OutFile $downloadPath
+        }
+
+        Expand-DeploymentPackage -SourceFile $downloadPath -TargetPath $targetPath
+    }
+    finally {
+        Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
+    }
+
+    return $targetPath
 }
 
-function Find-ProjectPath {
-    param([Parameter(Mandatory = $true)][string]$RepositoryPath)
+function Find-ApplicationAssembly {
+    param([Parameter(Mandatory = $true)][string]$DeploymentPath)
 
-    $project = Get-ChildItem -Path $RepositoryPath -Filter *.csproj -Recurse | Select-Object -First 1
-    if (-not $project) {
-        throw "No .csproj file was found in $RepositoryPath."
+    $runtimeConfig = Get-ChildItem -Path $DeploymentPath -Filter *.runtimeconfig.json -Recurse |
+        Where-Object { $_.FullName -notmatch '[\\/](ref|refs)[\\/]' } |
+        Select-Object -First 1
+
+    if ($runtimeConfig) {
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($runtimeConfig.BaseName)
+        $dllPath = Join-Path $runtimeConfig.DirectoryName "$baseName.dll"
+        if (Test-Path -LiteralPath $dllPath) {
+            return $dllPath
+        }
     }
 
-    return $project.FullName
-}
+    $dll = Get-ChildItem -Path $DeploymentPath -Filter *.dll -Recurse |
+        Where-Object { $_.FullName -notmatch '[\\/](ref|refs)[\\/]' } |
+        Select-Object -First 1
 
-function Publish-Project {
-    param(
-        [Parameter(Mandatory = $true)][string]$ProjectPath,
-        [Parameter(Mandatory = $true)][string]$OutputPath
-    )
-
-    & dotnet restore $ProjectPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet restore failed."
+    if (-not $dll) {
+        throw "No runnable application DLL was found. Provide a published framework-dependent build package or folder."
     }
 
-    & dotnet publish $ProjectPath -c Release -o $OutputPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish failed."
-    }
+    return $dll.FullName
 }
 
 function Ensure-WebConfig {
@@ -289,22 +409,20 @@ $DotNetChannel = Resolve-DotNetChannel -Value $DotNetChannel
 Install-WindowsFeatureSet
 Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
 
-$sourceValue = Read-Host "Enter a Git repository URL or local project folder path to deploy (leave blank to skip)"
+$sourceValue = Read-Host "Enter a published build artifact URL, a local published folder path, or a local published .zip path to deploy (leave blank to skip)"
 if ([string]::IsNullOrWhiteSpace($sourceValue)) {
     Write-Host "Setup completed. IIS and .NET prerequisites are installed."
     exit 0
 }
 
-$repoRoot = Join-Path $PSScriptRoot "repositories"
-New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
+$deploymentRoot = Join-Path $PSScriptRoot "deployments"
+New-Item -ItemType Directory -Path $deploymentRoot -Force | Out-Null
 
-$repoPath = Resolve-ApplicationSource -SourceValue $sourceValue -TargetRoot $repoRoot
+$deploymentPath = Resolve-DeploymentSource -SourceValue $sourceValue -TargetRoot $deploymentRoot
+$assemblyPath = Find-ApplicationAssembly -DeploymentPath $deploymentPath
+$assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)
+$publishPath = Split-Path -Path $assemblyPath -Parent
 
-$projectPath = Find-ProjectPath -RepositoryPath $repoPath
-$assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($projectPath)
-$publishPath = Join-Path $repoPath "published"
-
-Publish-Project -ProjectPath $projectPath -OutputPath $publishPath
 Ensure-WebConfig -PublishPath $publishPath -AssemblyName $assemblyName
 Configure-IisSite -PublishPath $publishPath -AppPoolName $SiteName -WebsiteName $SiteName -Port $SitePort
 

@@ -4,6 +4,7 @@ set -euo pipefail
 
 DOTNET_CHANNEL="${DOTNET_CHANNEL:-}"
 DOTNET_INSTALL_SCRIPT_URL="${DOTNET_INSTALL_SCRIPT_URL:-https://dot.net/v1/dotnet-install.sh}"
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 SERVICE_NAME="${SERVICE_NAME:-dotnet-app}"
 SERVICE_PORT="${SERVICE_PORT:-5000}"
 APP_ROOT="/opt/dotnet-apps"
@@ -21,29 +22,111 @@ run_cmd() {
   "$@"
 }
 
+has_ca_bundle() {
+  [[ -f /etc/ssl/certs/ca-certificates.crt || -f /etc/pki/tls/certs/ca-bundle.crt ]]
+}
+
 install_os_packages() {
+  local need_curl=0
+  local need_unzip=0
+  local need_tar=0
+  local need_ca=0
+
+  command -v curl >/dev/null 2>&1 || need_curl=1
+  command -v unzip >/dev/null 2>&1 || need_unzip=1
+  command -v tar >/dev/null 2>&1 || need_tar=1
+  has_ca_bundle || need_ca=1
+
+  if [[ "${need_curl}" -eq 0 && "${need_unzip}" -eq 0 && "${need_tar}" -eq 0 && "${need_ca}" -eq 0 ]]; then
+    echo "curl, unzip, tar, and CA certificates already available."
+    return
+  fi
+
   if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     run_cmd apt-get update
-    run_cmd apt-get install -y curl git ca-certificates
+    local packages=()
+    [[ "${need_curl}" -eq 1 ]] && packages+=(curl)
+    [[ "${need_unzip}" -eq 1 ]] && packages+=(unzip)
+    [[ "${need_tar}" -eq 1 ]] && packages+=(tar)
+    [[ "${need_ca}" -eq 1 ]] && packages+=(ca-certificates)
+    if [[ "${#packages[@]}" -gt 0 ]]; then
+      run_cmd apt-get install -y "${packages[@]}"
+    fi
     return
   fi
 
   if command -v dnf >/dev/null 2>&1; then
-    run_cmd dnf install -y curl git ca-certificates
+    local packages=()
+    [[ "${need_curl}" -eq 1 ]] && packages+=(curl)
+    [[ "${need_unzip}" -eq 1 ]] && packages+=(unzip)
+    [[ "${need_tar}" -eq 1 ]] && packages+=(tar)
+    [[ "${need_ca}" -eq 1 ]] && packages+=(ca-certificates)
+    if [[ "${#packages[@]}" -gt 0 ]]; then
+      run_cmd dnf install -y "${packages[@]}"
+    fi
     return
   fi
 
   if command -v yum >/dev/null 2>&1; then
-    run_cmd yum install -y curl git ca-certificates
+    local packages=()
+    [[ "${need_curl}" -eq 1 ]] && packages+=(curl)
+    [[ "${need_unzip}" -eq 1 ]] && packages+=(unzip)
+    [[ "${need_tar}" -eq 1 ]] && packages+=(tar)
+    [[ "${need_ca}" -eq 1 ]] && packages+=(ca-certificates)
+    if [[ "${#packages[@]}" -gt 0 ]]; then
+      run_cmd yum install -y "${packages[@]}"
+    fi
     return
   fi
 
-  echo "Unsupported package manager. Install curl and git manually, then rerun this script."
+  echo "Unsupported package manager. Install curl, unzip, tar, and CA certificates manually, then rerun this script."
   exit 1
 }
 
+dotnet_major_version() {
+  local major_version
+  major_version="$(printf '%s' "${DOTNET_CHANNEL}" | sed -E 's/^([0-9]+).*/\1/')"
+
+  if [[ -z "${major_version}" ]]; then
+    echo "Unable to determine a numeric .NET major version from '${DOTNET_CHANNEL}'. Use a major version like 8, 9, or 10 when idempotent install checks are required." >&2
+    exit 1
+  fi
+
+  printf '%s\n' "${major_version}"
+}
+
+dotnet_sdk_installed() {
+  local major_version
+  major_version="$(dotnet_major_version)"
+
+  if ! command -v dotnet >/dev/null 2>&1; then
+    return 1
+  fi
+
+  dotnet --list-sdks 2>/dev/null | grep -Eq "^${major_version}\."
+}
+
+aspnet_runtime_installed() {
+  local major_version
+  major_version="$(dotnet_major_version)"
+
+  if ! command -v dotnet >/dev/null 2>&1; then
+    return 1
+  fi
+
+  dotnet --list-runtimes 2>/dev/null | grep -Eq "^Microsoft\.AspNetCore\.App ${major_version}\."
+}
+
 install_dotnet() {
+  if dotnet_sdk_installed && aspnet_runtime_installed; then
+    echo ".NET SDK and ASP.NET Core Runtime for channel ${DOTNET_CHANNEL} already installed."
+    if [[ ! -x /usr/bin/dotnet ]]; then
+      ln -sf "${DOTNET_ROOT}/dotnet" /usr/bin/dotnet
+    fi
+    return
+  fi
+
   local installer
   installer="$(mktemp)"
 
@@ -86,18 +169,89 @@ ensure_service_user() {
   fi
 }
 
-repository_name() {
+artifact_name() {
   local source_value="$1"
   local name
   source_value="${source_value%/}"
   name="$(basename "${source_value}")"
-  name="${name%.git}"
+  name="${name%.zip}"
+  name="${name%.tar.gz}"
+  name="${name%.tgz}"
   printf '%s' "${name}"
 }
 
-find_project() {
-  local repo_path="$1"
-  find "${repo_path}" -name '*.csproj' | head -n 1
+is_url() {
+  [[ "$1" =~ ^https?:// ]]
+}
+
+prompt_for_github_token() {
+  local source_value="$1"
+
+  if [[ "${source_value}" =~ ^https://(github\.com|api\.github\.com|objects\.githubusercontent\.com|raw\.githubusercontent\.com)/ ]]; then
+    if [[ -z "${GITHUB_TOKEN}" ]]; then
+      read -r -s -p "Enter GitHub token for private artifact access (leave blank for public download): " GITHUB_TOKEN
+      echo
+    fi
+  fi
+}
+
+download_package() {
+  local source_value="$1"
+  local target_file="$2"
+
+  prompt_for_github_token "${source_value}"
+
+  if [[ -n "${GITHUB_TOKEN}" ]]; then
+    run_cmd curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" "${source_value}" -o "${target_file}"
+    return
+  fi
+
+  run_cmd curl -fsSL "${source_value}" -o "${target_file}"
+}
+
+extract_package() {
+  local source_file="$1"
+  local target_path="$2"
+
+  rm -rf "${target_path}"
+  mkdir -p "${target_path}"
+
+  case "${source_file}" in
+    *.zip)
+      run_cmd unzip -q "${source_file}" -d "${target_path}"
+      ;;
+    *.tar.gz|*.tgz)
+      run_cmd tar -xzf "${source_file}" -C "${target_path}"
+      ;;
+    *)
+      echo "Unsupported package format. Provide a published .zip or .tar.gz package, or a local published folder."
+      exit 1
+      ;;
+  esac
+}
+
+find_app_dll() {
+  local deployment_path="$1"
+  local runtime_config
+  runtime_config="$(find "${deployment_path}" -name '*.runtimeconfig.json' ! -path '*/ref/*' ! -path '*/refs/*' | head -n 1)"
+
+  if [[ -n "${runtime_config}" ]]; then
+    local base_name
+    base_name="${runtime_config%.runtimeconfig.json}"
+    if [[ -f "${base_name}.dll" ]]; then
+      printf '%s\n' "${base_name}.dll"
+      return
+    fi
+  fi
+
+  local dll_path
+  dll_path="$(find "${deployment_path}" -name '*.dll' ! -path '*/ref/*' ! -path '*/refs/*' | head -n 1)"
+  if [[ -z "${dll_path}" ]]; then
+    echo "No runnable application DLL was found. Provide a published framework-dependent build package or folder."
+    exit 1
+  fi
+
+  printf '%s\n' "${dll_path}"
 }
 
 write_service() {
@@ -130,21 +284,45 @@ resolve_application_source() {
   local source_value="$1"
   local target_root="$2"
   local app_name
-  app_name="$(repository_name "${source_value}")"
+  app_name="$(artifact_name "${source_value}")"
   local target_path="${target_root}/${app_name}"
 
-  if [[ -e "${source_value}" ]]; then
+  if [[ -d "${source_value}" ]]; then
     rm -rf "${target_path}"
     run_cmd cp -R "${source_value}" "${target_path}"
     printf '%s\n' "${target_path}"
     return
   fi
 
-  if [[ -d "${target_path}/.git" ]]; then
-    run_cmd git -C "${target_path}" pull
-  else
-    run_cmd git clone "${source_value}" "${target_path}"
+  if [[ -f "${source_value}" ]]; then
+    extract_package "${source_value}" "${target_path}"
+    printf '%s\n' "${target_path}"
+    return
   fi
+
+  if ! is_url "${source_value}"; then
+    echo "The source path '${source_value}' does not exist. Provide a valid local published folder, a local .zip/.tar.gz package, or a downloadable artifact URL."
+    exit 1
+  fi
+
+  if [[ "${source_value}" =~ ^https://github\.com/[^/]+/[^/]+/?($|tree/|blob/) ]]; then
+    echo "Provide a build artifact URL, not a GitHub repository page. Build the app first, package the published output, then use the artifact URL."
+    exit 1
+  fi
+
+  local temp_suffix=".zip"
+  case "${source_value}" in
+    *.tar.gz|*.tgz)
+      temp_suffix=".tar.gz"
+      ;;
+  esac
+
+  local download_file
+  download_file="$(mktemp --suffix "${temp_suffix}")"
+
+  download_package "${source_value}" "${download_file}"
+  extract_package "${download_file}" "${target_path}"
+  rm -f "${download_file}"
 
   printf '%s\n' "${target_path}"
 }
@@ -156,7 +334,7 @@ main() {
   install_dotnet
   ensure_service_user
 
-  read -r -p "Enter a Git repository URL or local project folder path to deploy (leave blank to skip): " source_value
+  read -r -p "Enter a published build artifact URL, a local published folder path, or a local .zip/.tar.gz package path to deploy (leave blank to skip): " source_value
   if [[ -z "${source_value}" ]]; then
     echo "Setup completed. .NET prerequisites are installed."
     exit 0
@@ -167,19 +345,12 @@ main() {
   local repo_path
   repo_path="$(resolve_application_source "${source_value}" "${APP_ROOT}")"
 
-  local project_path
-  project_path="$(find_project "${repo_path}")"
-  if [[ -z "${project_path}" ]]; then
-    echo "No .csproj file was found in ${repo_path}."
-    exit 1
-  fi
-
+  local dll_path
+  dll_path="$(find_app_dll "${repo_path}")"
   local dll_name
-  dll_name="$(basename "${project_path}" .csproj)"
-  local publish_path="${repo_path}/published"
-
-  run_cmd dotnet restore "${project_path}"
-  run_cmd dotnet publish "${project_path}" -c Release -o "${publish_path}"
+  dll_name="$(basename "${dll_path}" .dll)"
+  local publish_path
+  publish_path="$(dirname "${dll_path}")"
 
   chown -R dotnetapp:dotnetapp "${repo_path}"
   write_service "${publish_path}" "${dll_name}"
