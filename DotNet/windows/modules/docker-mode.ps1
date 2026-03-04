@@ -15,35 +15,33 @@ function Ensure-WindowsContainersFeature {
     Enable-WindowsOptionalFeature -Online -FeatureName "Containers" -All -NoRestart | Out-Null
 }
 
-function Install-DockerWithDockerMsftProvider {
+function Install-DockerWithMicrosoftScript {
     Ensure-WindowsContainersFeature
+    $installScriptPath = Join-Path $env:TEMP "install-docker-ce.ps1"
+    $installScriptUrl = "https://raw.githubusercontent.com/microsoft/Windows-Containers/Main/helpful_tools/Install-DockerCE/install-docker-ce.ps1"
 
-    if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
-        Write-Host "Installing NuGet package provider"
-        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+    try {
+        Write-Host "Downloading Microsoft Windows Containers Docker install script"
+        Invoke-WebRequest -UseBasicParsing -Uri $installScriptUrl -OutFile $installScriptPath
+
+        Write-Host "Installing Docker with Microsoft Windows Containers script"
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installScriptPath | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Docker install script failed with exit code $LASTEXITCODE."
+        }
     }
-
-    if (-not (Get-PSRepository -Name "PSGallery" -ErrorAction SilentlyContinue)) {
-        throw "PowerShell Gallery repository is unavailable. Cannot install Docker automatically."
+    finally {
+        Remove-Item -LiteralPath $installScriptPath -Force -ErrorAction SilentlyContinue
     }
-
-    if (-not (Get-PackageProvider -Name DockerMsftProvider -ErrorAction SilentlyContinue)) {
-        Write-Host "Installing DockerMsftProvider"
-        Install-Module -Name DockerMsftProvider -Repository PSGallery -Force | Out-Null
-    }
-
-    Write-Host "Installing Docker via DockerMsftProvider"
-    Install-Package -Name docker -ProviderName DockerMsftProvider -Force | Out-Null
 
     $dockerService = Get-Service -Name docker -ErrorAction SilentlyContinue
-    if ($dockerService) {
-        if ($dockerService.Status -ne "Running") {
-            Start-Service docker
-        }
-        return
+    if ($dockerService -and $dockerService.Status -ne "Running") {
+        Start-Service docker
     }
 
-    throw "Docker installation finished, but the docker service was not found."
+    if (-not (Test-Command -Name "docker")) {
+        throw "Docker installation completed, but the docker CLI is still unavailable. A restart may be required."
+    }
 }
 
 function Ensure-DockerInstalled {
@@ -60,12 +58,7 @@ function Ensure-DockerInstalled {
         return
     }
 
-    if (Get-Command Install-Package -ErrorAction SilentlyContinue) {
-        Install-DockerWithDockerMsftProvider
-        return
-    }
-
-    throw "Docker is not installed and no supported automatic installer was found. Install Docker manually or choose IIS mode."
+    Install-DockerWithMicrosoftScript
 }
 
 function Get-DockerRuntimeTag {
