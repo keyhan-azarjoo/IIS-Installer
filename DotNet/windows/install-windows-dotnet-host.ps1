@@ -149,18 +149,60 @@ function Ensure-Git {
 }
 
 function Get-RepositoryName {
-    param([Parameter(Mandatory = $true)][string]$RepositoryUrl)
+    param([Parameter(Mandatory = $true)][string]$SourcePath)
 
-    $name = Split-Path -Path $RepositoryUrl -Leaf
+    $normalizedPath = $SourcePath.TrimEnd('\', '/')
+    $name = Split-Path -Path $normalizedPath -Leaf
     if ($name.EndsWith(".git")) {
         $name = $name.Substring(0, $name.Length - 4)
     }
 
     if ([string]::IsNullOrWhiteSpace($name)) {
-        throw "Unable to determine a repository name from '$RepositoryUrl'."
+        throw "Unable to determine a folder name from '$SourcePath'."
     }
 
     return $name
+}
+
+function Resolve-ApplicationSource {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceValue,
+        [Parameter(Mandatory = $true)][string]$TargetRoot
+    )
+
+    if (Test-Path -LiteralPath $SourceValue) {
+        $resolvedSource = (Resolve-Path -LiteralPath $SourceValue).Path
+        $targetName = Get-RepositoryName -SourcePath $resolvedSource
+        $targetPath = Join-Path $TargetRoot $targetName
+
+        if (Test-Path -LiteralPath $targetPath) {
+            Remove-Item -LiteralPath $targetPath -Recurse -Force
+        }
+
+        Copy-Item -LiteralPath $resolvedSource -Destination $targetPath -Recurse -Force
+        return $targetPath
+    }
+
+    Ensure-Git
+
+    $repoName = Get-RepositoryName -SourcePath $SourceValue
+    $repoPath = Join-Path $TargetRoot $repoName
+
+    if (Test-Path $repoPath) {
+        Write-Host "Repository already exists. Pulling latest changes."
+        & git -C $repoPath pull
+        if ($LASTEXITCODE -ne 0) {
+            throw "git pull failed."
+        }
+    }
+    else {
+        & git clone $SourceValue $repoPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "git clone failed."
+        }
+    }
+
+    return $repoPath
 }
 
 function Find-ProjectPath {
@@ -247,33 +289,16 @@ $DotNetChannel = Resolve-DotNetChannel -Value $DotNetChannel
 Install-WindowsFeatureSet
 Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
 
-$repoUrl = Read-Host "Enter a Git repository URL to deploy (leave blank to skip)"
-if ([string]::IsNullOrWhiteSpace($repoUrl)) {
+$sourceValue = Read-Host "Enter a Git repository URL or local project folder path to deploy (leave blank to skip)"
+if ([string]::IsNullOrWhiteSpace($sourceValue)) {
     Write-Host "Setup completed. IIS and .NET prerequisites are installed."
     exit 0
 }
 
-Ensure-Git
-
 $repoRoot = Join-Path $PSScriptRoot "repositories"
 New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
 
-$repoName = Get-RepositoryName -RepositoryUrl $repoUrl
-$repoPath = Join-Path $repoRoot $repoName
-
-if (Test-Path $repoPath) {
-    Write-Host "Repository already exists. Pulling latest changes."
-    & git -C $repoPath pull
-    if ($LASTEXITCODE -ne 0) {
-        throw "git pull failed."
-    }
-}
-else {
-    & git clone $repoUrl $repoPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "git clone failed."
-    }
-}
+$repoPath = Resolve-ApplicationSource -SourceValue $sourceValue -TargetRoot $repoRoot
 
 $projectPath = Find-ProjectPath -RepositoryPath $repoPath
 $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($projectPath)

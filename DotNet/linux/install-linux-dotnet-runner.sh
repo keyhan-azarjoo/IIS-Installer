@@ -87,9 +87,10 @@ ensure_service_user() {
 }
 
 repository_name() {
-  local repo_url="$1"
+  local source_value="$1"
   local name
-  name="$(basename "${repo_url}")"
+  source_value="${source_value%/}"
+  name="$(basename "${source_value}")"
   name="${name%.git}"
   printf '%s' "${name}"
 }
@@ -125,6 +126,29 @@ WantedBy=multi-user.target
 EOF
 }
 
+resolve_application_source() {
+  local source_value="$1"
+  local target_root="$2"
+  local app_name
+  app_name="$(repository_name "${source_value}")"
+  local target_path="${target_root}/${app_name}"
+
+  if [[ -e "${source_value}" ]]; then
+    rm -rf "${target_path}"
+    run_cmd cp -R "${source_value}" "${target_path}"
+    printf '%s\n' "${target_path}"
+    return
+  fi
+
+  if [[ -d "${target_path}/.git" ]]; then
+    run_cmd git -C "${target_path}" pull
+  else
+    run_cmd git clone "${source_value}" "${target_path}"
+  fi
+
+  printf '%s\n' "${target_path}"
+}
+
 main() {
   require_root
   resolve_dotnet_channel
@@ -132,23 +156,16 @@ main() {
   install_dotnet
   ensure_service_user
 
-  read -r -p "Enter a Git repository URL to deploy (leave blank to skip): " repo_url
-  if [[ -z "${repo_url}" ]]; then
+  read -r -p "Enter a Git repository URL or local project folder path to deploy (leave blank to skip): " source_value
+  if [[ -z "${source_value}" ]]; then
     echo "Setup completed. .NET prerequisites are installed."
     exit 0
   fi
 
   mkdir -p "${APP_ROOT}"
 
-  local repo_name
-  repo_name="$(repository_name "${repo_url}")"
-  local repo_path="${APP_ROOT}/${repo_name}"
-
-  if [[ -d "${repo_path}/.git" ]]; then
-    run_cmd git -C "${repo_path}" pull
-  else
-    run_cmd git clone "${repo_url}" "${repo_path}"
-  fi
+  local repo_path
+  repo_path="$(resolve_application_source "${source_value}" "${APP_ROOT}")"
 
   local project_path
   project_path="$(find_project "${repo_path}")"

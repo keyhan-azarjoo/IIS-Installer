@@ -25,8 +25,8 @@ What it does:
 
 - Enables IIS and required modules, including WebSockets.
 - Prompts for the .NET release channel and installs the matching .NET SDK, ASP.NET Core Runtime, and Hosting Bundle.
-- Prompts for a Git repository URL.
-- Clones or updates the repo, publishes the first `.csproj` it finds, and creates an IIS site for it.
+- Prompts for either a Git repository URL or a local project folder path.
+- Clones, updates, or copies the app source, publishes the first `.csproj` it finds, and creates an IIS site for it.
 
 Defaults:
 
@@ -66,8 +66,8 @@ Linux:   https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/linux
 What it does:
 
 - Prompts for the .NET release channel, then installs `curl`, `git`, and the .NET SDK / ASP.NET Core Runtime.
-- Prompts for a Git repository URL.
-- Clones or updates the repo, publishes the first `.csproj` it finds, and creates a `systemd` service to run it.
+- Prompts for either a Git repository URL or a local project folder path.
+- Clones, updates, or copies the app source, publishes the first `.csproj` it finds, and creates a `systemd` service to run it.
 
 Defaults:
 
@@ -90,6 +90,7 @@ sudo DOTNET_CHANNEL=9 DOTNET_INSTALL_SCRIPT_URL="https://example.com/dotnet-inst
 ## Notes
 
 - Both scripts assume the target repository contains a runnable `.NET` project (`.csproj`).
+- For local deployment, pass a folder path that already contains the backend project source.
 - The Windows flow is intended for ASP.NET Core web apps hosted behind IIS.
 - The Linux flow runs the app directly with `systemd` and Kestrel.
 - As of March 4, 2026, Microsoft lists `.NET 8`, `.NET 9`, and `.NET 10` as active supported releases in the official support policy (last updated February 10, 2026), so keeping the channel user-selectable is the safest approach. Sources: https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core and https://dotnet.microsoft.com/en-us/download
