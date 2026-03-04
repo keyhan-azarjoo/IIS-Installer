@@ -7,6 +7,8 @@ DOTNET_INSTALL_SCRIPT_URL="${DOTNET_INSTALL_SCRIPT_URL:-https://dot.net/v1/dotne
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 SERVICE_NAME="${SERVICE_NAME:-dotnet-app}"
 SERVICE_PORT="${SERVICE_PORT:-5000}"
+HTTP_PORT="${HTTP_PORT:-80}"
+HTTPS_PORT="${HTTPS_PORT:-443}"
 APP_ROOT="/opt/dotnet-apps"
 DOTNET_ROOT="/usr/share/dotnet"
 
@@ -30,15 +32,19 @@ install_os_packages() {
   local need_curl=0
   local need_unzip=0
   local need_tar=0
+  local need_openssl=0
+  local need_nginx=0
   local need_ca=0
 
   command -v curl >/dev/null 2>&1 || need_curl=1
   command -v unzip >/dev/null 2>&1 || need_unzip=1
   command -v tar >/dev/null 2>&1 || need_tar=1
+  command -v openssl >/dev/null 2>&1 || need_openssl=1
+  command -v nginx >/dev/null 2>&1 || need_nginx=1
   has_ca_bundle || need_ca=1
 
-  if [[ "${need_curl}" -eq 0 && "${need_unzip}" -eq 0 && "${need_tar}" -eq 0 && "${need_ca}" -eq 0 ]]; then
-    echo "curl, unzip, tar, and CA certificates already available."
+  if [[ "${need_curl}" -eq 0 && "${need_unzip}" -eq 0 && "${need_tar}" -eq 0 && "${need_openssl}" -eq 0 && "${need_nginx}" -eq 0 && "${need_ca}" -eq 0 ]]; then
+    echo "curl, unzip, tar, openssl, nginx, and CA certificates already available."
     return
   fi
 
@@ -49,6 +55,8 @@ install_os_packages() {
     [[ "${need_curl}" -eq 1 ]] && packages+=(curl)
     [[ "${need_unzip}" -eq 1 ]] && packages+=(unzip)
     [[ "${need_tar}" -eq 1 ]] && packages+=(tar)
+    [[ "${need_openssl}" -eq 1 ]] && packages+=(openssl)
+    [[ "${need_nginx}" -eq 1 ]] && packages+=(nginx)
     [[ "${need_ca}" -eq 1 ]] && packages+=(ca-certificates)
     if [[ "${#packages[@]}" -gt 0 ]]; then
       run_cmd apt-get install -y "${packages[@]}"
@@ -61,6 +69,8 @@ install_os_packages() {
     [[ "${need_curl}" -eq 1 ]] && packages+=(curl)
     [[ "${need_unzip}" -eq 1 ]] && packages+=(unzip)
     [[ "${need_tar}" -eq 1 ]] && packages+=(tar)
+    [[ "${need_openssl}" -eq 1 ]] && packages+=(openssl)
+    [[ "${need_nginx}" -eq 1 ]] && packages+=(nginx)
     [[ "${need_ca}" -eq 1 ]] && packages+=(ca-certificates)
     if [[ "${#packages[@]}" -gt 0 ]]; then
       run_cmd dnf install -y "${packages[@]}"
@@ -73,6 +83,8 @@ install_os_packages() {
     [[ "${need_curl}" -eq 1 ]] && packages+=(curl)
     [[ "${need_unzip}" -eq 1 ]] && packages+=(unzip)
     [[ "${need_tar}" -eq 1 ]] && packages+=(tar)
+    [[ "${need_openssl}" -eq 1 ]] && packages+=(openssl)
+    [[ "${need_nginx}" -eq 1 ]] && packages+=(nginx)
     [[ "${need_ca}" -eq 1 ]] && packages+=(ca-certificates)
     if [[ "${#packages[@]}" -gt 0 ]]; then
       run_cmd yum install -y "${packages[@]}"
@@ -80,7 +92,7 @@ install_os_packages() {
     return
   fi
 
-  echo "Unsupported package manager. Install curl, unzip, tar, and CA certificates manually, then rerun this script."
+  echo "Unsupported package manager. Install curl, unzip, tar, openssl, nginx, and CA certificates manually, then rerun this script."
   exit 1
 }
 
@@ -254,6 +266,77 @@ find_app_dll() {
   printf '%s\n' "${dll_path}"
 }
 
+get_public_ip() {
+  local public_ip
+  public_ip="$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+  if [[ "${public_ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s\n' "${public_ip}"
+  fi
+}
+
+get_local_ip() {
+  local local_ip
+  local_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="src") { print $(i+1); exit }}')"
+  if [[ -z "${local_ip}" ]]; then
+    local_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  printf '%s\n' "${local_ip}"
+}
+
+resolve_host_name() {
+  local domain_name="$1"
+  if [[ -n "${domain_name}" ]]; then
+    printf '%s\n' "${domain_name}"
+    return
+  fi
+
+  local public_ip
+  public_ip="$(get_public_ip)"
+  if [[ -n "${public_ip}" ]]; then
+    printf '%s\n' "${public_ip}"
+    return
+  fi
+
+  local local_ip
+  local_ip="$(get_local_ip)"
+  if [[ -n "${local_ip}" ]]; then
+    printf '%s\n' "${local_ip}"
+    return
+  fi
+
+  printf '%s\n' "localhost"
+}
+
+ensure_certificate() {
+  local host_name="$1"
+  local cert_dir="/etc/nginx/ssl/${SERVICE_NAME}"
+  local cert_file="${cert_dir}/server.crt"
+  local key_file="${cert_dir}/server.key"
+  local san_entry
+
+  if [[ -f "${cert_file}" && -f "${key_file}" ]]; then
+    printf '%s|%s\n' "${cert_file}" "${key_file}"
+    return
+  fi
+
+  mkdir -p "${cert_dir}"
+  if [[ "${host_name}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    san_entry="IP:${host_name}"
+  else
+    san_entry="DNS:${host_name}"
+  fi
+
+  run_cmd openssl req -x509 -nodes -newkey rsa:2048 \
+    -keyout "${key_file}" \
+    -out "${cert_file}" \
+    -days 825 \
+    -subj "/CN=${host_name}" \
+    -addext "subjectAltName=${san_entry}"
+
+  chmod 600 "${key_file}"
+  printf '%s|%s\n' "${cert_file}" "${key_file}"
+}
+
 write_service() {
   local service_file="/etc/systemd/system/${SERVICE_NAME}.service"
   local publish_path="$1"
@@ -273,10 +356,50 @@ KillSignal=SIGINT
 SyslogIdentifier=${SERVICE_NAME}
 User=dotnetapp
 Environment=ASPNETCORE_ENVIRONMENT=Production
-Environment=ASPNETCORE_URLS=http://0.0.0.0:${SERVICE_PORT}
+Environment=ASPNETCORE_URLS=http://127.0.0.1:${SERVICE_PORT}
 
 [Install]
 WantedBy=multi-user.target
+EOF
+}
+
+write_nginx_config() {
+  local host_name="$1"
+  local cert_file="$2"
+  local key_file="$3"
+  local server_name="_"
+
+  if [[ -n "${host_name}" && "${host_name}" != "localhost" ]]; then
+    server_name="${host_name}"
+  fi
+
+  local config_file="/etc/nginx/conf.d/${SERVICE_NAME}.conf"
+  cat > "${config_file}" <<EOF
+server {
+    listen ${HTTP_PORT};
+    server_name ${server_name};
+    return 301 https://\$host:${HTTPS_PORT}\$request_uri;
+}
+
+server {
+    listen ${HTTPS_PORT} ssl;
+    server_name ${server_name};
+
+    ssl_certificate ${cert_file};
+    ssl_certificate_key ${key_file};
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location / {
+        proxy_pass http://127.0.0.1:${SERVICE_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
 EOF
 }
 
@@ -340,6 +463,10 @@ main() {
     exit 0
   fi
 
+  read -r -p "Enter a domain name for the site (leave blank to use public IP if available, otherwise local IP): " domain_name
+  local resolved_host
+  resolved_host="$(resolve_host_name "${domain_name}")"
+
   mkdir -p "${APP_ROOT}"
 
   local repo_path
@@ -355,12 +482,22 @@ main() {
   chown -R dotnetapp:dotnetapp "${repo_path}"
   write_service "${publish_path}" "${dll_name}"
 
+  local cert_info
+  cert_info="$(ensure_certificate "${resolved_host}")"
+  local cert_file="${cert_info%%|*}"
+  local key_file="${cert_info##*|}"
+
+  write_nginx_config "${domain_name:-$resolved_host}" "${cert_file}" "${key_file}"
+
   run_cmd systemctl daemon-reload
   run_cmd systemctl enable --now "${SERVICE_NAME}"
+  run_cmd systemctl enable --now nginx
+  run_cmd systemctl reload nginx
 
   echo "Deployment complete."
-  echo "Service: ${SERVICE_NAME}"
-  echo "Kestrel URL: http://localhost:${SERVICE_PORT}"
+  echo "Preferred host: ${resolved_host}"
+  echo "HTTP URL: http://${resolved_host}:${HTTP_PORT}"
+  echo "HTTPS URL: https://${resolved_host}:${HTTPS_PORT}"
 }
 
 main "$@"

@@ -6,7 +6,8 @@ param(
     [string]$HostingBundleUrl,
     [string]$GitHubToken,
     [string]$SiteName = "DotNetApp",
-    [int]$SitePort = 8080
+    [int]$SitePort = 80,
+    [int]$HttpsPort = 443
 )
 
 $ErrorActionPreference = "Stop"
@@ -225,11 +226,8 @@ function Get-ArtifactName {
         throw "Unable to determine a folder name from '$SourcePath'."
     }
 
-    foreach ($suffix in @(".zip")) {
-        if ($name.EndsWith($suffix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $name = $name.Substring(0, $name.Length - $suffix.Length)
-            break
-        }
+    if ($name.EndsWith(".zip", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $name = $name.Substring(0, $name.Length - 4)
     }
 
     return $name
@@ -353,6 +351,85 @@ function Find-ApplicationAssembly {
     return $dll.FullName
 }
 
+function Get-PublicIPAddress {
+    try {
+        $value = Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 5
+        if ($value -match '^\d{1,3}(\.\d{1,3}){3}$') {
+            return $value
+        }
+    }
+    catch {
+    }
+
+    return $null
+}
+
+function Get-LocalIPAddress {
+    $candidates = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.IPAddress -notlike "127.*" -and
+            $_.IPAddress -notlike "169.254.*" -and
+            $_.ValidLifetime -gt 0
+        } |
+        Sort-Object SkipAsSource, InterfaceMetric
+
+    return ($candidates | Select-Object -First 1).IPAddress
+}
+
+function Resolve-HostName {
+    param([string]$DomainName)
+
+    if (-not [string]::IsNullOrWhiteSpace($DomainName)) {
+        return $DomainName.Trim()
+    }
+
+    $publicIp = Get-PublicIPAddress
+    if (-not [string]::IsNullOrWhiteSpace($publicIp)) {
+        return $publicIp
+    }
+
+    $localIp = Get-LocalIPAddress
+    if (-not [string]::IsNullOrWhiteSpace($localIp)) {
+        return $localIp
+    }
+
+    return "localhost"
+}
+
+function Ensure-ServerCertificate {
+    param([Parameter(Mandatory = $true)][string]$HostName)
+
+    $existing = Get-ChildItem -Path Cert:\LocalMachine\My |
+        Where-Object {
+            $_.Subject -match "CN=$([regex]::Escape($HostName))($|,)" -and
+            $_.NotAfter -gt (Get-Date)
+        } |
+        Sort-Object NotAfter -Descending |
+        Select-Object -First 1
+
+    if ($existing) {
+        return $existing
+    }
+
+    if ($HostName -match '^\d{1,3}(\.\d{1,3}){3}$') {
+        return New-SelfSignedCertificate `
+            -Subject "CN=$HostName" `
+            -CertStoreLocation "Cert:\LocalMachine\My" `
+            -KeyAlgorithm RSA `
+            -KeyLength 2048 `
+            -HashAlgorithm SHA256 `
+            -NotAfter (Get-Date).AddYears(3)
+    }
+
+    return New-SelfSignedCertificate `
+        -DnsName $HostName `
+        -CertStoreLocation "Cert:\LocalMachine\My" `
+        -KeyAlgorithm RSA `
+        -KeyLength 2048 `
+        -HashAlgorithm SHA256 `
+        -NotAfter (Get-Date).AddYears(3)
+}
+
 function Ensure-WebConfig {
     param(
         [Parameter(Mandatory = $true)][string]$PublishPath,
@@ -384,10 +461,20 @@ function Configure-IisSite {
         [Parameter(Mandatory = $true)][string]$PublishPath,
         [Parameter(Mandatory = $true)][string]$AppPoolName,
         [Parameter(Mandatory = $true)][string]$WebsiteName,
-        [Parameter(Mandatory = $true)][int]$Port
+        [Parameter(Mandatory = $true)][int]$HttpPort,
+        [Parameter(Mandatory = $true)][int]$HttpsPortNumber,
+        [string]$DomainName,
+        [Parameter(Mandatory = $true)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
     )
 
     Import-Module WebAdministration
+
+    $hostHeader = ""
+    $sslFlags = 0
+    if (-not [string]::IsNullOrWhiteSpace($DomainName)) {
+        $hostHeader = $DomainName.Trim()
+        $sslFlags = 1
+    }
 
     if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
         New-WebAppPool -Name $AppPoolName | Out-Null
@@ -396,11 +483,35 @@ function Configure-IisSite {
     Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name managedRuntimeVersion -Value ""
 
     if (Test-Path "IIS:\Sites\$WebsiteName") {
-        Stop-Website -Name $WebsiteName
+        Stop-Website -Name $WebsiteName -ErrorAction SilentlyContinue
         Remove-Website -Name $WebsiteName
     }
 
-    New-Website -Name $WebsiteName -Port $Port -PhysicalPath $PublishPath -ApplicationPool $AppPoolName | Out-Null
+    New-Website -Name $WebsiteName -Port $HttpPort -PhysicalPath $PublishPath -ApplicationPool $AppPoolName -HostHeader $hostHeader | Out-Null
+
+    if (-not (Get-WebBinding -Name $WebsiteName -Protocol "https" -ErrorAction SilentlyContinue)) {
+        New-WebBinding -Name $WebsiteName -Protocol "https" -Port $HttpsPortNumber -HostHeader $hostHeader -SslFlags $sslFlags | Out-Null
+    }
+
+    Push-Location IIS:\SslBindings
+    try {
+        if ($sslFlags -eq 1) {
+            $bindingPath = "0.0.0.0!$HttpsPortNumber!$hostHeader"
+        }
+        else {
+            $bindingPath = "0.0.0.0!$HttpsPortNumber"
+        }
+
+        if (Test-Path $bindingPath) {
+            Remove-Item $bindingPath -Force
+        }
+
+        Get-Item "Cert:\LocalMachine\My\$($Certificate.Thumbprint)" | New-Item $bindingPath -SslFlags $sslFlags | Out-Null
+    }
+    finally {
+        Pop-Location
+    }
+
     Start-Website -Name $WebsiteName | Out-Null
 }
 
@@ -415,6 +526,10 @@ if ([string]::IsNullOrWhiteSpace($sourceValue)) {
     exit 0
 }
 
+$domainName = Read-Host "Enter a domain name for the site (leave blank to use public IP if available, otherwise local IP)"
+$resolvedHost = Resolve-HostName -DomainName $domainName
+$certificate = Ensure-ServerCertificate -HostName $resolvedHost
+
 $deploymentRoot = Join-Path $PSScriptRoot "deployments"
 New-Item -ItemType Directory -Path $deploymentRoot -Force | Out-Null
 
@@ -424,8 +539,16 @@ $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)
 $publishPath = Split-Path -Path $assemblyPath -Parent
 
 Ensure-WebConfig -PublishPath $publishPath -AssemblyName $assemblyName
-Configure-IisSite -PublishPath $publishPath -AppPoolName $SiteName -WebsiteName $SiteName -Port $SitePort
+Configure-IisSite `
+    -PublishPath $publishPath `
+    -AppPoolName $SiteName `
+    -WebsiteName $SiteName `
+    -HttpPort $SitePort `
+    -HttpsPortNumber $HttpsPort `
+    -DomainName $domainName `
+    -Certificate $certificate
 
 Write-Host "Deployment complete."
-Write-Host "IIS site: $SiteName"
-Write-Host "URL: http://localhost:$SitePort"
+Write-Host "Preferred host: $resolvedHost"
+Write-Host "HTTP URL: http://$resolvedHost:$SitePort"
+Write-Host "HTTPS URL: https://$resolvedHost:$HttpsPort"
