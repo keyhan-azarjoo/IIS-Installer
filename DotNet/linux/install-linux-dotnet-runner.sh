@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-DOTNET_CHANNEL="${DOTNET_CHANNEL:-8.0}"
+DOTNET_CHANNEL="${DOTNET_CHANNEL:-}"
+DOTNET_INSTALL_SCRIPT_URL="${DOTNET_INSTALL_SCRIPT_URL:-https://dot.net/v1/dotnet-install.sh}"
 SERVICE_NAME="${SERVICE_NAME:-dotnet-app}"
 SERVICE_PORT="${SERVICE_PORT:-5000}"
 APP_ROOT="/opt/dotnet-apps"
@@ -46,7 +47,7 @@ install_dotnet() {
   local installer
   installer="$(mktemp)"
 
-  run_cmd curl -fsSL https://dot.net/v1/dotnet-install.sh -o "${installer}"
+  run_cmd curl -fsSL "${DOTNET_INSTALL_SCRIPT_URL}" -o "${installer}"
   chmod +x "${installer}"
 
   mkdir -p "${DOTNET_ROOT}"
@@ -55,6 +56,28 @@ install_dotnet() {
 
   ln -sf "${DOTNET_ROOT}/dotnet" /usr/bin/dotnet
   rm -f "${installer}"
+}
+
+resolve_dotnet_channel() {
+  local selection="${DOTNET_CHANNEL}"
+
+  if [[ -z "${selection}" ]]; then
+    echo "Choose a .NET release channel."
+    echo "Examples: 8, 9, 10, 10.0, LTS, STS"
+    read -r -p "Enter .NET channel (default: 8.0): " selection
+  fi
+
+  if [[ -z "${selection}" ]]; then
+    DOTNET_CHANNEL="8.0"
+    return
+  fi
+
+  if [[ "${selection}" =~ ^[0-9]+$ ]]; then
+    DOTNET_CHANNEL="${selection}.0"
+    return
+  fi
+
+  DOTNET_CHANNEL="${selection}"
 }
 
 ensure_service_user() {
@@ -104,6 +127,7 @@ EOF
 
 main() {
   require_root
+  resolve_dotnet_channel
   install_os_packages
   install_dotnet
   ensure_service_user

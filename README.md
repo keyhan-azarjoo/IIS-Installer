@@ -24,20 +24,26 @@ https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/windows
 What it does:
 
 - Enables IIS and required modules, including WebSockets.
-- Installs the current .NET SDK, ASP.NET Core Runtime, and Hosting Bundle for the selected channel.
+- Prompts for the .NET release channel and installs the matching .NET SDK, ASP.NET Core Runtime, and Hosting Bundle.
 - Prompts for a Git repository URL.
 - Clones or updates the repo, publishes the first `.csproj` it finds, and creates an IIS site for it.
 
 Defaults:
 
-- .NET channel: `8.0`
+- .NET channel prompt accepts `8`, `9`, `10`, `10.0`, `LTS`, `STS`, or a direct value supported by Microsoft `aka.ms` channel links. Default: `8.0`
 - IIS site name: `DotNetApp`
 - IIS port: `8080`
 
 Example with custom values:
 
 ```powershell
-.\install-windows-dotnet-host.ps1 -DotNetChannel 9.0 -SiteName MyApi -SitePort 8090
+.\install-windows-dotnet-host.ps1 -DotNetChannel 10 -SiteName MyApi -SitePort 8090
+```
+
+Example with custom installer URLs:
+
+```powershell
+.\install-windows-dotnet-host.ps1 -DotNetChannel 9 -SdkInstallerUrl "https://example.com/dotnet-sdk.exe" -AspNetRuntimeUrl "https://example.com/aspnet-runtime.exe" -HostingBundleUrl "https://example.com/dotnet-hosting.exe"
 ```
 
 ## Linux
@@ -59,20 +65,26 @@ Linux:   https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/linux
 
 What it does:
 
-- Installs `curl`, `git`, and the .NET SDK / ASP.NET Core Runtime.
+- Prompts for the .NET release channel, then installs `curl`, `git`, and the .NET SDK / ASP.NET Core Runtime.
 - Prompts for a Git repository URL.
 - Clones or updates the repo, publishes the first `.csproj` it finds, and creates a `systemd` service to run it.
 
 Defaults:
 
-- .NET channel: `8.0`
+- .NET channel prompt accepts `8`, `9`, `10`, `10.0`, `LTS`, `STS`, or another valid `dotnet-install` channel value. Default: `8.0`
 - Service name: `dotnet-app`
 - App port: `5000`
 
 Example with custom values:
 
 ```bash
-sudo DOTNET_CHANNEL=9.0 SERVICE_NAME=my-api SERVICE_PORT=5050 ./install-linux-dotnet-runner.sh
+sudo DOTNET_CHANNEL=10 SERVICE_NAME=my-api SERVICE_PORT=5050 ./install-linux-dotnet-runner.sh
+```
+
+Example with a custom install script URL:
+
+```bash
+sudo DOTNET_CHANNEL=9 DOTNET_INSTALL_SCRIPT_URL="https://example.com/dotnet-install.sh" ./install-linux-dotnet-runner.sh
 ```
 
 ## Notes
@@ -80,3 +92,4 @@ sudo DOTNET_CHANNEL=9.0 SERVICE_NAME=my-api SERVICE_PORT=5050 ./install-linux-do
 - Both scripts assume the target repository contains a runnable `.NET` project (`.csproj`).
 - The Windows flow is intended for ASP.NET Core web apps hosted behind IIS.
 - The Linux flow runs the app directly with `systemd` and Kestrel.
+- As of March 4, 2026, Microsoft lists `.NET 8`, `.NET 9`, and `.NET 10` as active supported releases in the official support policy (last updated February 10, 2026), so keeping the channel user-selectable is the safest approach. Sources: https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core and https://dotnet.microsoft.com/en-us/download

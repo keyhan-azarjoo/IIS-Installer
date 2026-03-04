@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$DotNetChannel = "8.0",
+    [string]$DotNetChannel,
+    [string]$SdkInstallerUrl,
+    [string]$AspNetRuntimeUrl,
+    [string]$HostingBundleUrl,
     [string]$SiteName = "DotNetApp",
     [int]$SitePort = 8080
 )
@@ -73,19 +76,57 @@ function Install-Executable {
 }
 
 function Install-DotNetPrerequisites {
-    param([Parameter(Mandatory = $true)][string]$Channel)
+    param(
+        [string]$Channel,
+        [string]$SdkUrl,
+        [string]$RuntimeUrl,
+        [string]$HostingUrl
+    )
 
-    Install-Executable -Url "https://aka.ms/dotnet/$Channel/dotnet-sdk-win-x64.exe" `
+    if ([string]::IsNullOrWhiteSpace($SdkUrl)) {
+        $SdkUrl = "https://aka.ms/dotnet/$Channel/dotnet-sdk-win-x64.exe"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($RuntimeUrl)) {
+        $RuntimeUrl = "https://aka.ms/dotnet/$Channel/aspnetcore-runtime-win-x64.exe"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($HostingUrl)) {
+        $HostingUrl = "https://aka.ms/dotnet/$Channel/dotnet-hosting-win.exe"
+    }
+
+    Install-Executable -Url $SdkUrl `
         -FileName "dotnet-sdk-win-x64.exe" `
         -Arguments "/install /quiet /norestart"
 
-    Install-Executable -Url "https://aka.ms/dotnet/$Channel/aspnetcore-runtime-win-x64.exe" `
+    Install-Executable -Url $RuntimeUrl `
         -FileName "aspnetcore-runtime-win-x64.exe" `
         -Arguments "/install /quiet /norestart"
 
-    Install-Executable -Url "https://aka.ms/dotnet/$Channel/dotnet-hosting-win.exe" `
+    Install-Executable -Url $HostingUrl `
         -FileName "dotnet-hosting-win.exe" `
         -Arguments "/install /quiet /norestart OPT_NO_ANCM=0"
+}
+
+function Resolve-DotNetChannel {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        Write-Host "Choose a .NET release channel."
+        Write-Host "Examples: 8, 9, 10, 10.0, LTS, STS"
+        $Value = Read-Host "Enter .NET channel (default: 8.0)"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return "8.0"
+    }
+
+    $trimmed = $Value.Trim()
+    if ($trimmed -match '^\d+$') {
+        return "$trimmed.0"
+    }
+
+    return $trimmed
 }
 
 function Ensure-Git {
@@ -202,8 +243,9 @@ function Configure-IisSite {
 }
 
 Assert-Administrator
+$DotNetChannel = Resolve-DotNetChannel -Value $DotNetChannel
 Install-WindowsFeatureSet
-Install-DotNetPrerequisites -Channel $DotNetChannel
+Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
 
 $repoUrl = Read-Host "Enter a Git repository URL to deploy (leave blank to skip)"
 if ([string]::IsNullOrWhiteSpace($repoUrl)) {
