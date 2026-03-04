@@ -568,7 +568,7 @@ function Configure-IisSite {
         $httpConflict = Get-Website |
             Where-Object {
                 $_.Name -ne $WebsiteName -and
-                $_.Bindings.Collection.bindingInformation -contains "*:$HttpPort:"
+                $_.Bindings.Collection.bindingInformation -contains "*:${HttpPort}:"
             } |
             Select-Object -First 1
 
@@ -580,7 +580,7 @@ function Configure-IisSite {
         $httpsConflict = Get-WebBinding -Protocol "https" -ErrorAction SilentlyContinue |
             Where-Object {
                 $_.ItemXPath -ne $null -and
-                $_.bindingInformation -eq "*:$HttpsPortNumber:"
+                $_.bindingInformation -eq "*:${HttpsPortNumber}:"
             } |
             Select-Object -First 1
 
