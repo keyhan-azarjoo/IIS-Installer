@@ -293,8 +293,8 @@ function Configure-IisSite {
 
     Grant-IisFolderAccess -PublishPath $PublishPath -AppPoolName $AppPoolName
 
-    $appPool = Get-ChildItem "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue
-    if ($appPool -and $appPool.State -ne "Started") {
+    $appPoolState = Get-WebAppPoolState -Name $AppPoolName -ErrorAction SilentlyContinue
+    if ($null -ne $appPoolState -and $appPoolState.Value -ne "Started") {
         Start-WebAppPool -Name $AppPoolName | Out-Null
     }
 
@@ -302,8 +302,8 @@ function Configure-IisSite {
     Start-Sleep -Seconds 2
 
     if (-not (Test-LocalHttpsEndpoint -Port $resolvedHttpsPort)) {
-        $currentPool = Get-ChildItem "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue
-        $poolState = if ($currentPool) { $currentPool.State } else { "Unknown" }
+        $currentPoolState = Get-WebAppPoolState -Name $AppPoolName -ErrorAction SilentlyContinue
+        $poolState = if ($null -ne $currentPoolState) { $currentPoolState.Value } else { "Unknown" }
         throw "IIS site started, but HTTPS health check failed on port $resolvedHttpsPort (app pool state: $poolState)."
     }
 
