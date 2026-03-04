@@ -26,15 +26,10 @@ function Ensure-LocalWindowsModules {
     param([Parameter(Mandatory = $true)][string]$ModuleRoot)
 
     $requiredFiles = @("common.ps1", "iis-mode.ps1", "docker-mode.ps1")
-    $missingFiles = $requiredFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ModuleRoot $_)) }
-    if ($missingFiles.Count -eq 0) {
-        return
-    }
-
     New-Item -ItemType Directory -Path $ModuleRoot -Force | Out-Null
     $baseUrl = "https://raw.githubusercontent.com/keyhan-azarjoo/IIS-Installer/main/DotNet/windows/modules"
 
-    foreach ($fileName in $missingFiles) {
+    foreach ($fileName in $requiredFiles) {
         $targetPath = Join-Path $ModuleRoot $fileName
         $uri = "$baseUrl/$fileName"
         Write-Host "Downloading Windows module: $fileName"
