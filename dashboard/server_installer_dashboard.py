@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import ctypes
 import html
 import ipaddress
 import os
@@ -21,6 +22,15 @@ LINUX_INSTALLER = ROOT / "DotNet" / "linux" / "install-linux-dotnet-runner.sh"
 SESSIONS = set()
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+
+
+def is_windows_admin():
+    if os.name != "nt":
+        return True
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
 
 
 def validate_os_credentials(username, password):
@@ -97,6 +107,8 @@ def run_process(cmd, env=None, live_cb=None):
 def run_windows_installer(form, live_cb=None):
     if os.name != "nt":
         return 1, "Windows installer can only run on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
 
     cmd = [
         "powershell.exe",
@@ -131,6 +143,8 @@ def run_windows_installer(form, live_cb=None):
 def run_windows_setup_only(form, target, live_cb=None):
     if os.name != "nt":
         return 1, "Windows setup actions can only run on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
 
     dotnet_channel = (form.get("DotNetChannel", ["8.0"])[0] or "8.0").strip()
     if not dotnet_channel:
@@ -447,7 +461,7 @@ document.querySelectorAll(".run-form").forEach((form) => {{
           setState("Error");
           clearInterval(interval);
         }}
-      }}, 1000);
+      }}, 300);
     }} catch (err) {{
       appendTerminal("Request failed: " + err);
       setState("Error");

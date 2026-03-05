@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import ctypes
 import os
 import platform
 import subprocess
@@ -65,11 +66,43 @@ def preferred_host(arg_host: str) -> str:
     return "127.0.0.1"
 
 
+def is_windows_admin() -> bool:
+    if os.name != "nt":
+        return True
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def relaunch_as_admin_if_needed() -> bool:
+    if os.name != "nt":
+        return False
+    if is_windows_admin():
+        return False
+
+    params = subprocess.list2cmdline(sys.argv)
+    rc = ctypes.windll.shell32.ShellExecuteW(
+        None,
+        "runas",
+        sys.executable,
+        params,
+        None,
+        1,
+    )
+    if rc <= 32:
+        raise RuntimeError("Administrator elevation was required but could not be started.")
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="auto")
     parser.add_argument("--port", type=int, default=8090)
     args = parser.parse_args()
+
+    if relaunch_as_admin_if_needed():
+        return 0
 
     cwd_root = Path.cwd()
     if is_repo_layout(cwd_root):
