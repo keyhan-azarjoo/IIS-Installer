@@ -4,6 +4,7 @@ This repository includes OS-specific installers under `DotNet`:
 
 - `DotNet/windows/install-windows-dotnet-host.ps1`
 - `DotNet/windows/deploy-windows-over-ssh.ps1`
+- `DotNet/windows/start-installer-dashboard.ps1`
 - `DotNet/windows/modules/common.ps1`
 - `DotNet/windows/modules/iis-mode.ps1`
 - `DotNet/windows/modules/docker-mode.ps1`
@@ -20,6 +21,14 @@ Set-ExecutionPolicy -Scope Process Bypass
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/windows/install-windows-dotnet-host.ps1" -OutFile ".\install-windows-dotnet-host.ps1"
 .\install-windows-dotnet-host.ps1
 ```
+
+Run dashboard mode (single command) from an elevated terminal:
+
+```powershell
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/windows/start-installer-dashboard.ps1" -OutFile ".\start-installer-dashboard.ps1"; .\start-installer-dashboard.ps1
+```
+
+Then open `http://localhost:8090`, sign in with the username/password you entered in terminal, and run deployment from the dashboard form.
 
 If you download only the main Windows script, it will automatically download its required module files into a local `modules` folder the first time it runs.
 
