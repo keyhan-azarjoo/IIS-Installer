@@ -58,8 +58,28 @@ function Ensure-WindowsContainerRuntimeReady {
     }
 }
 
+function Get-DockerEngineOsType {
+    if (-not (Test-Command -Name "docker")) {
+        return $null
+    }
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $dockerOsType = (& docker info --format "{{.OSType}}" 2>$null | Select-Object -First 1)
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ([string]::IsNullOrWhiteSpace($dockerOsType)) {
+        return $null
+    }
+
+    return $dockerOsType.Trim().ToLowerInvariant()
+}
+
 function Install-DockerWithMicrosoftScript {
-    Ensure-WindowsContainerRuntimeReady
     $installScriptPath = Join-Path $env:TEMP "install-docker-ce.ps1"
     $installScriptUrl = "https://raw.githubusercontent.com/microsoft/Windows-Containers/Main/helpful_tools/Install-DockerCE/install-docker-ce.ps1"
 
@@ -88,8 +108,6 @@ function Install-DockerWithMicrosoftScript {
 }
 
 function Ensure-DockerInstalled {
-    Ensure-WindowsContainerRuntimeReady
-
     if (Test-Command -Name "docker") {
         return
     }
@@ -107,9 +125,16 @@ function Ensure-DockerInstalled {
 }
 
 function Get-DockerRuntimeTag {
-    param([Parameter(Mandatory = $true)][string]$DotNetChannel)
+    param(
+        [Parameter(Mandatory = $true)][string]$DotNetChannel,
+        [Parameter(Mandatory = $true)][ValidateSet("windows", "linux")][string]$EngineOsType
+    )
 
     $majorVersion = Get-DotNetMajorVersion -Channel $DotNetChannel
+    if ($EngineOsType -eq "linux") {
+        return "$majorVersion.0"
+    }
+
     $windowsBuild = [System.Environment]::OSVersion.Version.Build
 
     if ($windowsBuild -ge 20348) {
@@ -127,11 +152,12 @@ function Write-Dockerfile {
     param(
         [Parameter(Mandatory = $true)][string]$ContentPath,
         [Parameter(Mandatory = $true)][string]$AssemblyName,
-        [Parameter(Mandatory = $true)][string]$DotNetChannel
+        [Parameter(Mandatory = $true)][string]$DotNetChannel,
+        [Parameter(Mandatory = $true)][ValidateSet("windows", "linux")][string]$EngineOsType
     )
 
     $dockerfilePath = Join-Path $ContentPath "Dockerfile.generated"
-    $runtimeTag = Get-DockerRuntimeTag -DotNetChannel $DotNetChannel
+    $runtimeTag = Get-DockerRuntimeTag -DotNetChannel $DotNetChannel -EngineOsType $EngineOsType
     $content = @"
 FROM mcr.microsoft.com/dotnet/aspnet:$runtimeTag
 WORKDIR /app
@@ -155,6 +181,14 @@ function Invoke-DockerDeployment {
     )
 
     Ensure-DockerInstalled
+    $engineOsType = Get-DockerEngineOsType
+    if ($engineOsType -notin @("windows", "linux")) {
+        throw "Unable to detect Docker engine OS type. Ensure Docker Desktop/Engine is running."
+    }
+
+    if ($engineOsType -eq "windows") {
+        Ensure-WindowsContainerRuntimeReady
+    }
 
     $deploymentRoot = Join-Path $env:ProgramData "IIS-Installer\docker"
     $targetPath = Join-Path $deploymentRoot $PackageName
@@ -163,7 +197,7 @@ function Invoke-DockerDeployment {
 
     $assemblyPath = Find-ApplicationAssembly -DeploymentPath $targetPath
     $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)
-    $dockerfilePath = Write-Dockerfile -ContentPath (Split-Path -Path $assemblyPath -Parent) -AssemblyName $assemblyName -DotNetChannel $DotNetChannel
+    $dockerfilePath = Write-Dockerfile -ContentPath (Split-Path -Path $assemblyPath -Parent) -AssemblyName $assemblyName -DotNetChannel $DotNetChannel -EngineOsType $engineOsType
 
     $imageName = ("{0}:latest" -f ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-'))
     $containerName = ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-')
@@ -185,9 +219,14 @@ function Invoke-DockerDeployment {
         throw "docker build failed."
     }
 
-    # Prefer process isolation first when the image matches the host; fall back to Hyper-V
-    # if process isolation is unsupported on the current machine.
-    $runAttempts = @("process", "hyperv")
+    if ($engineOsType -eq "windows") {
+        # Prefer process isolation first when the image matches the host; fall back to Hyper-V
+        # if process isolation is unsupported on the current machine.
+        $runAttempts = @("process", "hyperv")
+    }
+    else {
+        $runAttempts = @($null)
+    }
 
     $runSucceeded = $false
     foreach ($isolation in $runAttempts) {
