@@ -79,6 +79,38 @@ function Get-DockerEngineOsType {
     return $dockerOsType.Trim().ToLowerInvariant()
 }
 
+function Test-DockerDesktopInstalled {
+    $desktopPaths = @(
+        (Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path $env:LocalAppData "Docker\Docker\Docker Desktop.exe")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($desktopPath in $desktopPaths) {
+        if (Test-Path -LiteralPath $desktopPath) {
+            return $true
+        }
+    }
+
+    if (Get-Command "com.docker.cli" -ErrorAction SilentlyContinue) {
+        return $true
+    }
+
+    return $false
+}
+
+function Install-DockerDesktopWithWinget {
+    if (-not (Test-Command -Name "winget")) {
+        throw "Docker Desktop is required to switch to Linux containers automatically, but winget is unavailable."
+    }
+
+    Write-Host "Installing Docker Desktop with winget"
+    $process = Start-Process -FilePath "winget" -ArgumentList "install --id Docker.DockerDesktop --exact --accept-package-agreements --accept-source-agreements --silent" -Wait -PassThru -NoNewWindow
+    if ($process.ExitCode -ne 0) {
+        throw "Docker Desktop installation failed with exit code $($process.ExitCode)."
+    }
+}
+
 function Switch-DockerEngineToLinux {
     $waitForLinuxEngine = {
         param([int]$TimeoutSeconds = 180)
@@ -305,6 +337,10 @@ function Invoke-DockerDeployment {
         catch {
             Write-Host "Windows container prerequisites are not available: $($_.Exception.Message)"
             $switchedToLinux = Switch-DockerEngineToLinux
+            if (-not $switchedToLinux -and -not (Test-DockerDesktopInstalled)) {
+                Install-DockerDesktopWithWinget
+                $switchedToLinux = Switch-DockerEngineToLinux
+            }
             if (-not $switchedToLinux) {
                 throw "Windows container prerequisites are missing and Docker could not be switched to Linux engine automatically. Enable Windows Containers feature or switch Docker Desktop to Linux containers, then rerun."
             }
