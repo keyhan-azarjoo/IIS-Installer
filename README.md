@@ -11,6 +11,7 @@ This repository includes OS-specific installers under `DotNet`:
 - `DotNet/linux/install-linux-dotnet-runner.sh`
 - `DotNet/linux/start-server-dashboard.sh`
 - `dashboard/server_installer_dashboard.py`
+- `dashboard/start-server-dashboard.py`
 
 These installers deploy only from prebuilt published output.
 
@@ -24,10 +25,10 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-
 .\install-windows-dotnet-host.ps1
 ```
 
-Run higher-level dashboard mode (single command) from an elevated terminal:
+Run higher-level dashboard mode (cross-platform, single URL):
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/windows/start-server-dashboard.ps1" -OutFile ".\start-server-dashboard.ps1"; .\start-server-dashboard.ps1
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -OutFile ".\start-server-dashboard.py"; py -3 .\start-server-dashboard.py
 ```
 
 Then open `http://127.0.0.1:8090`.
@@ -49,9 +50,8 @@ Dashboard now includes:
 Linux dashboard start:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/linux/start-server-dashboard.sh" -o ./start-server-dashboard.sh
-chmod +x ./start-server-dashboard.sh
-./start-server-dashboard.sh
+curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -o ./start-server-dashboard.py
+python3 ./start-server-dashboard.py
 ```
 
 If you download only the main Windows script, it will automatically download its required module files into a local `modules` folder the first time it runs.

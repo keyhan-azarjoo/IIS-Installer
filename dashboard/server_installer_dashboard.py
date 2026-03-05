@@ -228,6 +228,11 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
 .btn-secondary{{background:#0f766e}}
 .btn-dark{{background:#1e293b}}
 .onecol{{grid-template-columns:1fr}}
+.section{{scroll-margin-top:16px}}
+.terminal{{background:#0d1117;color:#c9d1d9;border-radius:12px;border:1px solid #1f2937;padding:12px;height:340px;overflow:auto;white-space:pre-wrap;font-family:Consolas,monospace;font-size:12px}}
+.term-title{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}
+.term-badge{{font-size:12px;color:#94a3b8}}
+.navlink{{display:block;text-decoration:none;color:#e8eef9}}
 @media (max-width:1100px){{.layout{{grid-template-columns:1fr}}.sidebar{{padding-bottom:10px}}.row{{grid-template-columns:1fr}}}}
 </style></head>
 <body><div class="layout">
@@ -235,15 +240,15 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
 <div class="brand">Server Installer</div>
 <div class="navgroup">
   <div class="navtitle">Installers</div>
-  <div class="navitem">Dot Net Installer</div>
-  <div class="navitem">IIS Installer (Windows)</div>
-  <div class="navitem">Docker Installer</div>
-  <div class="navitem">Combined Server Installers</div>
+  <div class="navitem"><a class="navlink" href="#windows-separate">Windows Separate Setup</a></div>
+  <div class="navitem"><a class="navlink" href="#windows-deploy">Windows Deployment</a></div>
+  <div class="navitem"><a class="navlink" href="#linux-deploy">Linux Deployment</a></div>
+  <div class="navitem"><a class="navlink" href="#web-terminal">Web Terminal</a></div>
 </div>
 <div class="navgroup">
   <div class="navtitle">Scope</div>
-  <div class="navitem">Windows Server Actions</div>
-  <div class="navitem">Linux Server Actions</div>
+  <div class="navitem"><a class="navlink" href="#windows-separate">IIS / Docker / DotNet</a></div>
+  <div class="navitem"><a class="navlink" href="#linux-deploy">Nginx / DotNet Runtime</a></div>
 </div>
 </div>
 <div class="main">
@@ -254,11 +259,11 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
   </div>
 </div>
 {msg}
-<div class="row">
+<div class="row section" id="windows-deploy">
 <div class="card">
 <h3>Windows Combined (.NET + IIS/Docker)</h3>
 <p>Run full deployment on Windows with all deployment options.</p>
-<form method="post" action="/run/windows">
+<form method="post" action="/run/windows" class="run-form" data-title="Windows Combined Installer">
 <label>Deployment Mode</label><select name="DeploymentMode"><option>IIS</option><option>Docker</option></select>
 <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
 <label>Source Path or URL</label><input name="SourceValue" placeholder="D:\\app\\published or https://..." required>
@@ -270,26 +275,26 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
 <button type="submit">Run Windows Installer</button>
 </form>
 </div>
-<div class="card">
+<div class="card section" id="windows-separate">
 <h3>Windows Separate Installers</h3>
 <p>Install only the part you need: IIS stack or Docker stack.</p>
-<form method="post" action="/run/windows_setup_iis">
+<form method="post" action="/run/windows_setup_iis" class="run-form" data-title="Windows IIS Stack Setup">
 <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
 <button class="btn-secondary" type="submit">Install IIS Stack Only</button>
 </form>
 <div class="divider"></div>
-<form method="post" action="/run/windows_setup_docker">
+<form method="post" action="/run/windows_setup_docker" class="run-form" data-title="Windows Docker Stack Setup">
 <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
 <button class="btn-dark" type="submit">Install Docker Stack Only</button>
 </form>
 <div class="divider"></div>
-<form method="post" action="/run/windows_iis">
+<form method="post" action="/run/windows_iis" class="run-form" data-title="Windows IIS Deployment">
 <label>Source Path or URL</label><input name="SourceValue" required>
 <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
 <button type="submit">Install IIS Mode</button>
 </form>
 <div class="divider"></div>
-<form method="post" action="/run/windows_docker">
+<form method="post" action="/run/windows_docker" class="run-form" data-title="Windows Docker Deployment">
 <label>Source Path or URL</label><input name="SourceValue" required>
 <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
 <label>Docker Host Port</label><input name="DockerHostPort" value="8080">
@@ -297,11 +302,11 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
 </form>
 </div>
 </div>
-<div class="row" style="margin-top:16px">
+<div class="row section" id="linux-deploy" style="margin-top:16px">
 <div class="card">
 <h3>Linux Combined (.NET + Nginx)</h3>
 <p>Run Linux deployment pipeline with application and web proxy setup.</p>
-<form method="post" action="/run/linux">
+<form method="post" action="/run/linux" class="run-form" data-title="Linux Combined Installer">
 <label>.NET Channel</label><input name="DOTNET_CHANNEL" value="8.0">
 <label>Source Path or URL</label><input name="SOURCE_VALUE" placeholder="/srv/app or https://..." required>
 <label>Domain Name</label><input name="DOMAIN_NAME">
@@ -315,13 +320,57 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
 <div class="card">
 <h3>Linux DotNet Prerequisites</h3>
 <p>Install base runtime and prerequisites without deploying app payload.</p>
-<form method="post" action="/run/linux_prereq">
+<form method="post" action="/run/linux_prereq" class="run-form" data-title="Linux Prerequisites Installer">
 <label>.NET Channel</label><input name="DOTNET_CHANNEL" value="8.0">
 <button type="submit">Install Linux Prerequisites Only</button>
 </form>
 </div>
 </div>
-</div></div></body></html>"""
+<div class="row onecol section" id="web-terminal">
+  <div class="card">
+    <div class="term-title">
+      <h3 style="margin:0">Web Terminal</h3>
+      <span id="termState" class="term-badge">Idle</span>
+    </div>
+    <div id="terminal" class="terminal">Ready. Click any installer button to run and stream output here.</div>
+  </div>
+</div>
+</div></div>
+<script>
+const terminalEl = document.getElementById("terminal");
+const termState = document.getElementById("termState");
+function appendTerminal(text) {{
+  terminalEl.textContent += (terminalEl.textContent ? "\\n" : "") + text;
+  terminalEl.scrollTop = terminalEl.scrollHeight;
+}}
+function setState(text) {{ termState.textContent = text; }}
+document.querySelectorAll(".run-form").forEach((form) => {{
+  form.addEventListener("submit", async (e) => {{
+    e.preventDefault();
+    const title = form.dataset.title || "Installer";
+    appendTerminal("============================================================");
+    appendTerminal("[" + new Date().toLocaleTimeString() + "] " + title + " started");
+    setState("Running: " + title);
+    const fd = new FormData(form);
+    const body = new URLSearchParams(fd);
+    try {{
+      const res = await fetch(form.action, {{
+        method: "POST",
+        headers: {{ "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" }},
+        body: body.toString()
+      }});
+      const json = await res.json();
+      appendTerminal(json.output || "");
+      appendTerminal("[" + new Date().toLocaleTimeString() + "] " + title + " finished (exit " + json.exit_code + ")");
+      setState("Idle");
+    }} catch (err) {{
+      appendTerminal("Request failed: " + err);
+      setState("Error");
+    }}
+  }});
+}});
+</script>
+</body></html>"""
 
 
 def page_output(title, output, code):
@@ -367,6 +416,24 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def write_json(self, payload, status=HTTPStatus.OK):
+        import json
+        data = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def is_fetch(self):
+        return self.headers.get("X-Requested-With", "").lower() == "fetch"
+
+    def respond_run_result(self, title, code, output):
+        if self.is_fetch():
+            self.write_json({"title": title, "exit_code": code, "output": output})
+        else:
+            self.write_html(page_output(title, output, code))
+
     def do_GET(self):
         if self.path == "/":
             if self.is_local_client() or self.is_auth():
@@ -398,34 +465,34 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/run/windows":
             code, output = run_windows_installer(form)
-            self.write_html(page_output("Windows Combined Installer", output, code))
+            self.respond_run_result("Windows Combined Installer", code, output)
             return
         if self.path == "/run/windows_iis":
             form["DeploymentMode"] = ["IIS"]
             code, output = run_windows_installer(form)
-            self.write_html(page_output("Windows IIS Installer", output, code))
+            self.respond_run_result("Windows IIS Installer", code, output)
             return
         if self.path == "/run/windows_setup_iis":
             code, output = run_windows_setup_only(form, "iis")
-            self.write_html(page_output("Windows IIS Stack Setup", output, code))
+            self.respond_run_result("Windows IIS Stack Setup", code, output)
             return
         if self.path == "/run/windows_setup_docker":
             code, output = run_windows_setup_only(form, "docker")
-            self.write_html(page_output("Windows Docker Stack Setup", output, code))
+            self.respond_run_result("Windows Docker Stack Setup", code, output)
             return
         if self.path == "/run/windows_docker":
             form["DeploymentMode"] = ["Docker"]
             code, output = run_windows_installer(form)
-            self.write_html(page_output("Windows Docker Installer", output, code))
+            self.respond_run_result("Windows Docker Installer", code, output)
             return
         if self.path == "/run/linux":
             code, output = run_linux_installer(form)
-            self.write_html(page_output("Linux Combined Installer", output, code))
+            self.respond_run_result("Linux Combined Installer", code, output)
             return
         if self.path == "/run/linux_prereq":
             form["SOURCE_VALUE"] = [""]
             code, output = run_linux_installer(form)
-            self.write_html(page_output("Linux Prerequisites Installer", output, code))
+            self.respond_run_result("Linux Prerequisites Installer", code, output)
             return
 
         self.write_html("Not found", HTTPStatus.NOT_FOUND)
