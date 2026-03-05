@@ -6,6 +6,8 @@ import os
 import secrets
 import socket
 import subprocess
+import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,6 +19,8 @@ WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.p
 LINUX_INSTALLER = ROOT / "DotNet" / "linux" / "install-linux-dotnet-runner.sh"
 
 SESSIONS = set()
+JOBS = {}
+JOBS_LOCK = threading.Lock()
 
 
 def validate_os_credentials(username, password):
@@ -66,19 +70,31 @@ def validate_os_credentials(username, password):
         return False, "Invalid Linux username/password."
 
 
-def run_process(cmd, env=None):
-    proc = subprocess.run(
+def run_process(cmd, env=None, live_cb=None):
+    proc = subprocess.Popen(
         cmd,
         cwd=str(ROOT),
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
     )
-    return proc.returncode, proc.stdout
+    chunks = []
+    try:
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                chunks.append(line)
+                if live_cb:
+                    live_cb(line)
+        proc.wait()
+    finally:
+        if proc.stdout is not None:
+            proc.stdout.close()
+    return proc.returncode, "".join(chunks)
 
 
-def run_windows_installer(form):
+def run_windows_installer(form, live_cb=None):
     if os.name != "nt":
         return 1, "Windows installer can only run on Windows hosts."
 
@@ -89,6 +105,7 @@ def run_windows_installer(form):
         "Bypass",
         "-File",
         str(WINDOWS_INSTALLER),
+        "-NonInteractive",
     ]
 
     keys = [
@@ -106,10 +123,12 @@ def run_windows_installer(form):
         if value:
             cmd.extend([f"-{key}", value])
 
-    return run_process(cmd)
+    env = os.environ.copy()
+    env["SERVER_INSTALLER_NONINTERACTIVE"] = "1"
+    return run_process(cmd, env=env, live_cb=live_cb)
 
 
-def run_windows_setup_only(form, target):
+def run_windows_setup_only(form, target, live_cb=None):
     if os.name != "nt":
         return 1, "Windows setup actions can only run on Windows hosts."
 
@@ -131,7 +150,9 @@ def run_windows_setup_only(form, target):
                 f"Install-DotNetPrerequisites -Channel '{dotnet_channel}'"
             ),
         ]
-        return run_process(cmd)
+        env = os.environ.copy()
+        env["SERVER_INSTALLER_NONINTERACTIVE"] = "1"
+        return run_process(cmd, env=env, live_cb=live_cb)
 
     if target == "docker":
         cmd = [
@@ -147,12 +168,14 @@ def run_windows_setup_only(form, target):
                 f"Ensure-DockerInstalled"
             ),
         ]
-        return run_process(cmd)
+        env = os.environ.copy()
+        env["SERVER_INSTALLER_NONINTERACTIVE"] = "1"
+        return run_process(cmd, env=env, live_cb=live_cb)
 
     return 1, "Unknown Windows setup target."
 
 
-def run_linux_installer(form):
+def run_linux_installer(form, live_cb=None):
     if os.name == "nt":
         return 1, "Linux installer can only run on Linux hosts."
 
@@ -175,7 +198,43 @@ def run_linux_installer(form):
         if value:
             env[key] = value
 
-    return run_process(installer_cmd, env=env)
+    return run_process(installer_cmd, env=env, live_cb=live_cb)
+
+
+def start_live_job(title, runner):
+    job_id = secrets.token_hex(12)
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "title": title,
+            "output": "",
+            "done": False,
+            "exit_code": None,
+            "created": time.time(),
+        }
+
+    def append_out(text):
+        with JOBS_LOCK:
+            if job_id in JOBS:
+                JOBS[job_id]["output"] += text
+
+    def worker():
+        try:
+            code, output = runner(append_out)
+            with JOBS_LOCK:
+                if job_id in JOBS:
+                    if output and not JOBS[job_id]["output"]:
+                        JOBS[job_id]["output"] = output
+                    JOBS[job_id]["exit_code"] = code
+                    JOBS[job_id]["done"] = True
+        except Exception as ex:
+            with JOBS_LOCK:
+                if job_id in JOBS:
+                    JOBS[job_id]["output"] += f"\nUnhandled error: {ex}\n"
+                    JOBS[job_id]["exit_code"] = 1
+                    JOBS[job_id]["done"] = True
+
+    threading.Thread(target=worker, daemon=True).start()
+    return job_id
 
 
 def page_login(message=""):
@@ -360,9 +419,35 @@ document.querySelectorAll(".run-form").forEach((form) => {{
         body: body.toString()
       }});
       const json = await res.json();
-      appendTerminal(json.output || "");
-      appendTerminal("[" + new Date().toLocaleTimeString() + "] " + title + " finished (exit " + json.exit_code + ")");
-      setState("Idle");
+      if (!json.job_id) {{
+        appendTerminal(json.output || "No output.");
+        appendTerminal("[" + new Date().toLocaleTimeString() + "] " + title + " finished (exit " + (json.exit_code ?? 1) + ")");
+        setState("Idle");
+        return;
+      }}
+
+      let offset = 0;
+      const interval = setInterval(async () => {{
+        try {{
+          const stateRes = await fetch("/job/" + json.job_id + "?offset=" + offset, {{
+            headers: {{ "X-Requested-With": "fetch" }}
+          }});
+          const state = await stateRes.json();
+          if (state.output) {{
+            appendTerminal(state.output);
+          }}
+          offset = state.next_offset || offset;
+          if (state.done) {{
+            appendTerminal("[" + new Date().toLocaleTimeString() + "] " + title + " finished (exit " + state.exit_code + ")");
+            setState("Idle");
+            clearInterval(interval);
+          }}
+        }} catch (pollErr) {{
+          appendTerminal("Polling failed: " + pollErr);
+          setState("Error");
+          clearInterval(interval);
+        }}
+      }}, 1000);
     }} catch (err) {{
       appendTerminal("Request failed: " + err);
       setState("Error");
@@ -447,6 +532,38 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.write_html(page_login())
             return
+        if self.path.startswith("/job/"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            path_only = self.path.split("?", 1)[0]
+            job_id = path_only.split("/job/", 1)[1]
+            query = {}
+            if "?" in self.path:
+                query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+            try:
+                offset = int((query.get("offset", ["0"])[0] or "0"))
+            except ValueError:
+                offset = 0
+            with JOBS_LOCK:
+                job = JOBS.get(job_id)
+                if not job:
+                    self.write_json({"error": "Job not found"}, HTTPStatus.NOT_FOUND)
+                    return
+                full_output = job["output"]
+                if offset < 0:
+                    offset = 0
+                output_chunk = full_output[offset:]
+                payload = {
+                    "job_id": job_id,
+                    "title": job["title"],
+                    "output": output_chunk,
+                    "next_offset": len(full_output),
+                    "done": job["done"],
+                    "exit_code": job["exit_code"],
+                }
+            self.write_json(payload)
+            return
         self.write_html("Not found", HTTPStatus.NOT_FOUND)
 
     def do_POST(self):
@@ -470,35 +587,70 @@ class Handler(BaseHTTPRequestHandler):
         form = self.parse_form()
 
         if self.path == "/run/windows":
-            code, output = run_windows_installer(form)
-            self.respond_run_result("Windows Combined Installer", code, output)
+            title = "Windows Combined Installer"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_installer(form)
+                self.respond_run_result(title, code, output)
             return
         if self.path == "/run/windows_iis":
             form["DeploymentMode"] = ["IIS"]
-            code, output = run_windows_installer(form)
-            self.respond_run_result("Windows IIS Installer", code, output)
+            title = "Windows IIS Installer"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_installer(form)
+                self.respond_run_result(title, code, output)
             return
         if self.path == "/run/windows_setup_iis":
-            code, output = run_windows_setup_only(form, "iis")
-            self.respond_run_result("Windows IIS Stack Setup", code, output)
+            title = "Windows IIS Stack Setup"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_setup_only(form, "iis", live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_setup_only(form, "iis")
+                self.respond_run_result(title, code, output)
             return
         if self.path == "/run/windows_setup_docker":
-            code, output = run_windows_setup_only(form, "docker")
-            self.respond_run_result("Windows Docker Stack Setup", code, output)
+            title = "Windows Docker Stack Setup"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_setup_only(form, "docker", live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_setup_only(form, "docker")
+                self.respond_run_result(title, code, output)
             return
         if self.path == "/run/windows_docker":
             form["DeploymentMode"] = ["Docker"]
-            code, output = run_windows_installer(form)
-            self.respond_run_result("Windows Docker Installer", code, output)
+            title = "Windows Docker Installer"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_installer(form)
+                self.respond_run_result(title, code, output)
             return
         if self.path == "/run/linux":
-            code, output = run_linux_installer(form)
-            self.respond_run_result("Linux Combined Installer", code, output)
+            title = "Linux Combined Installer"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_linux_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_linux_installer(form)
+                self.respond_run_result(title, code, output)
             return
         if self.path == "/run/linux_prereq":
             form["SOURCE_VALUE"] = [""]
-            code, output = run_linux_installer(form)
-            self.respond_run_result("Linux Prerequisites Installer", code, output)
+            title = "Linux Prerequisites Installer"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_linux_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_linux_installer(form)
+                self.respond_run_result(title, code, output)
             return
 
         self.write_html("Not found", HTTPStatus.NOT_FOUND)

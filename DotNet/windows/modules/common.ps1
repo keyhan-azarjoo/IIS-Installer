@@ -224,7 +224,12 @@ function Get-DownloadHeaders {
     $headers = @{}
     if ($SourceValue -match '^https://(github\.com|api\.github\.com|objects\.githubusercontent\.com|raw\.githubusercontent\.com)/') {
         if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
-            $GitHubToken = Read-Host "Enter GitHub token for private artifact access (leave blank for public download)"
+            if ($env:SERVER_INSTALLER_NONINTERACTIVE -eq "1") {
+                Write-Host "No GitHub token provided in non-interactive mode; continuing as public download."
+            }
+            else {
+                $GitHubToken = Read-Host "Enter GitHub token for private artifact access (leave blank for public download)"
+            }
         }
         if (-not [string]::IsNullOrWhiteSpace($GitHubToken)) {
             $headers["Authorization"] = "Bearer $GitHubToken"

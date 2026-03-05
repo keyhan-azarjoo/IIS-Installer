@@ -365,6 +365,11 @@ ENTRYPOINT ["dotnet", "$AssemblyName.dll"]
 }
 
 function Confirm-LinuxFallback {
+    if ($env:SERVER_INSTALLER_NONINTERACTIVE -eq "1") {
+        Write-Host "Non-interactive mode: trying Linux container fallback automatically."
+        return $true
+    }
+
     $answer = Read-Host "Windows container deployment is unavailable. Do you want to try Linux containers instead? (y/N)"
     if ([string]::IsNullOrWhiteSpace($answer)) {
         return $false

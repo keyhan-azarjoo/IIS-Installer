@@ -12,7 +12,8 @@ param(
     [string]$SiteName = "DotNetApp",
     [int]$SitePort = 80,
     [int]$HttpsPort = 443,
-    [int]$DockerHostPort = 8080
+    [int]$DockerHostPort = 8080,
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = "Stop"
@@ -81,7 +82,7 @@ function Install-DotNetForSelectedMode {
 
 Assert-Administrator -OriginalBoundParameters $originalBoundParameters
 
-if ([string]::IsNullOrWhiteSpace($DeploymentMode)) {
+if ([string]::IsNullOrWhiteSpace($DeploymentMode) -and -not $NonInteractive) {
     Write-Host "Choose deployment mode."
     Write-Host "1. IIS"
     Write-Host "2. Docker"
@@ -93,15 +94,35 @@ if ([string]::IsNullOrWhiteSpace($DeploymentMode)) {
         $DeploymentMode = "IIS"
     }
 }
+elseif ([string]::IsNullOrWhiteSpace($DeploymentMode) -and $NonInteractive) {
+    $DeploymentMode = "IIS"
+}
 
-$DotNetChannel = Resolve-DotNetChannel -Value $DotNetChannel
-$sourceValue = if (-not [string]::IsNullOrWhiteSpace($SourceValue)) { $SourceValue } else { Read-Host "Enter a build artifact URL, a local source folder, a local published folder, or a local published .zip path to deploy (leave blank to skip)" }
+$channelInput = if ($NonInteractive -and [string]::IsNullOrWhiteSpace($DotNetChannel)) { "8.0" } else { $DotNetChannel }
+$DotNetChannel = Resolve-DotNetChannel -Value $channelInput
+$sourceValue = if (-not [string]::IsNullOrWhiteSpace($SourceValue)) {
+    $SourceValue
+}
+elseif ($NonInteractive) {
+    ""
+}
+else {
+    Read-Host "Enter a build artifact URL, a local source folder, a local published folder, or a local published .zip path to deploy (leave blank to skip)"
+}
 if ([string]::IsNullOrWhiteSpace($sourceValue)) {
     Write-Host "Setup completed. No deployment source was provided."
     exit 0
 }
 
-$domainName = if (-not [string]::IsNullOrWhiteSpace($DomainName)) { $DomainName } else { Read-Host "Enter a domain name for the site (leave blank to auto-detect the best IP address)" }
+$domainName = if (-not [string]::IsNullOrWhiteSpace($DomainName)) {
+    $DomainName
+}
+elseif ($NonInteractive) {
+    ""
+}
+else {
+    Read-Host "Enter a domain name for the site (leave blank to auto-detect the best IP address)"
+}
 
 if ($DeploymentMode -eq "IIS") {
     Install-WindowsFeatureSet
