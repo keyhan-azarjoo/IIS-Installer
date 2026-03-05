@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$BindHost = "0.0.0.0",
+    [string]$BindHost = "auto",
     [int]$Port = 8090
 )
 

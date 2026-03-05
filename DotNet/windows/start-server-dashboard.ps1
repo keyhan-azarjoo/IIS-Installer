@@ -1,10 +1,60 @@
 [CmdletBinding()]
 param(
-    [string]$BindHost = "0.0.0.0",
+    [string]$BindHost = "auto",
     [int]$Port = 8090
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-PreferredIPv4Address {
+    $defaultRoute = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
+        Sort-Object -Property RouteMetric, InterfaceMetric |
+        Select-Object -First 1
+
+    $candidateIps = @()
+    if ($defaultRoute) {
+        $candidateIps = Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $defaultRoute.InterfaceIndex -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -ne "127.0.0.1" -and
+                $_.IPAddress -notlike "169.254.*" -and
+                $_.PrefixOrigin -ne "WellKnown"
+            } |
+            Sort-Object -Property @{ Expression = { if ($_.PrefixOrigin -eq "Manual") { 0 } else { 1 } } }, SkipAsSource
+    }
+
+    if (-not $candidateIps -or $candidateIps.Count -eq 0) {
+        $candidateIps = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -ne "127.0.0.1" -and
+                $_.IPAddress -notlike "169.254.*" -and
+                $_.PrefixOrigin -ne "WellKnown"
+            } |
+            Sort-Object -Property @{ Expression = { if ($_.PrefixOrigin -eq "Manual") { 0 } else { 1 } } }, InterfaceMetric, SkipAsSource
+    }
+
+    $ipFromNetAdapter = $candidateIps | Select-Object -First 1
+    if ($ipFromNetAdapter -and -not [string]::IsNullOrWhiteSpace($ipFromNetAdapter.IPAddress)) {
+        return $ipFromNetAdapter.IPAddress
+    }
+
+    try {
+        $socket = New-Object System.Net.Sockets.Socket([System.Net.Sockets.AddressFamily]::InterNetwork, [System.Net.Sockets.SocketType]::Dgram, [System.Net.Sockets.ProtocolType]::Udp)
+        $socket.Connect("8.8.8.8", 53)
+        $localIp = $socket.LocalEndPoint.Address.ToString()
+        $socket.Close()
+        if (-not [string]::IsNullOrWhiteSpace($localIp)) {
+            return $localIp
+        }
+    }
+    catch {
+    }
+
+    return "127.0.0.1"
+}
+
+if ([string]::IsNullOrWhiteSpace($BindHost) -or $BindHost -eq "auto" -or $BindHost -eq "0.0.0.0") {
+    $BindHost = Get-PreferredIPv4Address
+}
 
 function Ensure-ServerInstallerFiles {
     $installRoot = Join-Path $env:ProgramData "Server-Installer"
@@ -59,9 +109,7 @@ $argsList += @("--port", "$Port")
 
 Write-Host "Starting dashboard..."
 Write-Host "Local URL: http://127.0.0.1:$Port"
-if ($BindHost -ne "127.0.0.1" -and $BindHost -ne "localhost") {
-    Write-Host "Bind address: http://$BindHost`:$Port"
-}
+Write-Host "Server URL: http://$BindHost`:$Port"
 Push-Location $installRoot
 try {
     & $pythonCommand @argsList
