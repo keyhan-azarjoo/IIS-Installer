@@ -4,6 +4,7 @@ import html
 import ipaddress
 import os
 import secrets
+import socket
 import subprocess
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -437,7 +438,21 @@ def main():
     args = parser.parse_args()
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Dashboard started at http://{args.host}:{args.port}")
+    urls = [f"http://127.0.0.1:{args.port}"]
+    if args.host not in ("127.0.0.1", "localhost"):
+        try:
+            for addr in socket.gethostbyname_ex(socket.gethostname())[2]:
+                if addr.startswith("127."):
+                    continue
+                candidate = f"http://{addr}:{args.port}"
+                if candidate not in urls:
+                    urls.append(candidate)
+        except Exception:
+            pass
+
+    print("Dashboard URLs:")
+    for url in urls:
+        print(f"- {url}")
     print("Localhost access: no login required.")
     print("Remote access: requires OS username/password of this computer.")
     try:

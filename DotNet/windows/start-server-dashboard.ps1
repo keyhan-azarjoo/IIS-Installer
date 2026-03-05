@@ -57,7 +57,11 @@ $argsList += $dashboardScript
 $argsList += @("--host", $BindHost)
 $argsList += @("--port", "$Port")
 
-Write-Host "Starting dashboard on http://$BindHost`:$Port"
+Write-Host "Starting dashboard..."
+Write-Host "Local URL: http://127.0.0.1:$Port"
+if ($BindHost -ne "127.0.0.1" -and $BindHost -ne "localhost") {
+    Write-Host "Bind address: http://$BindHost`:$Port"
+}
 Push-Location $installRoot
 try {
     & $pythonCommand @argsList
