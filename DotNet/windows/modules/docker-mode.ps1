@@ -1,22 +1,65 @@
 Set-StrictMode -Version Latest
 
-function Ensure-WindowsContainersFeature {
-    $feature = Get-WindowsOptionalFeature -Online -FeatureName "Containers" -ErrorAction SilentlyContinue
+function Enable-WindowsOptionalFeatureIfAvailable {
+    param([Parameter(Mandatory = $true)][string]$FeatureName)
+
+    $feature = Get-WindowsOptionalFeature -Online -FeatureName $FeatureName -ErrorAction SilentlyContinue
     if (-not $feature) {
-        return
+        return @{
+            Available = $false
+            RestartNeeded = $false
+        }
     }
 
     if ($feature.State -eq "Enabled") {
-        Write-Host "Windows Containers feature already enabled."
-        return
+        Write-Host "Windows feature already enabled: $FeatureName"
+        return @{
+            Available = $true
+            RestartNeeded = $false
+        }
     }
 
-    Write-Host "Enabling Windows Containers feature"
-    Enable-WindowsOptionalFeature -Online -FeatureName "Containers" -All -NoRestart | Out-Null
+    Write-Host "Enabling Windows feature: $FeatureName"
+    $result = Enable-WindowsOptionalFeature -Online -FeatureName $FeatureName -All -NoRestart
+    $needsRestart = $result -and ($result.RestartNeeded -eq $true)
+    return @{
+        Available = $true
+        RestartNeeded = $needsRestart
+    }
+}
+
+function Ensure-WindowsContainerRuntimeReady {
+    $restartNeeded = $false
+    $containersFeature = Enable-WindowsOptionalFeatureIfAvailable -FeatureName "Containers"
+    if (-not $containersFeature.Available) {
+        throw "Windows Containers feature is unavailable on this host."
+    }
+    if ($containersFeature.RestartNeeded) {
+        $restartNeeded = $true
+    }
+
+    $hypervResult = Enable-WindowsOptionalFeatureIfAvailable -FeatureName "Microsoft-Hyper-V-All"
+    if (-not $hypervResult.Available) {
+        $hypervResult = Enable-WindowsOptionalFeatureIfAvailable -FeatureName "Microsoft-Hyper-V"
+    }
+    if ($hypervResult.Available -and $hypervResult.RestartNeeded) {
+        $restartNeeded = $true
+    }
+
+    foreach ($serviceName in @("hns", "vmcompute")) {
+        $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        if ($service -and $service.Status -ne "Running") {
+            Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($restartNeeded) {
+        throw "Windows container features were enabled/updated. Restart the machine and rerun deployment."
+    }
 }
 
 function Install-DockerWithMicrosoftScript {
-    Ensure-WindowsContainersFeature
+    Ensure-WindowsContainerRuntimeReady
     $installScriptPath = Join-Path $env:TEMP "install-docker-ce.ps1"
     $installScriptUrl = "https://raw.githubusercontent.com/microsoft/Windows-Containers/Main/helpful_tools/Install-DockerCE/install-docker-ce.ps1"
 
@@ -45,6 +88,8 @@ function Install-DockerWithMicrosoftScript {
 }
 
 function Ensure-DockerInstalled {
+    Ensure-WindowsContainerRuntimeReady
+
     if (Test-Command -Name "docker") {
         return
     }
