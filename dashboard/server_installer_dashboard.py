@@ -271,22 +271,22 @@ button{{background:#0f766e;color:#fff;border:0;padding:10px 14px;border-radius:8
 
 
 def page_dashboard(message=""):
-    msg = (
-        f"<div class='flash'>{html.escape(message)}</div>" if message else ""
-    )
+    msg = f"<div class='flash'>{html.escape(message)}</div>" if message else ""
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Server Installer Dashboard</title>
 <style>
 *{{box-sizing:border-box}}
-body{{font-family:"Segoe UI",Arial,sans-serif;background:linear-gradient(180deg,#f3f6fc,#eef3fb);margin:0;color:#0f172a}}
+body{{font-family:"Segoe UI",Arial,sans-serif;background:linear-gradient(180deg,#f3f6fc,#eef3fb);margin:0;color:#0f172a;overflow-x:hidden}}
 .layout{{display:grid;grid-template-columns:280px 1fr;min-height:100vh}}
-.sidebar{{background:linear-gradient(180deg,#0b1f3a,#102b4f);color:#e8eef9;padding:22px 18px;border-right:1px solid rgba(255,255,255,.08)}}
+.sidebar{{background:linear-gradient(180deg,#0b1f3a,#102b4f);color:#e8eef9;padding:22px 18px;border-right:1px solid rgba(255,255,255,.08);position:relative;z-index:30;transition:transform .2s ease}}
 .brand{{font-size:22px;font-weight:700;margin-bottom:18px;letter-spacing:.2px}}
 .navgroup{{margin-bottom:14px}}
 .navtitle{{font-size:12px;text-transform:uppercase;opacity:.75;margin-bottom:8px}}
-.navitem{{padding:11px 12px;margin:7px 0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);border-radius:10px;font-size:14px}}
+.navitem{{padding:11px 12px;margin:7px 0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);border-radius:10px;font-size:14px;cursor:pointer}}
+.navitem.active{{background:#1d4ed8}}
+.navlink{{display:block;text-decoration:none;color:#e8eef9}}
 .main{{padding:26px}}
-.header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}}
+.header{{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px}}
 .title{{font-size:30px;font-weight:700}}
 .subtitle{{font-size:14px;color:#475569}}
 .flash{{padding:12px 14px;background:#ecfdf3;border:1px solid #86efac;border-radius:10px;margin-bottom:16px;color:#14532d}}
@@ -300,123 +300,230 @@ input,select{{width:100%;padding:10px;margin-top:6px;margin-bottom:10px;border:1
 button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:9px;font-weight:600;cursor:pointer}}
 .btn-secondary{{background:#0f766e}}
 .btn-dark{{background:#1e293b}}
-.onecol{{grid-template-columns:1fr}}
-.section{{scroll-margin-top:16px}}
-.terminal{{background:#0d1117;color:#c9d1d9;border-radius:12px;border:1px solid #1f2937;padding:12px;height:340px;overflow:auto;white-space:pre-wrap;font-family:Consolas,monospace;font-size:12px}}
-.term-title{{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}}
-.term-badge{{font-size:12px;color:#94a3b8}}
-.navlink{{display:block;text-decoration:none;color:#e8eef9}}
-@media (max-width:1100px){{.layout{{grid-template-columns:1fr}}.sidebar{{padding-bottom:10px}}.row{{grid-template-columns:1fr}}}}
+.btn-outline{{background:#fff;color:#1e293b;border:1px solid #cbd5e1}}
+.view{{display:none}}
+.view.active{{display:block}}
+.sidebar-toggle{{display:none}}
+.sidebar-close{{display:none}}
+.backdrop{{display:none}}
+.terminal-panel{{position:fixed;right:22px;bottom:22px;width:620px;max-width:calc(100vw - 32px);z-index:60;border:1px solid #1f2937;background:#0d1117;border-radius:12px;box-shadow:0 20px 40px rgba(2,6,23,.5)}}
+.terminal-header{{cursor:move;user-select:none;padding:10px 12px;border-bottom:1px solid #1f2937;color:#cbd5e1;display:flex;justify-content:space-between;align-items:center;background:#111827;border-radius:12px 12px 0 0}}
+.terminal-title{{font-size:13px;font-weight:600}}
+.terminal-state{{font-size:12px;color:#93c5fd}}
+.terminal-controls button{{padding:6px 8px;margin-left:6px;font-size:12px}}
+.terminal-body{{height:320px;overflow:auto;padding:10px 12px;white-space:pre-wrap;font-family:Consolas,monospace;color:#c9d1d9;font-size:12px}}
+.terminal-hidden .terminal-body{{display:none}}
+.terminal-hidden{{width:280px}}
+@media (max-width:1100px) {{
+  .layout{{grid-template-columns:1fr}}
+  .row{{grid-template-columns:1fr}}
+  .sidebar{{position:fixed;left:0;top:0;bottom:0;width:280px;transform:translateX(-100%)}}
+  .sidebar.open{{transform:translateX(0)}}
+  .sidebar-toggle{{display:inline-block}}
+  .sidebar-close{{display:inline-block}}
+  .backdrop.show{{display:block;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:20}}
+}}
 </style></head>
-<body><div class="layout">
-<div class="sidebar">
-<div class="brand">Server Installer</div>
-<div class="navgroup">
-  <div class="navtitle">Installers</div>
-  <div class="navitem"><a class="navlink" href="#windows-separate">Windows Separate Setup</a></div>
-  <div class="navitem"><a class="navlink" href="#windows-deploy">Windows Deployment</a></div>
-  <div class="navitem"><a class="navlink" href="#linux-deploy">Linux Deployment</a></div>
-  <div class="navitem"><a class="navlink" href="#web-terminal">Web Terminal</a></div>
-</div>
-<div class="navgroup">
-  <div class="navtitle">Scope</div>
-  <div class="navitem"><a class="navlink" href="#windows-separate">IIS / Docker / DotNet</a></div>
-  <div class="navitem"><a class="navlink" href="#linux-deploy">Nginx / DotNet Runtime</a></div>
-</div>
-</div>
-<div class="main">
-<div class="header">
-  <div>
-    <div class="title">Server Installer Control Center</div>
-    <div class="subtitle">Professional deployment and server setup workflows from one dashboard.</div>
-  </div>
-</div>
-{msg}
-<div class="row section" id="windows-deploy">
-<div class="card">
-<h3>Windows Combined (.NET + IIS/Docker)</h3>
-<p>Run full deployment on Windows with all deployment options.</p>
-<form method="post" action="/run/windows" class="run-form" data-title="Windows Combined Installer">
-<label>Deployment Mode</label><select name="DeploymentMode"><option>IIS</option><option>Docker</option></select>
-<label>.NET Channel</label><input name="DotNetChannel" value="8.0">
-<label>Source Path or URL</label><input name="SourceValue" placeholder="D:\\app\\published or https://..." required>
-<label>Domain Name</label><input name="DomainName">
-<label>Site Name</label><input name="SiteName" value="DotNetApp">
-<label>HTTP Port</label><input name="SitePort" value="80">
-<label>HTTPS Port</label><input name="HttpsPort" value="443">
-<label>Docker Host Port</label><input name="DockerHostPort" value="8080">
-<button type="submit">Run Windows Installer</button>
-</form>
-</div>
-<div class="card section" id="windows-separate">
-<h3>Windows Separate Installers</h3>
-<p>Install only the part you need: IIS stack or Docker stack.</p>
-<form method="post" action="/run/windows_setup_iis" class="run-form" data-title="Windows IIS Stack Setup">
-<label>.NET Channel</label><input name="DotNetChannel" value="8.0">
-<button class="btn-secondary" type="submit">Install IIS Stack Only</button>
-</form>
-<div class="divider"></div>
-<form method="post" action="/run/windows_setup_docker" class="run-form" data-title="Windows Docker Stack Setup">
-<label>.NET Channel</label><input name="DotNetChannel" value="8.0">
-<button class="btn-dark" type="submit">Install Docker Stack Only</button>
-</form>
-<div class="divider"></div>
-<form method="post" action="/run/windows_iis" class="run-form" data-title="Windows IIS Deployment">
-<label>Source Path or URL</label><input name="SourceValue" required>
-<label>.NET Channel</label><input name="DotNetChannel" value="8.0">
-<button type="submit">Install IIS Mode</button>
-</form>
-<div class="divider"></div>
-<form method="post" action="/run/windows_docker" class="run-form" data-title="Windows Docker Deployment">
-<label>Source Path or URL</label><input name="SourceValue" required>
-<label>.NET Channel</label><input name="DotNetChannel" value="8.0">
-<label>Docker Host Port</label><input name="DockerHostPort" value="8080">
-<button type="submit">Install Docker Mode</button>
-</form>
-</div>
-</div>
-<div class="row section" id="linux-deploy" style="margin-top:16px">
-<div class="card">
-<h3>Linux Combined (.NET + Nginx)</h3>
-<p>Run Linux deployment pipeline with application and web proxy setup.</p>
-<form method="post" action="/run/linux" class="run-form" data-title="Linux Combined Installer">
-<label>.NET Channel</label><input name="DOTNET_CHANNEL" value="8.0">
-<label>Source Path or URL</label><input name="SOURCE_VALUE" placeholder="/srv/app or https://..." required>
-<label>Domain Name</label><input name="DOMAIN_NAME">
-<label>Service Name</label><input name="SERVICE_NAME" value="dotnet-app">
-<label>Service Port</label><input name="SERVICE_PORT" value="5000">
-<label>HTTP Port</label><input name="HTTP_PORT" value="80">
-<label>HTTPS Port</label><input name="HTTPS_PORT" value="443">
-<button type="submit">Run Linux Installer</button>
-</form>
-</div>
-<div class="card">
-<h3>Linux DotNet Prerequisites</h3>
-<p>Install base runtime and prerequisites without deploying app payload.</p>
-<form method="post" action="/run/linux_prereq" class="run-form" data-title="Linux Prerequisites Installer">
-<label>.NET Channel</label><input name="DOTNET_CHANNEL" value="8.0">
-<button type="submit">Install Linux Prerequisites Only</button>
-</form>
-</div>
-</div>
-<div class="row onecol section" id="web-terminal">
-  <div class="card">
-    <div class="term-title">
-      <h3 style="margin:0">Web Terminal</h3>
-      <span id="termState" class="term-badge">Idle</span>
+<body>
+<div id="backdrop" class="backdrop"></div>
+<div class="layout">
+  <aside id="sidebar" class="sidebar">
+    <div class="header" style="margin-bottom:12px">
+      <div class="brand">DotNet Installer</div>
+      <button id="closeSidebarBtn" class="btn-outline sidebar-close" type="button">Close</button>
     </div>
-    <div id="terminal" class="terminal">Ready. Click any installer button to run and stream output here.</div>
-  </div>
+    <div class="navgroup">
+      <div class="navtitle">Pages</div>
+      <div class="navitem active" data-view="view-home"><a class="navlink" href="#">Dashboard</a></div>
+      <div class="navitem" data-view="view-win-setup"><a class="navlink" href="#">Windows Setup</a></div>
+      <div class="navitem" data-view="view-win-deploy"><a class="navlink" href="#">Windows Deploy</a></div>
+      <div class="navitem" data-view="view-linux"><a class="navlink" href="#">Linux Deploy</a></div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="header">
+      <div>
+        <div class="title">DotNet Control Center</div>
+        <div class="subtitle">Choose a page from sidebar. Actions run with live logs in draggable terminal.</div>
+      </div>
+      <button id="openSidebarBtn" class="btn-outline sidebar-toggle" type="button">Menu</button>
+    </div>
+    {msg}
+
+    <section id="view-home" class="view active">
+      <div class="card">
+        <h3>Dashboard</h3>
+        <p>Use sidebar pages to manage Windows setup/deployment and Linux deployment. Open Web Terminal from the floating panel.</p>
+      </div>
+    </section>
+
+    <section id="view-win-setup" class="view">
+      <div class="row">
+        <div class="card">
+          <h3>Windows IIS Stack Setup</h3>
+          <p>Install IIS features + .NET prerequisites only.</p>
+          <form method="post" action="/run/windows_setup_iis" class="run-form" data-title="Windows IIS Stack Setup">
+            <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
+            <button class="btn-secondary" type="submit">Install IIS Stack Only</button>
+          </form>
+        </div>
+        <div class="card">
+          <h3>Windows Docker Stack Setup</h3>
+          <p>Install Docker stack prerequisites only.</p>
+          <form method="post" action="/run/windows_setup_docker" class="run-form" data-title="Windows Docker Stack Setup">
+            <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
+            <button class="btn-dark" type="submit">Install Docker Stack Only</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-win-deploy" class="view">
+      <div class="row">
+        <div class="card">
+          <h3>Windows Combined Deploy</h3>
+          <p>Deploy app to IIS or Docker from one form.</p>
+          <form method="post" action="/run/windows" class="run-form" data-title="Windows Combined Installer">
+            <label>Deployment Mode</label><select name="DeploymentMode"><option>IIS</option><option>Docker</option></select>
+            <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
+            <label>Source Path or URL</label><input name="SourceValue" placeholder="D:\\app\\published or https://..." required>
+            <label>Domain Name</label><input name="DomainName">
+            <label>Site Name</label><input name="SiteName" value="DotNetApp">
+            <label>HTTP Port</label><input name="SitePort" value="80">
+            <label>HTTPS Port</label><input name="HttpsPort" value="443">
+            <label>Docker Host Port</label><input name="DockerHostPort" value="8080">
+            <button type="submit">Run Combined Deploy</button>
+          </form>
+        </div>
+        <div class="card">
+          <h3>Windows Separate Deploy</h3>
+          <p>Deploy directly to one target.</p>
+          <form method="post" action="/run/windows_iis" class="run-form" data-title="Windows IIS Deployment">
+            <label>Source Path or URL</label><input name="SourceValue" required>
+            <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
+            <button type="submit">Deploy to IIS</button>
+          </form>
+          <div class="divider"></div>
+          <form method="post" action="/run/windows_docker" class="run-form" data-title="Windows Docker Deployment">
+            <label>Source Path or URL</label><input name="SourceValue" required>
+            <label>.NET Channel</label><input name="DotNetChannel" value="8.0">
+            <label>Docker Host Port</label><input name="DockerHostPort" value="8080">
+            <button type="submit">Deploy to Docker</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-linux" class="view">
+      <div class="row">
+        <div class="card">
+          <h3>Linux Combined Deploy</h3>
+          <p>Deploy app and configure Nginx + service.</p>
+          <form method="post" action="/run/linux" class="run-form" data-title="Linux Combined Installer">
+            <label>.NET Channel</label><input name="DOTNET_CHANNEL" value="8.0">
+            <label>Source Path or URL</label><input name="SOURCE_VALUE" placeholder="/srv/app or https://..." required>
+            <label>Domain Name</label><input name="DOMAIN_NAME">
+            <label>Service Name</label><input name="SERVICE_NAME" value="dotnet-app">
+            <label>Service Port</label><input name="SERVICE_PORT" value="5000">
+            <label>HTTP Port</label><input name="HTTP_PORT" value="80">
+            <label>HTTPS Port</label><input name="HTTPS_PORT" value="443">
+            <button type="submit">Run Linux Deploy</button>
+          </form>
+        </div>
+        <div class="card">
+          <h3>Linux Prerequisites</h3>
+          <p>Install runtime and required packages only.</p>
+          <form method="post" action="/run/linux_prereq" class="run-form" data-title="Linux Prerequisites Installer">
+            <label>.NET Channel</label><input name="DOTNET_CHANNEL" value="8.0">
+            <button type="submit">Install Linux Prerequisites</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
-</div></div>
+
+<div id="terminalPanel" class="terminal-panel">
+  <div id="terminalHeader" class="terminal-header">
+    <div>
+      <div class="terminal-title">Web Terminal</div>
+      <div id="termState" class="terminal-state">Idle</div>
+    </div>
+    <div class="terminal-controls">
+      <button id="toggleTerminalBtn" class="btn-outline" type="button">Minimize</button>
+    </div>
+  </div>
+  <div id="terminal" class="terminal-body">Ready. Click any installer button to run and stream output here.</div>
+</div>
+
 <script>
+const sidebar = document.getElementById("sidebar");
+const backdrop = document.getElementById("backdrop");
+const openSidebarBtn = document.getElementById("openSidebarBtn");
+const closeSidebarBtn = document.getElementById("closeSidebarBtn");
+const navItems = Array.from(document.querySelectorAll(".navitem[data-view]"));
+const views = Array.from(document.querySelectorAll(".view"));
 const terminalEl = document.getElementById("terminal");
 const termState = document.getElementById("termState");
+const terminalPanel = document.getElementById("terminalPanel");
+const terminalHeader = document.getElementById("terminalHeader");
+const toggleTerminalBtn = document.getElementById("toggleTerminalBtn");
+
 function appendTerminal(text) {{
   terminalEl.textContent += (terminalEl.textContent ? "\\n" : "") + text;
   terminalEl.scrollTop = terminalEl.scrollHeight;
 }}
 function setState(text) {{ termState.textContent = text; }}
+
+function openSidebar() {{
+  sidebar.classList.add("open");
+  backdrop.classList.add("show");
+}}
+function closeSidebar() {{
+  sidebar.classList.remove("open");
+  backdrop.classList.remove("show");
+}}
+if (openSidebarBtn) openSidebarBtn.addEventListener("click", openSidebar);
+if (closeSidebarBtn) closeSidebarBtn.addEventListener("click", closeSidebar);
+backdrop.addEventListener("click", closeSidebar);
+
+function activateView(viewId) {{
+  views.forEach(v => v.classList.toggle("active", v.id === viewId));
+  navItems.forEach(n => n.classList.toggle("active", n.dataset.view === viewId));
+}}
+navItems.forEach(item => {{
+  item.addEventListener("click", (e) => {{
+    e.preventDefault();
+    activateView(item.dataset.view);
+    closeSidebar();
+  }});
+}});
+
+let drag = {{ active:false, x:0, y:0, left:0, top:0 }};
+terminalHeader.addEventListener("mousedown", (e) => {{
+  drag.active = true;
+  const rect = terminalPanel.getBoundingClientRect();
+  drag.x = e.clientX; drag.y = e.clientY;
+  drag.left = rect.left; drag.top = rect.top;
+  terminalPanel.style.left = rect.left + "px";
+  terminalPanel.style.top = rect.top + "px";
+  terminalPanel.style.right = "auto";
+  terminalPanel.style.bottom = "auto";
+}});
+document.addEventListener("mousemove", (e) => {{
+  if (!drag.active) return;
+  const dx = e.clientX - drag.x;
+  const dy = e.clientY - drag.y;
+  terminalPanel.style.left = Math.max(10, drag.left + dx) + "px";
+  terminalPanel.style.top = Math.max(10, drag.top + dy) + "px";
+}});
+document.addEventListener("mouseup", () => {{ drag.active = false; }});
+
+toggleTerminalBtn.addEventListener("click", () => {{
+  terminalPanel.classList.toggle("terminal-hidden");
+  toggleTerminalBtn.textContent = terminalPanel.classList.contains("terminal-hidden") ? "Expand" : "Minimize";
+}});
+
 document.querySelectorAll(".run-form").forEach((form) => {{
   form.addEventListener("submit", async (e) => {{
     e.preventDefault();
@@ -439,7 +546,6 @@ document.querySelectorAll(".run-form").forEach((form) => {{
         setState("Idle");
         return;
       }}
-
       let offset = 0;
       const interval = setInterval(async () => {{
         try {{
@@ -447,9 +553,7 @@ document.querySelectorAll(".run-form").forEach((form) => {{
             headers: {{ "X-Requested-With": "fetch" }}
           }});
           const state = await stateRes.json();
-          if (state.output) {{
-            appendTerminal(state.output);
-          }}
+          if (state.output) appendTerminal(state.output);
           offset = state.next_offset || offset;
           if (state.done) {{
             appendTerminal("[" + new Date().toLocaleTimeString() + "] " + title + " finished (exit " + state.exit_code + ")");
