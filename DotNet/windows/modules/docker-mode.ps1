@@ -116,11 +116,33 @@ function Install-DockerDesktop {
         Write-Host "Downloading Docker Desktop installer"
         Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
 
-        Write-Host "Installing Docker Desktop from downloaded installer"
-        $installerProcess = Start-Process -FilePath $installerPath -ArgumentList "install --quiet" -Wait -PassThru
-        if ($installerProcess.ExitCode -ne 0) {
-            throw "Docker Desktop installer failed with exit code $($installerProcess.ExitCode)."
+        $argumentSets = @(
+            "install --quiet --accept-license --always-run-service",
+            "install --quiet"
+        )
+
+        foreach ($arguments in $argumentSets) {
+            Write-Host "Installing Docker Desktop from downloaded installer ($arguments)"
+            $installerProcess = Start-Process -FilePath $installerPath -ArgumentList $arguments -Wait -PassThru
+            if ($installerProcess.ExitCode -eq 0) {
+                return
+            }
+
+            if (Test-DockerDesktopInstalled) {
+                Write-Host "Docker Desktop appears installed despite installer exit code $($installerProcess.ExitCode)."
+                return
+            }
         }
+
+        throw "Docker Desktop installer failed. Check Docker Desktop install logs under %LocalAppData%\\Docker."
+    }
+    catch {
+        if (Test-DockerDesktopInstalled) {
+            Write-Host "Docker Desktop appears installed despite installer error."
+            return
+        }
+
+        throw
     }
     finally {
         Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
