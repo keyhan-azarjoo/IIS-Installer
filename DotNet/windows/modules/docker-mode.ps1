@@ -319,9 +319,16 @@ function Ensure-DockerInstalled {
 }
 
 function Get-DockerRuntimeTag {
-    param([Parameter(Mandatory = $true)][string]$DotNetChannel)
+    param(
+        [Parameter(Mandatory = $true)][string]$DotNetChannel,
+        [Parameter(Mandatory = $true)][ValidateSet("windows", "linux")][string]$EngineOsType
+    )
 
     $majorVersion = Get-DotNetMajorVersion -Channel $DotNetChannel
+    if ($EngineOsType -eq "linux") {
+        return "$majorVersion.0"
+    }
+
     $windowsBuild = [System.Environment]::OSVersion.Version.Build
 
     if ($windowsBuild -ge 20348) {
@@ -339,11 +346,12 @@ function Write-Dockerfile {
     param(
         [Parameter(Mandatory = $true)][string]$ContentPath,
         [Parameter(Mandatory = $true)][string]$AssemblyName,
-        [Parameter(Mandatory = $true)][string]$DotNetChannel
+        [Parameter(Mandatory = $true)][string]$DotNetChannel,
+        [Parameter(Mandatory = $true)][ValidateSet("windows", "linux")][string]$EngineOsType
     )
 
     $dockerfilePath = Join-Path $ContentPath "Dockerfile.generated"
-    $runtimeTag = Get-DockerRuntimeTag -DotNetChannel $DotNetChannel
+    $runtimeTag = Get-DockerRuntimeTag -DotNetChannel $DotNetChannel -EngineOsType $EngineOsType
     $content = @"
 FROM mcr.microsoft.com/dotnet/aspnet:$runtimeTag
 WORKDIR /app
@@ -354,6 +362,15 @@ ENTRYPOINT ["dotnet", "$AssemblyName.dll"]
 "@
     Set-Content -Path $dockerfilePath -Value $content -Encoding UTF8
     return $dockerfilePath
+}
+
+function Confirm-LinuxFallback {
+    $answer = Read-Host "Windows container deployment is unavailable. Do you want to try Linux containers instead? (y/N)"
+    if ([string]::IsNullOrWhiteSpace($answer)) {
+        return $false
+    }
+
+    return $answer.Trim().ToLowerInvariant() -in @("y", "yes")
 }
 
 function Invoke-DockerDeployment {
@@ -368,10 +385,38 @@ function Invoke-DockerDeployment {
 
     Ensure-DockerInstalled
     $engineOsType = Get-DockerEngineOsType
-    if ($engineOsType -ne "windows") {
-        throw "Docker engine must be set to Windows containers. Current engine: '$engineOsType'. Switch Docker Desktop to Windows containers and rerun."
+    if ($engineOsType -eq "windows") {
+        try {
+            Ensure-WindowsContainerRuntimeReady
+        }
+        catch {
+            Write-Host "Windows container prerequisites are not available: $($_.Exception.Message)"
+            if (-not (Confirm-LinuxFallback)) {
+                throw "Windows container prerequisites are missing. Docker mode was not switched to Linux because user declined."
+            }
+
+            $switchedToLinux = Switch-DockerEngineToLinux
+            if (-not $switchedToLinux -and -not (Test-DockerDesktopInstalled)) {
+                Install-DockerDesktop
+                $switchedToLinux = Switch-DockerEngineToLinux
+            }
+            if (-not $switchedToLinux) {
+                throw "Windows container prerequisites are missing and Docker could not be switched to Linux engine automatically."
+            }
+
+            $engineOsType = Get-DockerEngineOsType
+            if ($engineOsType -ne "linux") {
+                throw "Docker engine switch was attempted, but Linux engine is still unavailable."
+            }
+            Write-Host "Docker engine switched to Linux containers."
+        }
     }
-    Ensure-WindowsContainerRuntimeReady
+    elseif ($engineOsType -eq "linux") {
+        Write-Host "Docker engine is already Linux."
+    }
+    else {
+        throw "Unable to detect Docker engine OS type. Ensure Docker Desktop/Engine is running."
+    }
 
     $deploymentRoot = Join-Path $env:ProgramData "IIS-Installer\docker"
     $targetPath = Join-Path $deploymentRoot $PackageName
@@ -380,7 +425,7 @@ function Invoke-DockerDeployment {
 
     $assemblyPath = Find-ApplicationAssembly -DeploymentPath $targetPath
     $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)
-    $dockerfilePath = Write-Dockerfile -ContentPath (Split-Path -Path $assemblyPath -Parent) -AssemblyName $assemblyName -DotNetChannel $DotNetChannel
+    $dockerfilePath = Write-Dockerfile -ContentPath (Split-Path -Path $assemblyPath -Parent) -AssemblyName $assemblyName -DotNetChannel $DotNetChannel -EngineOsType $engineOsType
 
     $imageName = ("{0}:latest" -f ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-'))
     $containerName = ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-')
@@ -402,9 +447,14 @@ function Invoke-DockerDeployment {
         throw "docker build failed."
     }
 
-    # Prefer process isolation first when the image matches the host; fall back to Hyper-V
-    # if process isolation is unsupported on the current machine.
-    $runAttempts = @("process", "hyperv")
+    if ($engineOsType -eq "windows") {
+        # Prefer process isolation first when the image matches the host; fall back to Hyper-V
+        # if process isolation is unsupported on the current machine.
+        $runAttempts = @("process", "hyperv")
+    }
+    else {
+        $runAttempts = @($null)
+    }
 
     $runSucceeded = $false
     foreach ($isolation in $runAttempts) {
