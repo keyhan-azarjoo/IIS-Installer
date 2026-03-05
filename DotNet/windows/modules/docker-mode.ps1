@@ -99,15 +99,31 @@ function Test-DockerDesktopInstalled {
     return $false
 }
 
-function Install-DockerDesktopWithWinget {
-    if (-not (Test-Command -Name "winget")) {
-        throw "Docker Desktop is required to switch to Linux containers automatically, but winget is unavailable."
+function Install-DockerDesktop {
+    if (Test-Command -Name "winget") {
+        Write-Host "Installing Docker Desktop with winget"
+        $process = Start-Process -FilePath "winget" -ArgumentList "install --id Docker.DockerDesktop --exact --accept-package-agreements --accept-source-agreements --silent" -Wait -PassThru -NoNewWindow
+        if ($process.ExitCode -eq 0) {
+            return
+        }
+
+        Write-Host "winget install failed with exit code $($process.ExitCode). Trying direct installer download."
     }
 
-    Write-Host "Installing Docker Desktop with winget"
-    $process = Start-Process -FilePath "winget" -ArgumentList "install --id Docker.DockerDesktop --exact --accept-package-agreements --accept-source-agreements --silent" -Wait -PassThru -NoNewWindow
-    if ($process.ExitCode -ne 0) {
-        throw "Docker Desktop installation failed with exit code $($process.ExitCode)."
+    $installerPath = Join-Path $env:TEMP "DockerDesktopInstaller.exe"
+    $installerUrl = "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
+    try {
+        Write-Host "Downloading Docker Desktop installer"
+        Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
+
+        Write-Host "Installing Docker Desktop from downloaded installer"
+        $installerProcess = Start-Process -FilePath $installerPath -ArgumentList "install --quiet" -Wait -PassThru
+        if ($installerProcess.ExitCode -ne 0) {
+            throw "Docker Desktop installer failed with exit code $($installerProcess.ExitCode)."
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -338,7 +354,7 @@ function Invoke-DockerDeployment {
             Write-Host "Windows container prerequisites are not available: $($_.Exception.Message)"
             $switchedToLinux = Switch-DockerEngineToLinux
             if (-not $switchedToLinux -and -not (Test-DockerDesktopInstalled)) {
-                Install-DockerDesktopWithWinget
+                Install-DockerDesktop
                 $switchedToLinux = Switch-DockerEngineToLinux
             }
             if (-not $switchedToLinux) {
