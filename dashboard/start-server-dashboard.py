@@ -35,11 +35,18 @@ def ensure_files(root: Path) -> None:
     for rel in REQUIRED_FILES:
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            continue
         url = f"{REPO}/{rel}"
-        print(f"Downloading required file: {rel}")
-        urllib.request.urlretrieve(url, target)
+        tmp_target = target.with_suffix(target.suffix + ".download")
+        try:
+            print(f"Syncing required file: {rel}")
+            urllib.request.urlretrieve(url, tmp_target)
+            os.replace(tmp_target, target)
+        except Exception as ex:
+            if tmp_target.exists():
+                tmp_target.unlink(missing_ok=True)
+            if not target.exists():
+                raise RuntimeError(f"Failed to download required file '{rel}': {ex}") from ex
+            print(f"Warning: using cached file for {rel} ({ex})")
 
 
 def preferred_host(arg_host: str) -> str:

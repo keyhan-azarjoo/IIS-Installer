@@ -22,7 +22,7 @@ foreach ($entry in $PSBoundParameters.GetEnumerator()) {
     $originalBoundParameters[$entry.Key] = $entry.Value
 }
 
-$moduleRoot = Join-Path $env:ProgramData "Server-Installer\modules"
+$moduleRoot = Join-Path $env:TEMP ("server-installer-modules-" + [System.Guid]::NewGuid().ToString("N"))
 function Ensure-LocalWindowsModules {
     param([Parameter(Mandatory = $true)][string]$ModuleRoot)
 
@@ -34,7 +34,16 @@ function Ensure-LocalWindowsModules {
         $targetPath = Join-Path $ModuleRoot $fileName
         $uri = "$baseUrl/$fileName"
         Write-Host "Downloading Windows module: $fileName"
-        Invoke-WebRequest -Uri $uri -OutFile $targetPath
+        try {
+            Invoke-WebRequest -Uri $uri -OutFile $targetPath
+        }
+        catch [System.IO.IOException] {
+            if (Test-Path -LiteralPath $targetPath) {
+                Write-Host "Module file in use; reusing existing copy: $fileName"
+                continue
+            }
+            throw
+        }
     }
 }
 
@@ -127,4 +136,5 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $moduleRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
