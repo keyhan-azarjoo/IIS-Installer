@@ -3,6 +3,7 @@ import argparse
 import ctypes
 import os
 import platform
+import socket
 import subprocess
 import sys
 import urllib.request
@@ -63,6 +64,33 @@ def preferred_host(arg_host: str) -> str:
     return "127.0.0.1"
 
 
+def can_bind(host: str, port: int):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        return True, None
+    except OSError as ex:
+        return False, ex
+    finally:
+        sock.close()
+
+
+def choose_port(bind_host: str, preferred_port: int):
+    candidates = []
+    for p in [preferred_port, 80, 443]:
+        if p and p not in candidates:
+            candidates.append(p)
+
+    diagnostics = []
+    for port in candidates:
+        ok, err = can_bind(bind_host, port)
+        if ok:
+            return port, diagnostics
+        diagnostics.append((port, err))
+    return None, diagnostics
+
+
 def is_windows_admin() -> bool:
     if os.name != "nt":
         return True
@@ -117,11 +145,26 @@ def main() -> int:
     bind_host = args.host
     if (not bind_host) or bind_host in ("auto", "0.0.0.0"):
         bind_host = "0.0.0.0"
-    print(f"OS detected: {platform.system()}")
-    print(f"Dashboard URL: http://{display_host}:{args.port}")
-    print(f"Local URL: http://127.0.0.1:{args.port}")
 
-    cmd = [sys.executable, str(app), "--host", bind_host, "--port", str(args.port)]
+    selected_port, diagnostics = choose_port(bind_host, args.port)
+    if selected_port is None:
+        print("No usable port found for dashboard startup.", file=sys.stderr)
+        for port, err in diagnostics:
+            print(f"- Port {port}: {err}", file=sys.stderr)
+        print("Port checks validate local bind only. For remote access, firewall/security-group must also allow the port.", file=sys.stderr)
+        return 1
+
+    if selected_port != args.port:
+        print(f"Requested port {args.port} is unavailable. Falling back to {selected_port}.")
+    for port, err in diagnostics:
+        print(f"Port {port} unavailable: {err}")
+
+    print(f"OS detected: {platform.system()}")
+    print(f"Dashboard URL: http://{display_host}:{selected_port}")
+    print(f"Local URL: http://127.0.0.1:{selected_port}")
+    print("Port checks validate local bind only. For remote access, firewall/security-group must also allow this port.")
+
+    cmd = [sys.executable, str(app), "--host", bind_host, "--port", str(selected_port)]
     return subprocess.call(cmd, cwd=str(root))
 
 

@@ -940,7 +940,15 @@ def main():
     parser.add_argument("--host", default="0.0.0.0")
     args = parser.parse_args()
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    try:
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
+    except OSError as ex:
+        print(f"Failed to bind dashboard on {args.host}:{args.port} -> {ex}")
+        if getattr(ex, "errno", None) in (13,):
+            print("Hint: Port requires elevated privileges. Try a higher port (e.g. 8090) or run as root/admin.")
+        if getattr(ex, "errno", None) in (98, 10048):
+            print("Hint: Port is already in use by another process. Choose another port.")
+        return
 
     urls = [f"http://127.0.0.1:{args.port}"]
     if args.host not in ("127.0.0.1", "localhost", "0.0.0.0", ""):
