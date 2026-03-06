@@ -27,6 +27,7 @@ from urllib.parse import parse_qs
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+BUILD_ID = "s3-fix-2026-03-06-1609"
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
@@ -1139,6 +1140,9 @@ def run_linux_s3_installer(form=None, live_cb=None):
     if os.name == "nt":
         return 1, "Linux S3 installer can only run on Linux/macOS hosts."
     ensure_repo_files(S3_LINUX_FILES, live_cb=live_cb)
+    if live_cb:
+        live_cb(f"[DEBUG] Dashboard build: {BUILD_ID}\n")
+        live_cb(f"[DEBUG] Linux S3 core path: {(ROOT / 'S3' / 'linux-macos' / 'modules' / 'core.sh')}\n")
 
     local_core = ROOT / "S3" / "linux-macos" / "modules" / "core.sh"
     local_cleanup = ROOT / "S3" / "linux-macos" / "modules" / "cleanup.sh"
@@ -1220,8 +1224,9 @@ def run_linux_s3_stop(live_cb=None):
     if os.name == "nt":
         return 1, "Linux S3 stop can only run on Linux/macOS hosts."
 
-    script = r"""
+    script = rf"""
 set -euo pipefail
+echo "[DEBUG] Dashboard build: {BUILD_ID}"
 echo "[INFO] Stopping LocalS3 services..."
 if command -v systemctl >/dev/null 2>&1; then
   systemctl stop locals3-minio >/dev/null 2>&1 || true
