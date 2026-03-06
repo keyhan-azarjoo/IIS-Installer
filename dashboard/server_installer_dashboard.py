@@ -31,6 +31,8 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
 LINUX_INSTALLER = ROOT / "DotNet" / "linux" / "install-linux-dotnet-runner.sh"
+S3_WINDOWS_INSTALLER = ROOT / "S3" / "windows" / "setup-storage.ps1"
+S3_LINUX_INSTALLER = ROOT / "S3" / "linux-macos" / "setup-storage.sh"
 REPO_RAW_BASE = os.environ.get(
     "SERVER_INSTALLER_REPO_BASE",
     "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main",
@@ -40,6 +42,23 @@ WINDOWS_SETUP_MODULES = [
     "DotNet/windows/modules/common.ps1",
     "DotNet/windows/modules/iis-mode.ps1",
     "DotNet/windows/modules/docker-mode.ps1",
+]
+
+S3_WINDOWS_FILES = [
+    "S3/windows/setup-storage.ps1",
+    "S3/windows/modules/common.ps1",
+    "S3/windows/modules/minio.ps1",
+    "S3/windows/modules/cleanup.ps1",
+    "S3/windows/modules/iis.ps1",
+    "S3/windows/modules/docker.ps1",
+    "S3/windows/modules/main.ps1",
+]
+
+S3_LINUX_FILES = [
+    "S3/linux-macos/setup-storage.sh",
+    "S3/linux-macos/modules/core.sh",
+    "S3/linux-macos/modules/cleanup.sh",
+    "S3/linux-macos/modules/platform.sh",
 ]
 
 SESSIONS = set()
@@ -446,11 +465,12 @@ def validate_os_credentials(username, password):
         return False, "Invalid Linux username/password."
 
 
-def run_process(cmd, env=None, live_cb=None):
+def run_process(cmd, env=None, live_cb=None, input_text=None):
     proc = subprocess.Popen(
         cmd,
         cwd=str(ROOT),
         env=env,
+        stdin=subprocess.PIPE if input_text is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -458,6 +478,17 @@ def run_process(cmd, env=None, live_cb=None):
     )
     chunks = []
     try:
+        if input_text is not None and proc.stdin is not None:
+            try:
+                proc.stdin.write(input_text)
+                proc.stdin.flush()
+            except Exception:
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
         if proc.stdout is not None:
             # Stream character-level output so long-running commands are visible live
             # even when underlying tools do not flush newline-delimited lines.
@@ -817,6 +848,41 @@ def run_linux_installer(form, live_cb=None, require_source=True):
             env[key] = value
 
     return run_process(installer_cmd, env=env, live_cb=live_cb)
+
+
+def run_windows_s3_installer(form, live_cb=None, mode="iis"):
+    if os.name != "nt":
+        return 1, "Windows S3 installer can only run on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    ensure_repo_files(S3_WINDOWS_FILES, live_cb=live_cb)
+
+    selected_mode = (mode or "iis").strip().lower()
+    mode_choice = "2\n" if selected_mode == "docker" else "1\n"
+    # Script is interactive; feed defaults for remaining prompts.
+    scripted_input = mode_choice + ("\n" * 200)
+    cmd = [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(S3_WINDOWS_INSTALLER),
+    ]
+    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb, input_text=scripted_input)
+
+
+def run_linux_s3_installer(live_cb=None):
+    if os.name == "nt":
+        return 1, "Linux S3 installer can only run on Linux/macOS hosts."
+    ensure_repo_files(S3_LINUX_FILES, live_cb=live_cb)
+
+    cmd = ["bash", str(S3_LINUX_INSTALLER)]
+    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        cmd = ["sudo"] + cmd
+    # Script is interactive; feed defaults to proceed.
+    scripted_input = "\n" * 200
+    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb, input_text=scripted_input)
 
 
 def run_linux_docker_setup(live_cb=None):
@@ -1716,6 +1782,34 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
             else:
                 self.write_html(f"Invalid request: {html.escape(str(ex))}", HTTPStatus.BAD_REQUEST)
+            return
+
+        if self.path == "/run/s3_windows_iis":
+            title = "S3 Installer (Windows IIS)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_s3_installer(form, live_cb=cb, mode="iis"))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_s3_installer(form, mode="iis")
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/s3_windows_docker":
+            title = "S3 Installer (Windows Docker)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_s3_installer(form, live_cb=cb, mode="docker"))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_s3_installer(form, mode="docker")
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/s3_linux":
+            title = "S3 Installer (Linux/macOS)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_linux_s3_installer(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_linux_s3_installer()
+                self.respond_run_result(title, code, output)
             return
 
         if self.path == "/run/windows":

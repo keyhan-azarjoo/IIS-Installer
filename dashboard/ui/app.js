@@ -208,14 +208,49 @@ function App() {
     }
 
     if (page === "s3") {
-      return (
-        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-          <CardContent>
-            <Typography variant="h6" fontWeight={800}>S3</Typography>
-            <Typography variant="body2" color="text.secondary">Empty page.</Typography>
-          </CardContent>
-        </Card>
-      );
+      if (cfg.os === "windows") {
+        return (
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <ActionCard
+                title="Install S3 (IIS)"
+                description="Run Local S3 installer in Windows IIS mode."
+                action="/run/s3_windows_iis"
+                fields={[]}
+                onRun={run}
+                color="#0f766e"
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <ActionCard
+                title="Install S3 (Docker)"
+                description="Run Local S3 installer in Windows Docker mode."
+                action="/run/s3_windows_docker"
+                fields={[]}
+                onRun={run}
+                color="#1f2937"
+              />
+            </Grid>
+          </Grid>
+        );
+      }
+      if (cfg.os === "linux" || cfg.os === "darwin") {
+        return (
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <ActionCard
+                title="Install S3"
+                description="Run Local S3 installer for Linux/macOS."
+                action="/run/s3_linux"
+                fields={[]}
+                onRun={run}
+                color="#1e40af"
+              />
+            </Grid>
+          </Grid>
+        );
+      }
+      return <Alert severity="info">S3 installer is not configured for this OS.</Alert>;
     }
 
     if (page === "dotnet") {
