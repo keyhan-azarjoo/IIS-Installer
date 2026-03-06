@@ -178,6 +178,11 @@ function App() {
   const run = async (event, action, title) => {
     event.preventDefault();
     const body = new FormData(event.currentTarget);
+    append("============================================================");
+    append(`[${new Date().toLocaleTimeString()}] ${title} started`);
+    setTermState(`Running: ${title}`);
+    setTermOpen(true);
+    setTermMin(false);
     const isS3Install = action === "/run/s3_linux" || action === "/run/s3_windows" || action === "/run/s3_windows_iis" || action === "/run/s3_windows_docker";
     if (isS3Install) {
       // If requested HTTPS port is busy, ask user for another port before start.
@@ -191,25 +196,25 @@ function App() {
         const pj = await chk.json();
         if (!pj.ok) break;
         if (!pj.busy) break;
+        const busyMsg = `S3 HTTPS port ${p} is already in use. Please choose another port.`;
+        setInfoMessage(busyMsg);
+        append(busyMsg);
         const next = window.prompt(`Port ${p} is busy. Enter another HTTPS port for S3:`, "9443");
         if (next === null) {
           append(`[${new Date().toLocaleTimeString()}] ${title} cancelled (port ${p} is busy).`);
+          setInfoMessage(`Cancelled. Port ${p} is busy and no replacement was provided.`);
           setTermState("Idle");
           return;
         }
         const trimmed = String(next).trim();
         if (!/^\d+$/.test(trimmed) || Number(trimmed) < 1 || Number(trimmed) > 65535) {
           window.alert("Invalid port. Please enter a number between 1 and 65535.");
+          setInfoMessage("Invalid port entered. Please use a number between 1 and 65535.");
           continue;
         }
         body.set("LOCALS3_HTTPS_PORT", trimmed);
       }
     }
-    append("============================================================");
-    append(`[${new Date().toLocaleTimeString()}] ${title} started`);
-    setTermState(`Running: ${title}`);
-    setTermOpen(true);
-    setTermMin(false);
     try {
       const r = await fetch(action, { method: "POST", headers: { "X-Requested-With": "fetch" }, body });
       const j = await r.json();
