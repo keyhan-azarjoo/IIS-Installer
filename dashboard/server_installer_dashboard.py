@@ -2,6 +2,7 @@
 import argparse
 import ctypes
 import html
+import io
 import ipaddress
 import json
 import os
@@ -16,6 +17,8 @@ import urllib.request
 import warnings
 import zipfile
 import tarfile
+import traceback
+import re
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1050,40 +1053,80 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8", errors="replace")
         return parse_qs(raw, keep_blank_values=True)
 
+    def _parse_multipart(self):
+        ctype = self.headers.get("Content-Type", "") or ""
+        m = re.search(r'boundary="?([^";]+)"?', ctype, flags=re.IGNORECASE)
+        if not m:
+            raise RuntimeError("Missing multipart boundary.")
+        boundary = m.group(1).encode("utf-8")
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        data = self.rfile.read(length)
+        marker = b"--" + boundary
+        parts = []
+        for chunk in data.split(marker):
+            if not chunk or chunk in (b"--\r\n", b"--", b"\r\n"):
+                continue
+            if chunk.startswith(b"\r\n"):
+                chunk = chunk[2:]
+            if chunk.endswith(b"--\r\n"):
+                chunk = chunk[:-4]
+            elif chunk.endswith(b"\r\n"):
+                chunk = chunk[:-2]
+
+            header_blob, sep, body = chunk.partition(b"\r\n\r\n")
+            if not sep:
+                continue
+            headers = {}
+            for line in header_blob.decode("utf-8", errors="replace").split("\r\n"):
+                k, _, v = line.partition(":")
+                if _:
+                    headers[k.strip().lower()] = v.strip()
+            cd = headers.get("content-disposition", "")
+            if not cd:
+                continue
+            name_m = re.search(r'name="([^"]+)"', cd)
+            file_m = re.search(r'filename="([^"]*)"', cd)
+            if not name_m:
+                continue
+            parts.append({
+                "name": name_m.group(1),
+                "filename": file_m.group(1) if file_m else "",
+                "content": body,
+            })
+        return parts
+
     def parse_request_form(self):
         ctype = (self.headers.get("Content-Type", "") or "").lower()
         if ctype.startswith("multipart/form-data"):
-            import cgi
-
-            env = {
-                "REQUEST_METHOD": "POST",
-                "CONTENT_TYPE": self.headers.get("Content-Type", ""),
-                "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
-            }
             try:
-                fs = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env, keep_blank_values=True)
+                parts = self._parse_multipart()
             except Exception as ex:
                 raise RuntimeError(f"Failed to parse multipart upload: {ex}") from ex
             result = {}
-            if not fs:
+            if not parts:
                 return result
-            keys = fs.keys() if hasattr(fs, "keys") else []
-            for key in keys:
-                item = fs[key]
-                items = item if isinstance(item, list) else [item]
+            grouped = {}
+            for p in parts:
+                grouped.setdefault(p["name"], []).append(p)
+
+            for key, items in grouped.items():
                 folder_items = []
                 for it in items:
-                    if getattr(it, "filename", None):
-                        if it.file:
-                            if key in ("SourceFolder", "SOURCE_FOLDER"):
-                                folder_items.append(it)
-                            elif key == "SourceUpload":
-                                folder_items.append(it)
-                            else:
-                                saved = save_uploaded_archive_or_file(it)
-                                result.setdefault(key, []).append(saved)
+                    filename = it.get("filename", "")
+                    content = it.get("content", b"")
+                    if filename:
+                        fake_item = type("UploadItem", (), {})()
+                        fake_item.filename = filename
+                        fake_item.file = io.BytesIO(content)
+                        if key in ("SourceFolder", "SOURCE_FOLDER", "SourceUpload"):
+                            folder_items.append(fake_item)
+                        else:
+                            saved = save_uploaded_archive_or_file(fake_item)
+                            result.setdefault(key, []).append(saved)
                     else:
-                        result.setdefault(key, []).append((it.value or "").strip())
+                        value = content.decode("utf-8", errors="replace").strip()
+                        result.setdefault(key, []).append(value)
+
                 if folder_items:
                     if key == "SourceUpload":
                         if len(folder_items) == 1 and ("/" not in (folder_items[0].filename or "").replace("\\", "/")):
@@ -1099,25 +1142,23 @@ class Handler(BaseHTTPRequestHandler):
         return self.parse_form()
 
     def parse_upload_source(self):
-        import cgi
-
         ctype = (self.headers.get("Content-Type", "") or "").lower()
         if not ctype.startswith("multipart/form-data"):
             raise RuntimeError("Upload requires multipart/form-data.")
 
-        env = {
-            "REQUEST_METHOD": "POST",
-            "CONTENT_TYPE": self.headers.get("Content-Type", ""),
-            "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
-        }
-        fs = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env, keep_blank_values=True)
-        if not fs:
+        parts = self._parse_multipart()
+        if not parts:
             raise RuntimeError("Upload form is empty.")
-
-        items = fs["SourceUpload"] if "SourceUpload" in fs else None
-        if items is None:
+        items = [p for p in parts if p.get("name") == "SourceUpload"]
+        if not items:
             raise RuntimeError("No upload selected.")
-        files = items if isinstance(items, list) else [items]
+        files = []
+        for p in items:
+            if p.get("filename"):
+                fake_item = type("UploadItem", (), {})()
+                fake_item.filename = p.get("filename", "")
+                fake_item.file = io.BytesIO(p.get("content", b""))
+                files.append(fake_item)
 
         valid_files = [it for it in files if getattr(it, "filename", None) and getattr(it, "file", None)]
         if not valid_files:
@@ -1281,6 +1322,7 @@ class Handler(BaseHTTPRequestHandler):
                 saved_path = self.parse_upload_source()
             except Exception as ex:
                 print(f"Upload error: {ex}")
+                traceback.print_exc()
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
                 return
             self.write_json({"ok": True, "path": saved_path})
@@ -1289,6 +1331,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             form = self.parse_request_form()
         except Exception as ex:
+            print(f"Form parse error: {ex}")
+            traceback.print_exc()
             if self.is_fetch():
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
             else:

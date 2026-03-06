@@ -87,8 +87,15 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
         headers: { "X-Requested-With": "fetch" },
         body: fd,
       });
-      const json = await res.json();
+      const rawText = await res.text();
+      let json = {};
+      try {
+        json = JSON.parse(rawText);
+      } catch (_) {
+        json = { ok: false, error: rawText || `HTTP ${res.status}` };
+      }
       if (!json.ok) {
+        console.error("Upload failed response:", { status: res.status, body: rawText, parsed: json });
         throw new Error(json.error || "Upload failed");
       }
       setUploadedPath(json.path || "");
@@ -96,6 +103,7 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
       setUploadInfo("Uploaded and extracted on server.");
       return json.path || "";
     } catch (err) {
+      console.error("Upload exception:", err);
       setUploadInfo(`Upload failed: ${err}`);
       return "";
     } finally {
