@@ -1,12 +1,12 @@
 const {
   Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Drawer,
-  FormControl, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText,
-  MenuItem, Select, Stack, TextField, Toolbar, Typography, Paper
+  FormControl, Grid, IconButton, InputLabel, MenuItem, Paper, Select, Stack,
+  TextField, Toolbar, Typography
 } = MaterialUI;
 
 const cfg = window.__APP_CONFIG__ || { os: "windows", os_label: "Windows", message: "" };
-const DRAWER_W = 270;
-const DRAWER_MIN = 84;
+const DRAWER_W = 250;
+const DRAWER_MIN = 82;
 
 function Field({ field }) {
   if (field.type === "select") {
@@ -35,9 +35,9 @@ function Field({ field }) {
   );
 }
 
-function ActionFormCard({ title, description, action, fields, onRun, color }) {
+function ActionCard({ title, description, action, fields, onRun, color }) {
   return (
-    <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", boxShadow: "0 10px 28px rgba(15,23,42,.08)" }}>
+    <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", boxShadow: "0 10px 26px rgba(15,23,42,.08)" }}>
       <CardContent>
         <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>{title}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{description}</Typography>
@@ -52,14 +52,19 @@ function ActionFormCard({ title, description, action, fields, onRun, color }) {
   );
 }
 
-function PlaceholderCard({ title, description, onClick }) {
+function NavCard({ title, text, onClick, outlined }) {
   return (
-    <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+    <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
       <CardContent>
-        <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>{title}</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{description}</Typography>
-        <Button variant="outlined" fullWidth sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }} onClick={onClick}>
-          Start
+        <Typography variant="h6" fontWeight={800} sx={{ mb: 0.8 }}>{title}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{text}</Typography>
+        <Button
+          fullWidth
+          variant={outlined ? "outlined" : "contained"}
+          sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }}
+          onClick={onClick}
+        >
+          Open
         </Button>
       </CardContent>
     </Card>
@@ -70,8 +75,7 @@ function App() {
   const isMobile = MaterialUI.useMediaQuery("(max-width:1100px)");
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
-  const [moduleTab, setModuleTab] = React.useState("dotnet");
-  const [stackTab, setStackTab] = React.useState("iis");
+  const [page, setPage] = React.useState("home");
   const [termText, setTermText] = React.useState("Ready. Click Start to run and stream output.");
   const [termState, setTermState] = React.useState("Idle");
   const [termOpen, setTermOpen] = React.useState(false);
@@ -79,12 +83,6 @@ function App() {
   const [termPos, setTermPos] = React.useState({ x: null, y: null });
   const [infoMessage, setInfoMessage] = React.useState("");
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
-
-  React.useEffect(() => {
-    if (cfg.os === "windows") setStackTab("iis");
-    else if (cfg.os === "linux") setStackTab("linux");
-    else setStackTab("macos");
-  }, []);
 
   React.useEffect(() => {
     const onMove = (e) => {
@@ -151,57 +149,82 @@ function App() {
     }
   };
 
-  const moduleCards = (
-    <Grid container spacing={2}>
-      <Grid item xs={12} md={6}>
-        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-          <CardContent>
-            <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>DotNet</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Open .NET installation/deployment operations.</Typography>
-            <Button fullWidth variant="contained" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setModuleTab("dotnet")}>Open DotNet</Button>
-          </CardContent>
-        </Card>
-      </Grid>
-      <Grid item xs={12} md={6}>
-        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-          <CardContent>
-            <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>S3</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Open S3 section (empty page).</Typography>
-            <Button fullWidth variant="outlined" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setModuleTab("s3")}>Open S3</Button>
-          </CardContent>
-        </Card>
-      </Grid>
-    </Grid>
-  );
+  const goBack = () => {
+    if (page === "home") return;
+    if (page === "dotnet") setPage("home");
+    else if (page === "s3") setPage("home");
+    else if (page.startsWith("dotnet-")) setPage("dotnet");
+    else setPage("home");
+  };
 
-  const dotnetStacks = (() => {
-    if (cfg.os === "windows") {
-      return (
-        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
-          <Button variant={stackTab === "iis" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setStackTab("iis")}>IIS</Button>
-          <Button variant={stackTab === "docker" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setStackTab("docker")}>Docker</Button>
-        </Stack>
-      );
-    }
-    if (cfg.os === "linux") {
-      return (
-        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
-          <Button variant={stackTab === "linux" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setStackTab("linux")}>Linux</Button>
-          <Button variant={stackTab === "docker" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setStackTab("docker")}>Docker</Button>
-        </Stack>
-      );
-    }
-    return (
-      <Alert severity="info">macOS installer actions are not configured yet.</Alert>
-    );
+  const headerTitle = (() => {
+    if (page === "home") return "Dashboard";
+    if (page === "dotnet") return "DotNet";
+    if (page === "s3") return "S3";
+    if (page === "dotnet-iis") return "DotNet > IIS";
+    if (page === "dotnet-docker") return "DotNet > Docker";
+    if (page === "dotnet-linux") return "DotNet > Linux";
+    return "Dashboard";
   })();
 
-  const dotnetActions = (() => {
-    if (cfg.os === "windows" && stackTab === "iis") {
+  const renderPage = () => {
+    if (page === "home") {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionFormCard
+            <NavCard title="DotNet" text="Open .NET installer/deployment pages." onClick={() => setPage("dotnet")} />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="S3" text="Open S3 page (empty)." onClick={() => setPage("s3")} outlined />
+          </Grid>
+        </Grid>
+      );
+    }
+
+    if (page === "s3") {
+      return (
+        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+          <CardContent>
+            <Typography variant="h6" fontWeight={800}>S3</Typography>
+            <Typography variant="body2" color="text.secondary">Empty page.</Typography>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (page === "dotnet") {
+      if (cfg.os === "windows") {
+        return (
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <NavCard title="IIS" text="Install and deploy on IIS." onClick={() => setPage("dotnet-iis")} />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <NavCard title="Docker" text="Install and deploy on Docker." onClick={() => setPage("dotnet-docker")} />
+            </Grid>
+          </Grid>
+        );
+      }
+      if (cfg.os === "linux") {
+        return (
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <NavCard title="Linux" text="Install and deploy on Linux." onClick={() => setPage("dotnet-linux")} />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <NavCard title="Docker" text="Install and deploy on Docker (Linux)." onClick={() => setPage("dotnet-docker")} />
+            </Grid>
+          </Grid>
+        );
+      }
+      return <Alert severity="info">macOS installer actions are not configured yet.</Alert>;
+    }
+
+    if (cfg.os === "windows" && page === "dotnet-iis") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <ActionCard
               title="Install IIS"
               description="Install IIS features and .NET prerequisites."
               action="/run/windows_setup_iis"
@@ -211,9 +234,9 @@ function App() {
             />
           </Grid>
           <Grid item xs={12} md={6}>
-            <ActionFormCard
+            <ActionCard
               title="Deploy IIS"
-              description="Deploy app directly to IIS."
+              description="Deploy application to IIS."
               action="/run/windows_iis"
               fields={[
                 { name: "SourceValue", label: "Source Path or URL", required: true },
@@ -226,11 +249,12 @@ function App() {
         </Grid>
       );
     }
-    if (cfg.os === "windows" && stackTab === "docker") {
+
+    if (cfg.os === "windows" && page === "dotnet-docker") {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionFormCard
+            <ActionCard
               title="Install Docker"
               description="Install Docker prerequisites and .NET runtime."
               action="/run/windows_setup_docker"
@@ -240,9 +264,9 @@ function App() {
             />
           </Grid>
           <Grid item xs={12} md={6}>
-            <ActionFormCard
+            <ActionCard
               title="Deploy Docker"
-              description="Deploy app directly to Docker."
+              description="Deploy application to Docker."
               action="/run/windows_docker"
               fields={[
                 { name: "SourceValue", label: "Source Path or URL", required: true },
@@ -256,13 +280,14 @@ function App() {
         </Grid>
       );
     }
-    if (cfg.os === "linux" && stackTab === "linux") {
+
+    if (cfg.os === "linux" && page === "dotnet-linux") {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionFormCard
+            <ActionCard
               title="Install Linux"
-              description="Install runtime and Linux prerequisites."
+              description="Install Linux prerequisites."
               action="/run/linux_prereq"
               fields={[{ name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" }]}
               onRun={run}
@@ -270,9 +295,9 @@ function App() {
             />
           </Grid>
           <Grid item xs={12} md={6}>
-            <ActionFormCard
+            <ActionCard
               title="Deploy Linux"
-              description="Deploy .NET application on Linux."
+              description="Deploy application on Linux."
               action="/run/linux"
               fields={[
                 { name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" },
@@ -289,28 +314,34 @@ function App() {
         </Grid>
       );
     }
-    if (cfg.os === "linux" && stackTab === "docker") {
+
+    if (cfg.os === "linux" && page === "dotnet-docker") {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <PlaceholderCard
-              title="Install Docker (Linux)"
-              description="Reserved action. Backend endpoint is not implemented yet."
-              onClick={() => setInfoMessage("Install Docker (Linux) is not implemented yet.")}
-            />
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800}>Install Docker</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Reserved action.</Typography>
+                <Button fullWidth variant="outlined" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setInfoMessage("Install Docker (Linux) is not implemented yet.")}>Start</Button>
+              </CardContent>
+            </Card>
           </Grid>
           <Grid item xs={12} md={6}>
-            <PlaceholderCard
-              title="Deploy Docker (Linux)"
-              description="Reserved action. Backend endpoint is not implemented yet."
-              onClick={() => setInfoMessage("Deploy Docker (Linux) is not implemented yet.")}
-            />
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800}>Deploy Docker</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Reserved action.</Typography>
+                <Button fullWidth variant="outlined" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setInfoMessage("Deploy Docker (Linux) is not implemented yet.")}>Start</Button>
+              </CardContent>
+            </Card>
           </Grid>
         </Grid>
       );
     }
-    return <Alert severity="info">No actions available for this platform.</Alert>;
-  })();
+
+    return <Alert severity="info">No actions available for this page.</Alert>;
+  };
 
   const sidebar = (
     <Box sx={{ height: "100%", background: "linear-gradient(180deg,#081726,#132d4b)", color: "#deebff", p: 1.5 }}>
@@ -318,7 +349,7 @@ function App() {
         {!collapsed && (
           <Box>
             <Typography variant="h6" fontWeight={800}>Server Installer</Typography>
-            <Typography variant="caption" sx={{ opacity: 0.8 }}>Control Panel</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.8 }}>Simple Dashboard</Typography>
           </Box>
         )}
         {!isMobile && (
@@ -330,16 +361,14 @@ function App() {
       {!collapsed && (
         <Chip label={cfg.os_label} size="small" sx={{ mb: 1.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }} />
       )}
-      <List sx={{ pt: 0 }}>
-        <ListItemButton selected={moduleTab === "dotnet"} onClick={() => { setModuleTab("dotnet"); if (isMobile) setMobileOpen(false); }} sx={{ mb: 0.5, borderRadius: 2, color: "#e5edff", "&.Mui-selected": { backgroundColor: "#1d4ed8", color: "#fff" }, "&:hover": { backgroundColor: "rgba(255,255,255,.12)" } }}>
-          {!collapsed && <ListItemText primary="DotNet" primaryTypographyProps={{ fontSize: 14, fontWeight: 700 }} />}
-          {collapsed && <Typography sx={{ fontSize: 12, fontWeight: 700 }}>NET</Typography>}
-        </ListItemButton>
-        <ListItemButton selected={moduleTab === "s3"} onClick={() => { setModuleTab("s3"); if (isMobile) setMobileOpen(false); }} sx={{ mb: 0.5, borderRadius: 2, color: "#e5edff", "&.Mui-selected": { backgroundColor: "#1d4ed8", color: "#fff" }, "&:hover": { backgroundColor: "rgba(255,255,255,.12)" } }}>
-          {!collapsed && <ListItemText primary="S3" primaryTypographyProps={{ fontSize: 14, fontWeight: 700 }} />}
-          {collapsed && <Typography sx={{ fontSize: 12, fontWeight: 700 }}>S3</Typography>}
-        </ListItemButton>
-      </List>
+      <Button
+        fullWidth
+        variant={page === "home" ? "contained" : "outlined"}
+        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }}
+        onClick={() => { setPage("home"); if (isMobile) setMobileOpen(false); }}
+      >
+        {collapsed ? "Home" : "Dashboard Home"}
+      </Button>
     </Box>
   );
 
@@ -355,13 +384,19 @@ function App() {
             <span style={{ fontSize: 18, fontWeight: 700 }}>|||</span>
           </IconButton>
           <Box sx={{ ml: 1 }}>
-            <Typography variant="h6" fontWeight={800}>Server Installer Panel</Typography>
+            <Typography variant="h6" fontWeight={800}>{headerTitle}</Typography>
             <Typography variant="caption" sx={{ opacity: 0.9 }}>Detected OS: {cfg.os_label}</Typography>
           </Box>
         </Toolbar>
       </AppBar>
 
-      <Drawer variant={isMobile ? "temporary" : "permanent"} open={isMobile ? mobileOpen : true} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} PaperProps={{ sx: { width: isMobile ? DRAWER_W : (collapsed ? DRAWER_MIN : DRAWER_W), transition: "width .2s ease", borderRight: "1px solid rgba(15,23,42,.15)", overflowX: "hidden" } }}>
+      <Drawer
+        variant={isMobile ? "temporary" : "permanent"}
+        open={isMobile ? mobileOpen : true}
+        onClose={() => setMobileOpen(false)}
+        ModalProps={{ keepMounted: true }}
+        PaperProps={{ sx: { width: isMobile ? DRAWER_W : (collapsed ? DRAWER_MIN : DRAWER_W), transition: "width .2s ease", borderRight: "1px solid rgba(15,23,42,.15)", overflowX: "hidden" } }}
+      >
         {sidebar}
       </Drawer>
 
@@ -370,35 +405,12 @@ function App() {
         {infoMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfoMessage("")}>{infoMessage}</Alert>}
 
         <Stack spacing={2}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent>
-              <Typography variant="h5" fontWeight={800}>Modules</Typography>
-              <Typography variant="body2" color="text.secondary">DotNet | S3</Typography>
-            </CardContent>
-          </Card>
-
-          {moduleCards}
-
-          {moduleTab === "dotnet" && (
-            <Stack spacing={2}>
-              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-                <CardContent>
-                  <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>DotNet</Typography>
-                  {dotnetStacks}
-                </CardContent>
-              </Card>
-              {dotnetActions}
+          {page !== "home" && (
+            <Stack direction="row" justifyContent="flex-start">
+              <Button variant="outlined" sx={{ textTransform: "none" }} onClick={goBack}>Back</Button>
             </Stack>
           )}
-
-          {moduleTab === "s3" && (
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-              <CardContent>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>S3</Typography>
-                <Typography variant="body2" color="text.secondary">Empty page.</Typography>
-              </CardContent>
-            </Card>
-          )}
+          {renderPage()}
         </Stack>
       </Box>
 
