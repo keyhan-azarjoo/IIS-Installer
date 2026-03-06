@@ -19,6 +19,7 @@ import zipfile
 import tarfile
 import traceback
 import re
+import shlex
 import getpass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -954,6 +955,23 @@ def pick_free_local_tcp_port(candidates):
     return None
 
 
+def _linux_locals3_nginx_owns_port(port):
+    if os.name == "nt":
+        return False
+    try:
+        p = int(str(port).strip())
+    except Exception:
+        return False
+    conf = Path("/etc/nginx/conf.d/locals3.conf")
+    if not conf.exists():
+        return False
+    try:
+        text = conf.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return False
+    return re.search(rf"\blisten\s+{p}\b", text) is not None
+
+
 def run_windows_installer(form, live_cb=None):
     if os.name != "nt":
         return 1, "Windows installer can only run on Windows hosts."
@@ -1140,42 +1158,39 @@ def run_linux_s3_installer(form=None, live_cb=None):
     if os.name == "nt":
         return 1, "Linux S3 installer can only run on Linux/macOS hosts."
     ensure_repo_files(S3_LINUX_FILES, live_cb=live_cb)
+    form = form or {}
     if live_cb:
         live_cb(f"[DEBUG] Dashboard build: {BUILD_ID}\n")
         live_cb(f"[DEBUG] Linux S3 core path: {(ROOT / 'S3' / 'linux-macos' / 'modules' / 'core.sh')}\n")
 
-    local_core = ROOT / "S3" / "linux-macos" / "modules" / "core.sh"
-    local_cleanup = ROOT / "S3" / "linux-macos" / "modules" / "cleanup.sh"
-    local_platform = ROOT / "S3" / "linux-macos" / "modules" / "platform.sh"
-    # Defensive override: some stale module variants print prompt text to stdout,
-    # which can pollute command substitution for https_port. Force a clean value.
-    force_port_fn = (
-        'resolve_https_port_unix(){ '
-        'local p="${LOCALS3_HTTPS_PORT:-}"; '
-        'if [ -n "$p" ]; then echo "$p"; return; fi; '
-        'echo "8443"; '
-        '}; '
-    )
-    launcher = (
-        f"source '{local_core}'; "
-        f"source '{local_cleanup}'; "
-        f"source '{local_platform}'; "
-        f"{force_port_fn}"
-        "run_linux_macos_install"
-    )
-    cmd = ["bash", "-c", launcher]
     requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
     if requested_https and (not requested_https.isdigit()):
         return 1, "LOCALS3_HTTPS_PORT must be numeric."
     if requested_https and is_local_tcp_port_listening(requested_https):
-        auto_port = pick_free_local_tcp_port([9443, 10443, 11443, 12443, 13443, 8443, 15443, 16443])
-        if auto_port:
+        if _linux_locals3_nginx_owns_port(requested_https):
             if live_cb:
-                live_cb(f"Requested HTTPS port {requested_https} is busy. Auto-selected free port {auto_port}.\n")
-            form["LOCALS3_HTTPS_PORT"] = [str(auto_port)]
-            requested_https = str(auto_port)
+                live_cb(f"Requested HTTPS port {requested_https} is currently owned by LocalS3. Reclaiming it...\n")
+            stop_code, stop_out = run_linux_s3_stop(live_cb=live_cb)
+            if stop_code != 0 and live_cb and stop_out:
+                live_cb(stop_out + "\n")
+            if is_local_tcp_port_listening(requested_https):
+                auto_port = pick_free_local_tcp_port([9443, 10443, 11443, 12443, 13443, 8443, 15443, 16443])
+                if auto_port:
+                    if live_cb:
+                        live_cb(f"Port {requested_https} is still busy after reclaim attempt. Auto-selected free port {auto_port}.\n")
+                    form["LOCALS3_HTTPS_PORT"] = [str(auto_port)]
+                    requested_https = str(auto_port)
+                else:
+                    return 1, f"Requested HTTPS port {requested_https} is still in use and no fallback port was found."
         else:
-            return 1, f"Requested HTTPS port {requested_https} is already in use and no fallback port was found."
+            auto_port = pick_free_local_tcp_port([9443, 10443, 11443, 12443, 13443, 8443, 15443, 16443])
+            if auto_port:
+                if live_cb:
+                    live_cb(f"Requested HTTPS port {requested_https} is busy. Auto-selected free port {auto_port}.\n")
+                form["LOCALS3_HTTPS_PORT"] = [str(auto_port)]
+                requested_https = str(auto_port)
+            else:
+                return 1, f"Requested HTTPS port {requested_https} is already in use and no fallback port was found."
 
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
     requested_lan = (form.get("LOCALS3_ENABLE_LAN", [""])[0] or "").strip().lower()
@@ -1197,7 +1212,6 @@ def run_linux_s3_installer(form=None, live_cb=None):
 
     scripted_input = f"{host_line}\n{lan_line}\n{https_flow}\n" + ("\n" * 200)
     env = os.environ.copy()
-    form = form or {}
     forwarded_env = {}
     for key in [
         "LOCALS3_HOST",
@@ -1210,6 +1224,30 @@ def run_linux_s3_installer(form=None, live_cb=None):
         if value:
             env[key] = value
             forwarded_env[key] = value
+
+    local_core = ROOT / "S3" / "linux-macos" / "modules" / "core.sh"
+    local_cleanup = ROOT / "S3" / "linux-macos" / "modules" / "cleanup.sh"
+    local_platform = ROOT / "S3" / "linux-macos" / "modules" / "platform.sh"
+    env_exports = "".join([f"export {k}={shlex.quote(v)}; " for k, v in forwarded_env.items()])
+    # Defensive override: stale module variants may print prompt text to stdout.
+    force_port_fn = (
+        'resolve_https_port_unix(){ '
+        'local p="${LOCALS3_HTTPS_PORT:-}"; '
+        'if [ -n "$p" ]; then echo "$p"; return; fi; '
+        'echo "8443"; '
+        '}; '
+    )
+    launcher = (
+        f"{env_exports}"
+        f"source '{local_core}'; "
+        f"source '{local_cleanup}'; "
+        f"source '{local_platform}'; "
+        f"{force_port_fn}"
+        "run_linux_macos_install"
+    )
+    cmd = ["bash", "-c", launcher]
+    if live_cb:
+        live_cb(f"[DEBUG] Effective LOCALS3_HTTPS_PORT: {(forwarded_env.get('LOCALS3_HTTPS_PORT', ''))}\n")
 
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         cmd = ["sudo", "env"]
