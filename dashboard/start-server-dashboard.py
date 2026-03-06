@@ -3,6 +3,7 @@ import argparse
 import ctypes
 import os
 import platform
+import signal
 import socket
 import subprocess
 import sys
@@ -75,6 +76,101 @@ def can_bind(host: str, port: int):
         return False, ex
     finally:
         sock.close()
+
+
+def find_listener_pid_linux(port: int):
+    try:
+        out = subprocess.check_output(
+            ["ss", "-ltnp", f"sport = :{port}"],
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except Exception:
+        return None
+
+    for line in out.splitlines():
+        if "users:((" not in line:
+            continue
+        marker = "pid="
+        idx = line.find(marker)
+        if idx == -1:
+            continue
+        idx += len(marker)
+        end = idx
+        while end < len(line) and line[end].isdigit():
+            end += 1
+        if end > idx:
+            try:
+                return int(line[idx:end])
+            except ValueError:
+                return None
+    return None
+
+
+def process_cmdline(pid: int):
+    try:
+        data = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except Exception:
+        return ""
+    return data.replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+
+
+def is_dashboard_process(pid: int):
+    cmd = process_cmdline(pid)
+    if not cmd:
+        return False
+    indicators = [
+        "start-server-dashboard.py",
+        "server_installer_dashboard.py",
+    ]
+    return any(ind in cmd for ind in indicators)
+
+
+def stop_process(pid: int, timeout_sec: float = 3.0):
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except Exception:
+        return False
+
+    started = time.time()
+    while time.time() - started < timeout_sec:
+        try:
+            os.kill(pid, 0)
+            time.sleep(0.1)
+        except ProcessLookupError:
+            return True
+        except Exception:
+            break
+
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except Exception:
+        pass
+
+    time.sleep(0.2)
+    try:
+        os.kill(pid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+    except Exception:
+        return False
+
+
+def stop_existing_dashboard_on_port(port: int):
+    if os.name == "nt":
+        return False, "port pre-clean is only implemented on Linux"
+    pid = find_listener_pid_linux(port)
+    if not pid:
+        return False, "no listener"
+    if not is_dashboard_process(pid):
+        return False, f"port owned by different process (pid {pid})"
+    stopped = stop_process(pid)
+    if stopped:
+        return True, f"stopped previous dashboard process pid {pid}"
+    return False, f"failed to stop previous dashboard process pid {pid}"
 
 
 def choose_port(bind_host: str, preferred_port: int):
@@ -159,6 +255,18 @@ def main() -> int:
     bind_host = args.host
     if (not bind_host) or bind_host in ("auto", "0.0.0.0"):
         bind_host = "0.0.0.0"
+
+    preclean_ports = []
+    for p in [args.port, 80, 443]:
+        if p and p not in preclean_ports:
+            preclean_ports.append(p)
+    print("Pre-run checks:")
+    for p in preclean_ports:
+        changed, note = stop_existing_dashboard_on_port(p)
+        if changed:
+            print(f"- Port {p}: {note}")
+        elif note != "no listener":
+            print(f"- Port {p}: {note}")
 
     selected_port, diagnostics = choose_port(bind_host, args.port)
     if selected_port is None:
