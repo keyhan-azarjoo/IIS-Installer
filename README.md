@@ -17,42 +17,15 @@ These installers deploy only from prebuilt published output.
 
 ## Windows
 
-Fetch and run the PowerShell script from an elevated terminal:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/windows/install-windows-dotnet-host.ps1" -OutFile ".\install-windows-dotnet-host.ps1"
-.\install-windows-dotnet-host.ps1
-```
-
 Run higher-level dashboard mode (cross-platform, single URL):
 
 ```powershell
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -OutFile ".\start-server-dashboard.py"; py -3 .\start-server-dashboard.py
 ```
 
-Then open `http://127.0.0.1:8090`.
-- If opened on the same computer (localhost), no login is required.
-- If opened remotely from another computer, login is required using this computer's OS username/password.
-
-Use the dashboard folders:
-- Dot Net Installer
-- IIS Installer
-- Docker Installer
-- Combined Server Installers
-
-Dashboard now includes:
-- Professional sidebar layout with grouped installer areas.
-- Separate Windows setup actions: `Install IIS Stack Only` and `Install Docker Stack Only`.
-- Separate Windows deployment actions: IIS deployment and Docker deployment.
-- Linux combined deployment and Linux prerequisites-only actions.
-
-Linux dashboard start:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -o ./start-server-dashboard.py
-python3 ./start-server-dashboard.py
-```
+Dashboard URLs:
+- `http://127.0.0.1:8090`
+- `http://<server-ip>:8090`
 
 If you download only the main Windows script, it will automatically download its required module files into a local `modules` folder the first time it runs.
 
@@ -132,12 +105,10 @@ Example:
 
 ## Linux
 
-Fetch and run the shell script as root:
+Run dashboard mode:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/linux/install-linux-dotnet-runner.sh" -o ./install-linux-dotnet-runner.sh
-chmod +x ./install-linux-dotnet-runner.sh
-sudo ./install-linux-dotnet-runner.sh
+curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -o ./start-server-dashboard.py && python3 ./start-server-dashboard.py
 ```
 
 Repository folders:
