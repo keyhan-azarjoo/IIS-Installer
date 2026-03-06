@@ -6,6 +6,7 @@ import platform
 import socket
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -85,10 +86,23 @@ def choose_port(bind_host: str, preferred_port: int):
     diagnostics = []
     for port in candidates:
         ok, err = can_bind(bind_host, port)
+        diagnostics.append((port, ok, err))
         if ok:
             return port, diagnostics
-        diagnostics.append((port, err))
     return None, diagnostics
+
+
+def check_local_http(port: int, attempts: int = 8, delay: float = 0.5):
+    url = f"http://127.0.0.1:{port}/"
+    last_error = None
+    for _ in range(attempts):
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                return True, f"{resp.status}"
+        except Exception as ex:
+            last_error = ex
+            time.sleep(delay)
+    return False, str(last_error) if last_error else "Unknown error"
 
 
 def is_windows_admin() -> bool:
@@ -149,15 +163,23 @@ def main() -> int:
     selected_port, diagnostics = choose_port(bind_host, args.port)
     if selected_port is None:
         print("No usable port found for dashboard startup.", file=sys.stderr)
-        for port, err in diagnostics:
-            print(f"- Port {port}: {err}", file=sys.stderr)
+        for port, ok, err in diagnostics:
+            if ok:
+                print(f"- Port {port}: available", file=sys.stderr)
+            else:
+                print(f"- Port {port}: unavailable -> {err}", file=sys.stderr)
         print("Port checks validate local bind only. For remote access, firewall/security-group must also allow the port.", file=sys.stderr)
         return 1
 
+    print("Port checks:")
+    for port, ok, err in diagnostics:
+        if ok:
+            print(f"- Port {port}: available for local bind")
+        else:
+            print(f"- Port {port}: unavailable ({err})")
+
     if selected_port != args.port:
         print(f"Requested port {args.port} is unavailable. Falling back to {selected_port}.")
-    for port, err in diagnostics:
-        print(f"Port {port} unavailable: {err}")
 
     print(f"OS detected: {platform.system()}")
     print(f"Dashboard URL: http://{display_host}:{selected_port}")
@@ -165,7 +187,25 @@ def main() -> int:
     print("Port checks validate local bind only. For remote access, firewall/security-group must also allow this port.")
 
     cmd = [sys.executable, str(app), "--host", bind_host, "--port", str(selected_port)]
-    return subprocess.call(cmd, cwd=str(root))
+    proc = subprocess.Popen(cmd, cwd=str(root))
+
+    ok, detail = check_local_http(selected_port)
+    print("Startup diagnostics:")
+    print(f"- Bind host: {bind_host}")
+    print(f"- Selected port: {selected_port}")
+    if ok:
+        print(f"- Local HTTP check: PASS (HTTP {detail})")
+        print("- If remote access still times out, the blocker is external to the app (UFW/iptables/cloud firewall/security-group).")
+    else:
+        if proc.poll() is not None:
+            print(f"- Local HTTP check: FAIL ({detail})")
+            print(f"- Dashboard process exited early with code {proc.returncode}.")
+            print("- Read the error lines above for the exact bind/startup failure.")
+        else:
+            print(f"- Local HTTP check: FAIL ({detail})")
+            print("- Process is running but localhost is not responding yet. This usually indicates startup/runtime errors in the dashboard process output.")
+
+    return proc.wait()
 
 
 if __name__ == "__main__":
