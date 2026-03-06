@@ -1098,6 +1098,39 @@ class Handler(BaseHTTPRequestHandler):
             return result
         return self.parse_form()
 
+    def parse_upload_source(self):
+        import cgi
+
+        ctype = (self.headers.get("Content-Type", "") or "").lower()
+        if not ctype.startswith("multipart/form-data"):
+            raise RuntimeError("Upload requires multipart/form-data.")
+
+        env = {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+            "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+        }
+        fs = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env, keep_blank_values=True)
+        if not fs:
+            raise RuntimeError("Upload form is empty.")
+
+        items = fs["SourceUpload"] if "SourceUpload" in fs else None
+        if items is None:
+            raise RuntimeError("No upload selected.")
+        files = items if isinstance(items, list) else [items]
+
+        valid_files = [it for it in files if getattr(it, "filename", None) and getattr(it, "file", None)]
+        if not valid_files:
+            raise RuntimeError("No upload selected.")
+
+        looks_like_folder = (len(valid_files) > 1) or any(
+            ("/" in (it.filename or "").replace("\\", "/")) for it in valid_files
+        )
+        if looks_like_folder:
+            return save_uploaded_folder(valid_files)
+
+        return save_uploaded_archive_or_file(valid_files[0])
+
     def set_cookie(self, sid):
         self.send_header("Set-Cookie", f"sid={sid}; Path=/; HttpOnly")
 
@@ -1245,33 +1278,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/upload/source":
             try:
-                form = self.parse_request_form()
+                saved_path = self.parse_upload_source()
             except Exception as ex:
+                print(f"Upload error: {ex}")
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
                 return
-            files = form.get("SourceUpload", [])
-            if not files:
-                self.write_json({"ok": False, "error": "No upload selected."}, HTTPStatus.BAD_REQUEST)
-                return
-            try:
-                saved_path = ""
-                if len(files) == 1 and Path(files[0]).exists():
-                    # parse_request_form already stored saved path for plain file uploads
-                    p = Path(files[0])
-                    if p.is_file():
-                        lower = p.name.lower()
-                        if lower.endswith(".zip") or lower.endswith(".tar.gz") or lower.endswith(".tgz") or lower.endswith(".tar"):
-                            saved_path = str(prepare_source_dir(str(p)))
-                        else:
-                            saved_path = str(p)
-                    else:
-                        saved_path = str(p)
-                else:
-                    # multiple uploaded files are treated as folder contents and already extracted
-                    saved_path = files[0]
-                self.write_json({"ok": True, "path": saved_path})
-            except Exception as ex:
-                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            self.write_json({"ok": True, "path": saved_path})
             return
 
         try:
