@@ -14,6 +14,7 @@ import threading
 import time
 import urllib.request
 import warnings
+import zipfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -142,6 +143,45 @@ def save_uploaded_stream(filename, stream):
     return str(target)
 
 
+def _safe_rel_path(name: str):
+    rel = (name or "file.bin").replace("\\", "/")
+    if ":" in rel:
+        rel = rel.split(":", 1)[1]
+    rel = rel.lstrip("/")
+    parts = [p for p in rel.split("/") if p not in ("", ".", "..")]
+    if not parts:
+        return "file.bin"
+    return "/".join(parts)
+
+
+def save_uploaded_folder(items):
+    base = upload_root_dir()
+    base.mkdir(parents=True, exist_ok=True)
+    folder_name = f"folder-{int(time.time())}-{secrets.token_hex(4)}"
+    source_dir = base / folder_name
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    for it in items:
+        rel = _safe_rel_path(getattr(it, "filename", "") or "file.bin")
+        target = source_dir / Path(rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("wb") as f:
+            shutil.copyfileobj(it.file, f)
+
+    zip_path = base / f"{folder_name}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for p in source_dir.rglob("*"):
+            if p.is_file():
+                zf.write(p, p.relative_to(source_dir))
+
+    extract_dir = base / f"{folder_name}-extracted"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(extract_dir)
+
+    return str(extract_dir)
+
+
 def ensure_repo_files(relative_paths, live_cb=None):
     for rel in relative_paths:
         rel_path = Path(rel)
@@ -178,7 +218,11 @@ def run_windows_installer(form, live_cb=None):
         if source_value:
             form["SourceValue"] = [source_value]
     if not source_value:
-        return 1, "Source path/URL or uploaded file is required."
+        source_value = (form.get("SourceFolder", [""])[0] or "").strip()
+        if source_value:
+            form["SourceValue"] = [source_value]
+    if not source_value:
+        return 1, "Source path/URL, uploaded file, or uploaded folder is required."
 
     cmd = [
         "powershell.exe",
@@ -270,8 +314,12 @@ def run_linux_installer(form, live_cb=None, require_source=True):
         source_value = (form.get("SOURCE_FILE", [""])[0] or "").strip()
         if source_value:
             form["SOURCE_VALUE"] = [source_value]
+    if not source_value:
+        source_value = (form.get("SOURCE_FOLDER", [""])[0] or "").strip()
+        if source_value:
+            form["SOURCE_VALUE"] = [source_value]
     if require_source and not source_value:
-        return 1, "Source path/URL or uploaded file is required."
+        return 1, "Source path/URL, uploaded file, or uploaded folder is required."
 
     installer_cmd = ["bash", str(LINUX_INSTALLER)]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
@@ -823,13 +871,20 @@ class Handler(BaseHTTPRequestHandler):
             for key in keys:
                 item = fs[key]
                 items = item if isinstance(item, list) else [item]
+                folder_items = []
                 for it in items:
                     if getattr(it, "filename", None):
                         if it.file:
-                            saved = save_uploaded_stream(it.filename, it.file)
-                            result.setdefault(key, []).append(saved)
+                            if key in ("SourceFolder", "SOURCE_FOLDER"):
+                                folder_items.append(it)
+                            else:
+                                saved = save_uploaded_stream(it.filename, it.file)
+                                result.setdefault(key, []).append(saved)
                     else:
                         result.setdefault(key, []).append((it.value or "").strip())
+                if folder_items:
+                    saved_folder = save_uploaded_folder(folder_items)
+                    result.setdefault(key, []).append(saved_folder)
             return result
         return self.parse_form()
 

@@ -3,6 +3,16 @@ const {
 } = MaterialUI;
 
 function Field({ field }) {
+  if (field.type === "folder") {
+    return (
+      <Box sx={{ mb: 1.5 }}>
+        <Typography variant="caption" sx={{ display: "block", mb: 0.5, color: "text.secondary" }}>
+          {field.label}
+        </Typography>
+        <input type="file" name={field.name} webkitdirectory="" directory="" multiple />
+      </Box>
+    );
+  }
   if (field.type === "file") {
     return (
       <Box sx={{ mb: 1.5 }}>
