@@ -1,5 +1,5 @@
 const {
-  Alert, AppBar, Box, Button, Card, CardContent, CssBaseline, Divider, Drawer,
+  Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Divider, Drawer,
   FormControl, Grid, IconButton, InputLabel, List, ListItemButton, ListItemIcon,
   ListItemText, MenuItem, Select, Stack, TextField, Toolbar, Typography, Paper
 } = MaterialUI;
@@ -16,6 +16,7 @@ const ChevronRight = Icons.ChevronRight || (() => React.createElement("span", nu
 const cfg = window.__APP_CONFIG__ || { os: "windows", os_label: "Windows", message: "" };
 const DRAWER_W = 280;
 const DRAWER_MIN = 78;
+const APP_TITLE = "Server Installer Panel";
 
 function fieldsToForm(fields) {
   return fields.map((f) => {
@@ -77,6 +78,7 @@ function App() {
   const [termMin, setTermMin] = React.useState(false);
   const [termOpen, setTermOpen] = React.useState(false);
   const [termPos, setTermPos] = React.useState({ x: null, y: null });
+  const [infoMessage, setInfoMessage] = React.useState("");
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
 
   const navItems = React.useMemo(() => {
@@ -161,15 +163,28 @@ function App() {
   };
 
   const drawer = (
-    <Box sx={{ height: "100%", background: "linear-gradient(180deg,#0b1f3a,#14345b)", color: "#deebff", p: 1.5 }}>
+    <Box sx={{ height: "100%", background: "linear-gradient(180deg,#081726,#132d4b)", color: "#deebff", p: 1.5 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 1, pb: 2, pt: 1 }}>
-        {!collapsed && <Typography variant="h6" fontWeight={800}>DotNet Installer</Typography>}
+        {!collapsed && (
+          <Box>
+            <Typography variant="h6" fontWeight={800}>{APP_TITLE}</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.8 }}>Operations Center</Typography>
+          </Box>
+        )}
         {!isMobile && (
           <IconButton sx={{ color: "#deebff" }} onClick={() => setCollapsed((v) => !v)}>
             {collapsed ? <ChevronRight /> : <ChevronLeft />}
           </IconButton>
         )}
       </Stack>
+      {!collapsed && (
+        <Chip
+          label={cfg.os_label}
+          size="small"
+          sx={{ mb: 1.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }}
+        />
+      )}
+      {!collapsed && <Typography sx={{ px: 2, pb: 0.8, fontSize: 12, opacity: 0.72, textTransform: "uppercase", letterSpacing: ".08em" }}>Modules</Typography>}
       <List sx={{ pt: 0 }}>
         {navItems.map((n) => (
           <ListItemButton
@@ -202,7 +217,7 @@ function App() {
           zIndex: 1300,
           ml: `${mainMargin}px`,
           width: `calc(100% - ${mainMargin}px)`,
-          background: "linear-gradient(90deg,#0b1f3a,#244a7a)",
+          background: "linear-gradient(90deg,#081726,#1a3f66)",
           transition: "all .2s ease",
         }}
       >
@@ -211,7 +226,7 @@ function App() {
             <MenuIcon />
           </IconButton>
           <Box sx={{ ml: 1 }}>
-            <Typography variant="h6" fontWeight={800}>Server Installer Control Center</Typography>
+            <Typography variant="h6" fontWeight={800}>{APP_TITLE}</Typography>
             <Typography variant="caption" sx={{ opacity: 0.9 }}>Detected OS: {cfg.os_label}</Typography>
           </Box>
         </Toolbar>
@@ -236,13 +251,86 @@ function App() {
 
       <Box component="main" sx={{ flexGrow: 1, mt: "64px", p: { xs: 2, md: 3 }, ml: `${mainMargin}px`, transition: "margin .2s ease" }}>
         {cfg.message && <Alert severity="success" sx={{ mb: 2 }}>{cfg.message}</Alert>}
+        {infoMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfoMessage("")}>{infoMessage}</Alert>}
         {view === "home" && (
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", boxShadow: "0 10px 30px rgba(15,23,42,.07)" }}>
-            <CardContent>
-              <Typography variant="h5" fontWeight={800} sx={{ mb: 1 }}>Dashboard</Typography>
-              <Typography color="text.secondary">Select an installer section from the sidebar. Live command output appears in the web terminal box.</Typography>
-            </CardContent>
-          </Card>
+          <Stack spacing={2}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", boxShadow: "0 10px 30px rgba(15,23,42,.07)" }}>
+              <CardContent>
+                <Typography variant="h5" fontWeight={800} sx={{ mb: 1 }}>Dashboard</Typography>
+                <Typography color="text.secondary">Select an operation below. Live command output appears in the web terminal.</Typography>
+              </CardContent>
+            </Card>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={4}>
+                <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+                  <CardContent>
+                    <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>Install IIS</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Install IIS stack and .NET prerequisites.
+                    </Typography>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }}
+                      disabled={cfg.os !== "windows"}
+                      onClick={() => {
+                        if (cfg.os !== "windows") {
+                          setInfoMessage("Install IIS is available on Windows only.");
+                          return;
+                        }
+                        const form = document.createElement("form");
+                        form.innerHTML = '<input name="DotNetChannel" value="8.0" />';
+                        const ev = { preventDefault: () => {}, currentTarget: form };
+                        run(ev, "/run/windows_setup_iis", "Windows IIS Stack Setup");
+                      }}
+                    >
+                      Install IIS
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+                  <CardContent>
+                    <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>Deploy .NET</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Open deployment page for the current OS.
+                    </Typography>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, bgcolor: "#1e40af" }}
+                      onClick={() => {
+                        if (cfg.os === "windows") setView("win-deploy");
+                        else if (cfg.os === "linux") setView("linux");
+                        else setView("macos");
+                      }}
+                    >
+                      Deploy .NET
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+                  <CardContent>
+                    <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>Deploy S3</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Placeholder action for future S3 deployment flow.
+                    </Typography>
+                    <Button
+                      fullWidth
+                      variant="outlined"
+                      sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }}
+                      onClick={() => setInfoMessage("Deploy S3 is not implemented yet.")}
+                    >
+                      Deploy S3
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Stack>
         )}
 
         {cfg.os === "windows" && view === "win-setup" && (
