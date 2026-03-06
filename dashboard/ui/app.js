@@ -259,13 +259,14 @@ function App() {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-              <CardContent>
-                <Typography variant="h6" fontWeight={800}>Install Docker</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Reserved action.</Typography>
-                <Button fullWidth variant="outlined" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setInfoMessage("Install Docker (Linux) is not implemented yet.")}>Start</Button>
-              </CardContent>
-            </Card>
+            <ActionCard
+              title="Install Docker"
+              description="Install Docker Engine on Linux."
+              action="/run/linux_setup_docker"
+              fields={[]}
+              onRun={run}
+              color="#1f2937"
+            />
           </Grid>
           <Grid item xs={12} md={6}>
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>

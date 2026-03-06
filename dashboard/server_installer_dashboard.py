@@ -290,6 +290,47 @@ def run_linux_installer(form, live_cb=None, require_source=True):
     return run_process(installer_cmd, env=env, live_cb=live_cb)
 
 
+def run_linux_docker_setup(live_cb=None):
+    if os.name == "nt":
+        return 1, "Linux Docker setup can only run on Linux hosts."
+
+    script = r"""
+set -e
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "Unsupported Linux distribution for automatic Docker install. apt-get is required."
+  exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+echo "Updating apt package index..."
+apt-get update
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Installing Docker Engine..."
+  apt-get install -y docker.io
+else
+  echo "Docker is already installed."
+fi
+
+echo "Enabling Docker service..."
+systemctl enable --now docker || true
+
+if command -v docker >/dev/null 2>&1; then
+  echo "Docker version:"
+  docker --version
+  echo "Docker installed and ready."
+else
+  echo "Docker installation did not complete successfully."
+  exit 1
+fi
+"""
+
+    cmd = ["bash", "-lc", script]
+    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        cmd = ["sudo"] + cmd
+    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
+
+
 def start_live_job(title, runner):
     job_id = secrets.token_hex(12)
     with JOBS_LOCK:
@@ -992,6 +1033,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_linux_installer(form, require_source=False)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/linux_setup_docker":
+            title = "Linux Docker Setup Installer"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_linux_docker_setup(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_linux_docker_setup()
                 self.respond_run_result(title, code, output)
             return
 
