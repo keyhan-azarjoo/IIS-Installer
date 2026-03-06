@@ -2330,7 +2330,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/api/system/port":
-            form = self.parse_form()
+            form = self.parse_request_form()
             action = (form.get("action", [""])[0] or "").strip()
             port = (form.get("port", [""])[0] or "").strip()
             protocol = (form.get("protocol", ["tcp"])[0] or "tcp").strip()
@@ -2339,7 +2339,7 @@ class Handler(BaseHTTPRequestHandler):
             self.write_json({"ok": ok, "message": message}, status)
             return
         if self.path == "/api/system/port_check":
-            form = self.parse_form()
+            form = self.parse_request_form()
             port = (form.get("port", [""])[0] or "").strip()
             protocol = (form.get("protocol", ["tcp"])[0] or "tcp").strip()
             result = get_port_usage(port, protocol)
@@ -2347,7 +2347,7 @@ class Handler(BaseHTTPRequestHandler):
             self.write_json(result, status)
             return
         if self.path == "/api/system/service":
-            form = self.parse_form()
+            form = self.parse_request_form()
             action = (form.get("action", [""])[0] or "").strip()
             name = (form.get("name", [""])[0] or "").strip()
             kind = (form.get("kind", ["service"])[0] or "service").strip()

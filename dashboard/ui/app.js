@@ -64,6 +64,7 @@ function App() {
   const [page, setPage] = React.useState("home");
   const [termText, setTermText] = React.useState("Ready. Click Start to run and stream output.");
   const [termState, setTermState] = React.useState("Idle");
+  const [runError, setRunError] = React.useState("");
   const [termOpen, setTermOpen] = React.useState(false);
   const [termMin, setTermMin] = React.useState(false);
   const [termPos, setTermPos] = React.useState({ x: null, y: null });
@@ -164,6 +165,9 @@ function App() {
       const next = j.next_offset || offset;
       if (j.done) {
         append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code})`);
+        if (Number(j.exit_code) !== 0) {
+          setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
+        }
         setTermState("Idle");
         loadSystem.current();
         return;
@@ -184,6 +188,7 @@ function App() {
     setTermOpen(true);
     setTermMin(false);
     const isS3Install = action === "/run/s3_linux" || action === "/run/s3_windows" || action === "/run/s3_windows_iis" || action === "/run/s3_windows_docker";
+    setRunError("");
     if (isS3Install) {
       // If requested HTTPS port is busy, ask user for another port before start.
       while (true) {
@@ -221,6 +226,9 @@ function App() {
       if (!j.job_id) {
         append(j.output || "No output.");
         append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code ?? 1})`);
+        if (Number(j.exit_code ?? 1) !== 0) {
+          setRunError(`${title} failed (exit ${j.exit_code ?? 1}). ${String(j.output || "").slice(0, 200)}`);
+        }
         setTermState("Idle");
         loadSystem.current();
         return;
@@ -228,6 +236,7 @@ function App() {
       poll(j.job_id, title, 0);
     } catch (err) {
       append(`Request failed: ${err}`);
+      setRunError(`${title} request failed: ${err}`);
       setTermState("Error");
     }
   };
@@ -879,6 +888,7 @@ function App() {
       <Box component="main" sx={{ flexGrow: 1, mt: "64px", p: { xs: 2, md: 3 }, ml: `${mainMargin}px`, transition: "margin .2s ease" }}>
         {cfg.message && <Alert severity="success" sx={{ mb: 2 }}>{cfg.message}</Alert>}
         {infoMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfoMessage("")}>{infoMessage}</Alert>}
+        {runError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setRunError("")}>{runError}</Alert>}
         {systemErr && <Alert severity="error" sx={{ mb: 2 }}>{systemErr}</Alert>}
 
         <Grid container spacing={1.2} sx={{ mb: 1.5 }}>
