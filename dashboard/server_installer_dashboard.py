@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import secrets
+import shutil
 import socket
 import subprocess
 import threading
@@ -117,6 +118,25 @@ def run_process(cmd, env=None, live_cb=None):
     return proc.returncode, "".join(chunks)
 
 
+def upload_root_dir():
+    if os.name == "nt":
+        d_drive = Path("D:/")
+        if d_drive.exists():
+            return d_drive / "Server-Installer" / "uploads"
+        return Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "uploads"
+    return Path("/var/tmp/server-installer/uploads")
+
+
+def save_uploaded_stream(filename, stream):
+    safe_name = Path(filename or "upload.bin").name
+    base = upload_root_dir()
+    base.mkdir(parents=True, exist_ok=True)
+    target = base / f"{int(time.time())}-{secrets.token_hex(4)}-{safe_name}"
+    with target.open("wb") as f:
+        shutil.copyfileobj(stream, f)
+    return str(target)
+
+
 def ensure_repo_files(relative_paths, live_cb=None):
     for rel in relative_paths:
         rel_path = Path(rel)
@@ -146,6 +166,14 @@ def run_windows_installer(form, live_cb=None):
     if not is_windows_admin():
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
     ensure_repo_files(["DotNet/windows/install-windows-dotnet-host.ps1"], live_cb=live_cb)
+
+    source_value = (form.get("SourceValue", [""])[0] or "").strip()
+    if not source_value:
+        source_value = (form.get("SourceFile", [""])[0] or "").strip()
+        if source_value:
+            form["SourceValue"] = [source_value]
+    if not source_value:
+        return 1, "Source path/URL or uploaded file is required."
 
     cmd = [
         "powershell.exe",
@@ -227,10 +255,18 @@ def run_windows_setup_only(form, target, live_cb=None):
     return 1, "Unknown Windows setup target."
 
 
-def run_linux_installer(form, live_cb=None):
+def run_linux_installer(form, live_cb=None, require_source=True):
     if os.name == "nt":
         return 1, "Linux installer can only run on Linux hosts."
     ensure_repo_files(["DotNet/linux/install-linux-dotnet-runner.sh"], live_cb=live_cb)
+
+    source_value = (form.get("SOURCE_VALUE", [""])[0] or "").strip()
+    if not source_value:
+        source_value = (form.get("SOURCE_FILE", [""])[0] or "").strip()
+        if source_value:
+            form["SOURCE_VALUE"] = [source_value]
+    if require_source and not source_value:
+        return 1, "Source path/URL or uploaded file is required."
 
     installer_cmd = ["bash", str(LINUX_INSTALLER)]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
@@ -717,6 +753,34 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8", errors="replace")
         return parse_qs(raw, keep_blank_values=True)
 
+    def parse_request_form(self):
+        ctype = (self.headers.get("Content-Type", "") or "").lower()
+        if ctype.startswith("multipart/form-data"):
+            import cgi
+
+            env = {
+                "REQUEST_METHOD": "POST",
+                "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+            }
+            fs = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env, keep_blank_values=True)
+            result = {}
+            if not fs:
+                return result
+            keys = fs.keys() if hasattr(fs, "keys") else []
+            for key in keys:
+                item = fs[key]
+                items = item if isinstance(item, list) else [item]
+                for it in items:
+                    if getattr(it, "filename", None):
+                        if it.file:
+                            saved = save_uploaded_stream(it.filename, it.file)
+                            result.setdefault(key, []).append(saved)
+                    else:
+                        result.setdefault(key, []).append((it.value or "").strip())
+            return result
+        return self.parse_form()
+
     def set_cookie(self, sid):
         self.send_header("Set-Cookie", f"sid={sid}; Path=/; HttpOnly")
 
@@ -862,7 +926,7 @@ class Handler(BaseHTTPRequestHandler):
             self.write_html("Unauthorized", HTTPStatus.UNAUTHORIZED)
             return
 
-        form = self.parse_form()
+        form = self.parse_request_form()
 
         if self.path == "/run/windows":
             title = "Windows Combined Installer"
@@ -914,20 +978,20 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/run/linux":
             title = "Linux Combined Installer"
             if self.is_fetch():
-                job_id = start_live_job(title, lambda cb: run_linux_installer(form, live_cb=cb))
+                job_id = start_live_job(title, lambda cb: run_linux_installer(form, live_cb=cb, require_source=True))
                 self.write_json({"job_id": job_id, "title": title})
             else:
-                code, output = run_linux_installer(form)
+                code, output = run_linux_installer(form, require_source=True)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/linux_prereq":
             form["SOURCE_VALUE"] = [""]
             title = "Linux Prerequisites Installer"
             if self.is_fetch():
-                job_id = start_live_job(title, lambda cb: run_linux_installer(form, live_cb=cb))
+                job_id = start_live_job(title, lambda cb: run_linux_installer(form, live_cb=cb, require_source=False))
                 self.write_json({"job_id": job_id, "title": title})
             else:
-                code, output = run_linux_installer(form)
+                code, output = run_linux_installer(form, require_source=False)
                 self.respond_run_result(title, code, output)
             return
 

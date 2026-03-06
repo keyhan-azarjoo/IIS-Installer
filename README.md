@@ -3,7 +3,6 @@
 This repository includes OS-specific installers under `DotNet`:
 
 - `DotNet/windows/install-windows-dotnet-host.ps1`
-- `DotNet/windows/deploy-windows-over-ssh.ps1`
 - `DotNet/windows/start-server-dashboard.ps1`
 - `DotNet/windows/modules/common.ps1`
 - `DotNet/windows/modules/iis-mode.ps1`
@@ -79,30 +78,6 @@ Example in Docker mode:
 .\install-windows-dotnet-host.ps1 -DeploymentMode Docker -DotNetChannel 10 -SiteName MyApi -DockerHostPort 8080
 ```
 
-### Windows Over SSH
-
-If you are connecting to a Windows server over SSH and want to use a local file path from your own computer, use the local-side deploy script instead of running the server installer directly over SSH.
-
-What it does:
-
-- Runs on your local computer.
-- Searches under the local path for an already published app first.
-- If no published app is found, searches for a `.csproj` and runs `dotnet publish -c Release` locally.
-- Packages the build as a `.zip`.
-- Copies the installer script, Windows modules, and package to the remote Windows server with `scp`.
-- Runs the server installer remotely over `ssh`.
-
-Example:
-
-```powershell
-.\DotNet\windows\deploy-windows-over-ssh.ps1 `
-  -LocalPath "C:\code\weight_system\api_weight_system" `
-  -RemoteHost "server.example.com" `
-  -RemoteUser "Administrator" `
-  -DotNetChannel "9.0" `
-  -SiteName "WeightApi"
-```
-
 ## Linux
 
 Run dashboard mode:
@@ -172,7 +147,7 @@ If the artifact is private on GitHub, the installers will prompt for a GitHub to
 
 - Remote downloads must already be published build artifacts.
 - For local deployment, you can pass either raw source code (with a `.csproj`) or an already published output folder.
-- A script already running on a remote server cannot directly read a path from your local computer; for that workflow, use `deploy-windows-over-ssh.ps1`.
+- A script already running on a remote server cannot directly read a path from your local computer.
 - The Windows flow is intended for ASP.NET Core web apps hosted behind IIS.
 - Windows also supports Docker mode as an alternative to IIS.
 - The Linux flow runs the app behind Nginx with HTTP and HTTPS termination.

@@ -60,7 +60,7 @@ function App() {
 
   const run = async (event, action, title) => {
     event.preventDefault();
-    const body = new URLSearchParams(new FormData(event.currentTarget)).toString();
+    const body = new FormData(event.currentTarget);
     append("============================================================");
     append(`[${new Date().toLocaleTimeString()}] ${title} started`);
     setTermState(`Running: ${title}`);
@@ -69,7 +69,7 @@ function App() {
     try {
       const r = await fetch(action, {
         method: "POST",
-        headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
+        headers: { "X-Requested-With": "fetch" },
         body,
       });
       const j = await r.json();
@@ -176,7 +176,8 @@ function App() {
               description="Deploy application to IIS."
               action="/run/windows_iis"
               fields={[
-                { name: "SourceValue", label: "Source Path or URL", required: true },
+                { name: "SourceValue", label: "Source Path or URL" },
+                { name: "SourceFile", label: "Or Upload File (.zip/.tar/.published)", type: "file" },
                 { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
               ]}
               onRun={run}
@@ -206,7 +207,8 @@ function App() {
               description="Deploy application to Docker."
               action="/run/windows_docker"
               fields={[
-                { name: "SourceValue", label: "Source Path or URL", required: true },
+                { name: "SourceValue", label: "Source Path or URL" },
+                { name: "SourceFile", label: "Or Upload File (.zip/.tar/.published)", type: "file" },
                 { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
                 { name: "DockerHostPort", label: "Docker Host Port", defaultValue: "8080" },
               ]}
@@ -238,7 +240,8 @@ function App() {
               action="/run/linux"
               fields={[
                 { name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" },
-                { name: "SOURCE_VALUE", label: "Source Path or URL", required: true, placeholder: "/srv/app or https://..." },
+                { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://..." },
+                { name: "SOURCE_FILE", label: "Or Upload File (.zip/.tar/.published)", type: "file" },
                 { name: "DOMAIN_NAME", label: "Domain Name" },
                 { name: "SERVICE_NAME", label: "Service Name", defaultValue: "dotnet-app" },
                 { name: "SERVICE_PORT", label: "Service Port", defaultValue: "5000" },
