@@ -992,8 +992,6 @@ def run_linux_s3_installer(form=None, live_cb=None):
     ensure_repo_files(S3_LINUX_FILES, live_cb=live_cb)
 
     cmd = ["bash", str(S3_LINUX_INSTALLER)]
-    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-        cmd = ["sudo"] + cmd
     requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
     if requested_https:
         if not requested_https.isdigit():
@@ -1022,6 +1020,7 @@ def run_linux_s3_installer(form=None, live_cb=None):
     scripted_input = f"{host_line}\n{lan_line}\n{https_flow}\n" + ("\n" * 200)
     env = os.environ.copy()
     form = form or {}
+    forwarded_env = {}
     for key in [
         "LOCALS3_HOST",
         "LOCALS3_ENABLE_LAN",
@@ -1032,6 +1031,14 @@ def run_linux_s3_installer(form=None, live_cb=None):
         value = (form.get(key, [""])[0] or "").strip()
         if value:
             env[key] = value
+            forwarded_env[key] = value
+
+    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        cmd = ["sudo", "env"]
+        for k, v in forwarded_env.items():
+            cmd.append(f"{k}={v}")
+        cmd += ["bash", str(S3_LINUX_INSTALLER)]
+
     return run_process(cmd, env=env, live_cb=live_cb, input_text=scripted_input)
 
 

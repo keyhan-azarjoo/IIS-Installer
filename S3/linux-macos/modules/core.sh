@@ -138,9 +138,9 @@ resolve_https_port_unix() {
     warn "Port 443 is busy."
   fi
 
-  echo "Choose HTTPS port option:"
-  echo "  1) Auto alternate port (tries: 8443, 9443, 10443)"
-  echo "  2) Enter custom port"
+  echo "Choose HTTPS port option:" >&2
+  echo "  1) Auto alternate port (tries: 8443, 9443, 10443)" >&2
+  echo "  2) Enter custom port" >&2
   read -r -p "Select option [1/2] (default: 1): " choice
 
   if [ "${choice:-1}" = "2" ]; then
