@@ -53,7 +53,11 @@ function Get-PreferredIPv4Address {
 }
 
 if ([string]::IsNullOrWhiteSpace($BindHost) -or $BindHost -eq "auto" -or $BindHost -eq "0.0.0.0") {
-    $BindHost = Get-PreferredIPv4Address
+    $displayHost = Get-PreferredIPv4Address
+    $BindHost = "0.0.0.0"
+}
+else {
+    $displayHost = $BindHost
 }
 
 function Ensure-ServerInstallerFiles {
@@ -62,12 +66,8 @@ function Ensure-ServerInstallerFiles {
 
     $requiredFiles = @(
         "dashboard/server_installer_dashboard.py",
-        "dashboard/server_dashboard_ui.js",
-        "DotNet/windows/install-windows-dotnet-host.ps1",
-        "DotNet/windows/modules/common.ps1",
-        "DotNet/windows/modules/iis-mode.ps1",
-        "DotNet/windows/modules/docker-mode.ps1",
-        "DotNet/linux/install-linux-dotnet-runner.sh"
+        "dashboard/ui/components.js",
+        "dashboard/ui/app.js"
     )
 
     foreach ($relativePath in $requiredFiles) {
@@ -121,7 +121,7 @@ $argsList += @("--port", "$Port")
 
 Write-Host "Starting dashboard..."
 Write-Host "Local URL: http://127.0.0.1:$Port"
-Write-Host "Server URL: http://$BindHost`:$Port"
+Write-Host "Server URL: http://$displayHost`:$Port"
 Push-Location $installRoot
 try {
     & $pythonCommand @argsList

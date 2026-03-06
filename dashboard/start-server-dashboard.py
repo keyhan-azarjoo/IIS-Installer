@@ -10,14 +10,10 @@ from pathlib import Path
 
 
 REPO = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
-REQUIRED_FILES = [
+DASHBOARD_FILES = [
     "dashboard/server_installer_dashboard.py",
-    "dashboard/server_dashboard_ui.js",
-    "DotNet/windows/install-windows-dotnet-host.ps1",
-    "DotNet/windows/modules/common.ps1",
-    "DotNet/windows/modules/iis-mode.ps1",
-    "DotNet/windows/modules/docker-mode.ps1",
-    "DotNet/linux/install-linux-dotnet-runner.sh",
+    "dashboard/ui/components.js",
+    "dashboard/ui/app.js",
 ]
 
 
@@ -34,7 +30,7 @@ def cache_root() -> Path:
 
 def ensure_files(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    for rel in REQUIRED_FILES:
+    for rel in DASHBOARD_FILES:
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         url = f"{REPO}/{rel}"
@@ -117,12 +113,15 @@ def main() -> int:
         print(f"Dashboard script not found: {app}", file=sys.stderr)
         return 1
 
-    host = preferred_host(args.host)
+    display_host = preferred_host(args.host)
+    bind_host = args.host
+    if (not bind_host) or bind_host in ("auto", "0.0.0.0"):
+        bind_host = "0.0.0.0"
     print(f"OS detected: {platform.system()}")
-    print(f"Dashboard URL: http://{host}:{args.port}")
+    print(f"Dashboard URL: http://{display_host}:{args.port}")
     print(f"Local URL: http://127.0.0.1:{args.port}")
 
-    cmd = [sys.executable, str(app), "--host", host, "--port", str(args.port)]
+    cmd = [sys.executable, str(app), "--host", bind_host, "--port", str(args.port)]
     return subprocess.call(cmd, cwd=str(root))
 
 

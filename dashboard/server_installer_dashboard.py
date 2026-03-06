@@ -11,6 +11,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,6 +21,16 @@ from urllib.parse import parse_qs
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
 LINUX_INSTALLER = ROOT / "DotNet" / "linux" / "install-linux-dotnet-runner.sh"
+REPO_RAW_BASE = os.environ.get(
+    "SERVER_INSTALLER_REPO_BASE",
+    "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main",
+)
+
+WINDOWS_SETUP_MODULES = [
+    "DotNet/windows/modules/common.ps1",
+    "DotNet/windows/modules/iis-mode.ps1",
+    "DotNet/windows/modules/docker-mode.ps1",
+]
 
 SESSIONS = set()
 JOBS = {}
@@ -106,11 +117,35 @@ def run_process(cmd, env=None, live_cb=None):
     return proc.returncode, "".join(chunks)
 
 
+def ensure_repo_files(relative_paths, live_cb=None):
+    for rel in relative_paths:
+        rel_path = Path(rel)
+        target = ROOT / rel_path
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_target = target.with_suffix(target.suffix + ".download")
+        url = f"{REPO_RAW_BASE}/{rel_path.as_posix()}"
+        message = f"Downloading required file on demand: {rel_path.as_posix()}"
+        if live_cb:
+            live_cb(message + "\n")
+        else:
+            print(message)
+        try:
+            urllib.request.urlretrieve(url, tmp_target)
+            os.replace(tmp_target, target)
+        except Exception as ex:
+            if tmp_target.exists():
+                tmp_target.unlink(missing_ok=True)
+            raise RuntimeError(f"Failed to download required file '{rel_path.as_posix()}': {ex}") from ex
+
+
 def run_windows_installer(form, live_cb=None):
     if os.name != "nt":
         return 1, "Windows installer can only run on Windows hosts."
     if not is_windows_admin():
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    ensure_repo_files(["DotNet/windows/install-windows-dotnet-host.ps1"], live_cb=live_cb)
 
     cmd = [
         "powershell.exe",
@@ -147,6 +182,7 @@ def run_windows_setup_only(form, target, live_cb=None):
         return 1, "Windows setup actions can only run on Windows hosts."
     if not is_windows_admin():
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    ensure_repo_files(WINDOWS_SETUP_MODULES, live_cb=live_cb)
 
     dotnet_channel = (form.get("DotNetChannel", ["8.0"])[0] or "8.0").strip()
     if not dotnet_channel:
@@ -194,6 +230,7 @@ def run_windows_setup_only(form, target, live_cb=None):
 def run_linux_installer(form, live_cb=None):
     if os.name == "nt":
         return 1, "Linux installer can only run on Linux hosts."
+    ensure_repo_files(["DotNet/linux/install-linux-dotnet-runner.sh"], live_cb=live_cb)
 
     installer_cmd = ["bash", str(LINUX_INSTALLER)]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
@@ -300,7 +337,8 @@ def page_dashboard_mui(message="", system_name=""):
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel" src="/static/server_dashboard_ui.js"></script>
+  <script type="text/babel" src="/static/ui/components.js"></script>
+  <script type="text/babel" src="/static/ui/app.js"></script>
 </body>
 </html>""".replace("__CONFIG__", json.dumps(config))
 
@@ -732,15 +770,31 @@ class Handler(BaseHTTPRequestHandler):
             self.write_html(page_output(title, output, code))
 
     def do_GET(self):
-        if self.path == "/static/server_dashboard_ui.js":
-            ui_script = ROOT / "dashboard" / "server_dashboard_ui.js"
-            if not ui_script.exists():
-                self.write_html("Dashboard UI script not found.", HTTPStatus.NOT_FOUND)
+        if self.path.startswith("/static/"):
+            static_rel = self.path.split("?", 1)[0].replace("/static/", "", 1).lstrip("/")
+            static_root = (ROOT / "dashboard").resolve()
+            static_file = (static_root / static_rel).resolve()
+            try:
+                static_file.relative_to(static_root)
+            except Exception:
+                self.write_html("Invalid static path.", HTTPStatus.BAD_REQUEST)
                 return
-            data = ui_script.read_bytes()
+            if (not static_file.exists()) or (not static_file.is_file()):
+                self.write_html("Static file not found.", HTTPStatus.NOT_FOUND)
+                return
+            data = static_file.read_bytes()
+            ext = static_file.suffix.lower()
+            if ext == ".js":
+                content_type = "application/javascript; charset=utf-8"
+            elif ext == ".css":
+                content_type = "text/css; charset=utf-8"
+            elif ext == ".json":
+                content_type = "application/json; charset=utf-8"
+            else:
+                content_type = "text/plain; charset=utf-8"
             try:
                 self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 self.send_header("Pragma", "no-cache")
