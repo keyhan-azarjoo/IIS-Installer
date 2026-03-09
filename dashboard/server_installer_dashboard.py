@@ -28,7 +28,7 @@ from urllib.parse import parse_qs
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "s3-fix-2026-03-09-1256"
+BUILD_ID = "s3-fix-2026-03-09-1416"
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
