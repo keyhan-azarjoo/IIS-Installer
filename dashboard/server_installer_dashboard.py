@@ -1157,6 +1157,7 @@ def get_system_status():
         "memory": get_memory_info(),
         "network_totals": get_network_totals(),
         "ips": get_ip_addresses(),
+        "public_ip": get_public_ipv4(),
         "listening_ports": get_listening_ports(),
         "software": {
             "dotnet": get_dotnet_info(),
