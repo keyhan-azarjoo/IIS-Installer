@@ -1571,6 +1571,36 @@ def is_local_tcp_port_listening(port):
     return False
 
 
+def _windows_locals3_iis_owns_port(port):
+    if os.name != "nt":
+        return False
+    try:
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            (
+                "Import-Module WebAdministration; "
+                "$site='LocalS3'; "
+                "if (Test-Path \"IIS:\\Sites\\$site\") { "
+                "Get-WebBinding -Name $site -Protocol https | "
+                "ForEach-Object { $_.bindingInformation } }"
+            ),
+        ]
+        rc, out = run_capture(cmd, timeout=20)
+        if rc != 0 or not out:
+            return False
+        for line in out.splitlines():
+            parts = line.strip().split(":")
+            if len(parts) >= 2 and parts[1].isdigit() and int(parts[1]) == int(port):
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def pick_free_local_tcp_port(candidates):
     for p in candidates:
         try:
@@ -1807,7 +1837,11 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         if not requested_https.isdigit():
             return 1, "LOCALS3_HTTPS_PORT must be numeric."
         if is_local_tcp_port_listening(requested_https):
-            return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
+            if _windows_locals3_iis_owns_port(requested_https):
+                # Allow reuse when the existing LocalS3 IIS binding owns the port (update/reinstall).
+                pass
+            else:
+                return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
     # Script is interactive; feed defaults for remaining prompts.
     scripted_input = mode_choice + ("\n" * 200)
     cmd = [

@@ -222,7 +222,7 @@ function App() {
 
       // Strict pre-check: do not start if port is owned by another app.
       const p = String(body.get("LOCALS3_HTTPS_PORT") || "").trim();
-      if (p) {
+      if (p && cfg.os !== "windows") {
         const fd = new FormData();
         fd.append("port", p);
         fd.append("protocol", "tcp");
