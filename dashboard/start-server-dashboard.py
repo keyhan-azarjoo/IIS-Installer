@@ -459,6 +459,78 @@ WantedBy=multi-user.target
     return 0
 
 
+def install_or_update_windows_task(root: Path, bind_host: str, selected_port: int, display_host: str) -> int:
+    if os.name != "nt":
+        return 1
+    if not is_windows_admin():
+        print("Windows service installation requires Administrator. Re-run as admin.", file=sys.stderr)
+        return 1
+
+    script_path = (root / "dashboard" / "start-server-dashboard.py").resolve()
+    if not script_path.exists():
+        print("Required dashboard files are missing after sync.", file=sys.stderr)
+        return 1
+
+    owner_state, own, foreign = port_owner_state(selected_port)
+    if owner_state == "foreign":
+        print(
+            f"Port {selected_port} is owned by another process ({', '.join(map(str, sorted(foreign)))}). "
+            "Choose another port.",
+            file=sys.stderr,
+        )
+        return 1
+    if owner_state == "dashboard":
+        stop_existing_dashboard_on_port(selected_port)
+
+    python_exe = sys.executable
+    task_name = "ServerInstallerDashboard"
+    task_cmd = f"\"{python_exe}\" \"{script_path}\" --run-server --host {bind_host} --port {selected_port}"
+    rc, out = run_capture(
+        [
+            "schtasks",
+            "/Create",
+            "/TN",
+            task_name,
+            "/SC",
+            "ONSTART",
+            "/RL",
+            "HIGHEST",
+            "/RU",
+            "SYSTEM",
+            "/TR",
+            task_cmd,
+            "/F",
+        ],
+        timeout=30,
+    )
+    if rc != 0:
+        print(f"schtasks /Create failed:\n{out}", file=sys.stderr)
+        return 1
+    run_capture(["schtasks", "/Run", "/TN", task_name], timeout=20)
+
+    state_file = root / "dashboard" / "service-state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "service": task_name,
+                "root": str(root),
+                "host": bind_host,
+                "port": selected_port,
+                "updated_at": int(time.time()),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    print(f"OS detected: {platform.system()}")
+    print(f"Service: {task_name} (scheduled task, enabled)")
+    print(f"Dashboard URL: http://{display_host}:{selected_port}")
+    print(f"Local URL: http://127.0.0.1:{selected_port}")
+    print("Re-running this same command will update files and restart the service.")
+    return 0
+
+
 def is_windows_admin() -> bool:
     if os.name != "nt":
         return True
@@ -530,9 +602,7 @@ def main() -> int:
     if os.name != "nt":
         return install_or_update_linux_service(root, bind_host, selected_port, display_host)
 
-    # Windows fallback: keep previous behavior (foreground process).
-    print("Service install mode is currently automatic on Linux systemd. Running in foreground on this OS.")
-    return run_dashboard_foreground(root, bind_host, selected_port, display_host)
+    return install_or_update_windows_task(root, bind_host, selected_port, display_host)
 
 
 if __name__ == "__main__":
