@@ -482,7 +482,8 @@ function Resolve-EnvPort {
     [string]$label,
     [switch]$requireIisBinding
   )
-  $raw = $env:$envName
+  $raw = ""
+  try { $raw = (Get-Item -Path "env:$envName" -ErrorAction SilentlyContinue).Value } catch {}
   if (-not $raw -or [string]::IsNullOrWhiteSpace($raw)) { return $null }
   $raw = $raw.Trim()
   $port = 0
