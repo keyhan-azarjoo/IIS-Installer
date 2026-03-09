@@ -118,20 +118,10 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
           <conditions>
             <add input="{SERVER_PORT}" pattern="^$consoleHttpsPort$" />
           </conditions>
-          <serverVariables>
-            <set name="HTTP_X_FORWARDED_PROTO" value="http" />
-            <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
-            <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
-          </serverVariables>
           <action type="Rewrite" url="http://127.0.0.1:$uiPort/{R:1}" />
         </rule>
         <rule name="MinIOApiProxy" stopProcessing="true">
           <match url="(.*)" />
-          <serverVariables>
-            <set name="HTTP_X_FORWARDED_PROTO" value="https" />
-            <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
-            <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
-          </serverVariables>
           <action type="Rewrite" url="http://127.0.0.1:$targetPort/{R:1}" />
         </rule>
       </rules>
@@ -158,20 +148,8 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
     exit 1
   }
 
-  try {
-    $allowedVars = Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/rewrite/allowedServerVariables" -Name "." -ErrorAction Stop
-    foreach ($varName in @("HTTP_X_FORWARDED_PROTO","HTTP_X_FORWARDED_HOST","HTTP_X_FORWARDED_FOR")) {
-      $alreadyAllowed = $false
-      if ($allowedVars -and $allowedVars.Collection) {
-        $alreadyAllowed = $null -ne ($allowedVars.Collection | Where-Object { $_.Attributes["name"].Value -eq $varName } | Select-Object -First 1)
-      }
-      if (-not $alreadyAllowed) {
-        Add-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/rewrite/allowedServerVariables" -Name "." -Value @{ name = $varName } -ErrorAction Stop | Out-Null
-      }
-    }
-  } catch {
-    Warn "Could not update IIS Rewrite allowed server variables automatically. If proxy requests fail, allow HTTP_X_FORWARDED_PROTO/HOST/FOR in IIS Rewrite settings."
-  }
+  # ServerVariables are not required for core proxy functionality and can trigger 500 errors
+  # when the rewrite module blocks them. Keep this minimal to avoid IIS errors.
 
   # Remove legacy LocalS3 certs before generating a fresh trust chain.
   # Older versions stored a self-signed localhost leaf in Root, which can cause Go to

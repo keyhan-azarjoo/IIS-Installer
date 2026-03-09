@@ -2060,15 +2060,27 @@ def run_dashboard_update(live_cb=None):
             "$ProgressPreference='SilentlyContinue'; "
             f"Set-Location -Path '{(ROOT / 'dashboard')}' ; "
             f"Invoke-WebRequest -Uri '{script_url}' -OutFile './start-server-dashboard.py'; "
-            "python .\\start-server-dashboard.py"
+            "$log = Join-Path $env:TEMP 'server-installer-dashboard-update.log'; "
+            "Start-Process -FilePath python -ArgumentList '.\\start-server-dashboard.py' "
+            "-WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $log;"
+            "Write-Host \"[INFO] Update launched in background. Log: $log\""
         )
         cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]
-        return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
+        rc, out = run_capture(cmd, timeout=30)
+        return (0 if rc == 0 else 1), (out or "")
 
     python_bin = "python3" if command_exists("python3") else "python"
-    shell_cmd = f"cd '{(ROOT / 'dashboard')}' && curl -fsSL '{script_url}' -o ./start-server-dashboard.py && {python_bin} ./start-server-dashboard.py"
+    log_path = "/tmp/server-installer-dashboard-update.log"
+    shell_cmd = (
+        f"cd '{(ROOT / 'dashboard')}' && "
+        f"curl -fsSL '{script_url}' -o ./start-server-dashboard.py && "
+        f"({python_bin} ./start-server-dashboard.py > '{log_path}' 2>&1 &)"
+    )
     cmd = ["bash", "-lc", shell_cmd]
-    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
+    rc, out = run_capture(cmd, timeout=30)
+    if live_cb:
+        live_cb(f"[INFO] Update launched in background. Log: {log_path}\n")
+    return (0 if rc == 0 else 1), (out or "")
 
 def run_windows_s3_stop(live_cb=None):
     if os.name != "nt":
