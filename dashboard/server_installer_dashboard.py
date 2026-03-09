@@ -28,7 +28,7 @@ from urllib.parse import parse_qs
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "s3-fix-2026-03-09-1237"
+BUILD_ID = "s3-fix-2026-03-09-1256"
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
@@ -85,6 +85,20 @@ def run_capture(cmd, timeout=20):
         return proc.returncode, (proc.stdout or "").strip()
     except Exception as ex:
         return 1, str(ex)
+
+
+def _curl_status(url, insecure=False, timeout=6):
+    if not command_exists("curl"):
+        return None
+    cmd = ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout)]
+    if insecure:
+        cmd.insert(1, "-k")
+    cmd.append(url)
+    rc, out = run_capture(cmd, timeout=timeout + 2)
+    if rc != 0:
+        return None
+    code = (out or "").strip()
+    return code if code else None
 
 
 def get_uptime_seconds():
@@ -1755,7 +1769,42 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         if value:
             env[key] = value
     env["LOCALS3_MODE"] = selected_mode
-    return run_process(cmd, env=env, live_cb=live_cb, input_text=scripted_input)
+    code, output = run_process(cmd, env=env, live_cb=live_cb, input_text=scripted_input)
+    if code != 0:
+        return code, output
+
+    # Post-install health check to avoid 502s on the proxy.
+    https_port = forwarded_env.get("LOCALS3_HTTPS_PORT") or requested_https or "8443"
+    ui_port = forwarded_env.get("LOCALS3_UI_PORT") or "9001"
+    host_for_url = forwarded_env.get("LOCALS3_HOST") or choose_s3_host("")
+    prefix = _sudo_prefix()
+
+    def log(line):
+        if live_cb:
+            live_cb(line + "\n")
+
+    status_ui = _curl_status(f"http://127.0.0.1:{ui_port}/")
+    if not status_ui or status_ui == "000":
+        log(f"[WARN] MinIO console did not respond on http://127.0.0.1:{ui_port} (status {status_ui}). Restarting locals3-minio...")
+        if command_exists("systemctl"):
+            run_capture(prefix + ["systemctl", "restart", "locals3-minio"], timeout=30)
+        time.sleep(2)
+        status_ui = _curl_status(f"http://127.0.0.1:{ui_port}/")
+
+    status_proxy = _curl_status(f"https://{host_for_url}:{https_port}/", insecure=True)
+    if status_proxy in (None, "000", "502", "503"):
+        log(f"[WARN] Proxy HTTPS check returned {status_proxy}. Reloading nginx...")
+        if command_exists("systemctl"):
+            run_capture(prefix + ["systemctl", "reload", "nginx"], timeout=20)
+        time.sleep(1)
+        status_proxy = _curl_status(f"https://{host_for_url}:{https_port}/", insecure=True)
+
+    if status_ui in (None, "000"):
+        return 1, (output or "") + f"\n[ERROR] MinIO console not responding on port {ui_port}."
+    if status_proxy in (None, "000", "502", "503"):
+        return 1, (output or "") + f"\n[ERROR] Proxy HTTPS returned {status_proxy} for https://{host_for_url}:{https_port}/"
+
+    return code, output
 
 
 def run_linux_s3_installer(form=None, live_cb=None):
