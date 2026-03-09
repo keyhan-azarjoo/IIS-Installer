@@ -76,60 +76,12 @@ pick_port() {
   echo ""
 }
 
-env_trim() {
-  local n="$1"
-  local v="${!n:-}"
-  echo "$(echo "$v" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-}
-
-is_valid_port() {
-  local p="$1"
-  if ! echo "$p" | grep -Eq '^[0-9]+$'; then
-    return 1
-  fi
-  [ "$p" -ge 1 ] && [ "$p" -le 65535 ]
-}
-
-resolve_port_from_env_or_pick() {
-  local env_name="$1"
-  shift
-  local requested picked
-  requested="$(env_trim "$env_name")"
-  if [ -n "$requested" ]; then
-    if ! is_valid_port "$requested"; then
-      err "Invalid port in ${env_name}: ${requested}"
-      exit 1
-    fi
-    if ! port_free "$requested"; then
-      err "Requested port ${requested} from ${env_name} is already in use."
-      exit 1
-    fi
-    echo "$requested"
-    return
-  fi
-  picked="$(pick_port "$@")"
-  echo "$picked"
-}
-
 resolve_https_port_unix() {
-  local choice custom_port picked requested_https
-  requested_https="$(env_trim "LOCALS3_HTTPS_PORT")"
-  if [ -n "$requested_https" ]; then
-    if ! is_valid_port "$requested_https"; then
-      err "Invalid LOCALS3_HTTPS_PORT: $requested_https"
-      exit 1
-    fi
-    if ! port_free "$requested_https"; then
-      err "Requested HTTPS port $requested_https is already in use."
-      exit 1
-    fi
-    echo "$requested_https"
-    return
-  fi
+  local choice custom_port picked
 
   if port_free 443; then
-    read -r -p "Use HTTPS port 443? (y/N): " choice
-    choice="$(echo "${choice:-n}" | tr '[:upper:]' '[:lower:]')"
+    read -r -p "Use HTTPS port 443? (Y/n): " choice
+    choice="$(echo "${choice:-y}" | tr '[:upper:]' '[:lower:]')"
     if [ "$choice" = "y" ] || [ "$choice" = "yes" ]; then
       echo "443"
       return
@@ -138,9 +90,9 @@ resolve_https_port_unix() {
     warn "Port 443 is busy."
   fi
 
-  echo "Choose HTTPS port option:" >&2
-  echo "  1) Auto alternate port (tries: 8443, 9443, 10443)" >&2
-  echo "  2) Enter custom port" >&2
+  echo "Choose HTTPS port option:"
+  echo "  1) Auto alternate port (tries: 8443, 9443, 10443)"
+  echo "  2) Enter custom port"
   read -r -p "Select option [1/2] (default: 1): " choice
 
   if [ "${choice:-1}" = "2" ]; then
@@ -172,30 +124,6 @@ resolve_https_port_unix() {
 
   err "No free HTTPS port was found in the default range (8443, 9443, 10443)."
   exit 1
-}
-
-sanitize_port_value() {
-  local raw="$1"
-  local cleaned
-  cleaned="$(echo "$raw" | tr -cd '0-9\n' | tail -n 1)"
-  if echo "$cleaned" | grep -Eq '^[0-9]+$' && [ "$cleaned" -ge 1 ] && [ "$cleaned" -le 65535 ]; then
-    echo "$cleaned"
-    return
-  fi
-  echo ""
-}
-
-open_firewall_port_linux() {
-  local p="$1"
-  if has_cmd ufw; then
-    ufw allow "${p}/tcp" >/dev/null 2>&1 || true
-    return
-  fi
-  if has_cmd firewall-cmd; then
-    firewall-cmd --permanent --add-port="${p}/tcp" >/dev/null 2>&1 || true
-    firewall-cmd --reload >/dev/null 2>&1 || true
-    return
-  fi
 }
 
 get_lan_ipv4() {
@@ -295,24 +223,17 @@ install_minio_binary() {
 }
 
 configure_minio_linux() {
-  local root="$1" api_port="$2" ui_port="$3" public_url="$4"
+  local root="$1" api_port="$2" ui_port="$3"
   local bin="/usr/local/bin/minio"
   local data="${root}/data"
   local envf="/etc/default/locals3-minio"
-  local minio_user minio_pass
-  minio_user="$(env_trim "LOCALS3_ROOT_USER")"
-  minio_pass="$(env_trim "LOCALS3_ROOT_PASSWORD")"
-  [ -z "$minio_user" ] && minio_user="admin"
-  [ -z "$minio_pass" ] && minio_pass="StrongPassword123"
   mkdir -p "$root" "$data"
 
   install_minio_binary "$bin"
 
-cat > "$envf" <<EOF
-MINIO_ROOT_USER=${minio_user}
-MINIO_ROOT_PASSWORD=${minio_pass}
-MINIO_SERVER_URL=${public_url}
-MINIO_BROWSER_REDIRECT_URL=${public_url}
+  cat > "$envf" <<EOF
+MINIO_ROOT_USER=admin
+MINIO_ROOT_PASSWORD=StrongPassword123
 EOF
 
   cat > /etc/systemd/system/locals3-minio.service <<EOF
@@ -334,16 +255,11 @@ EOF
 }
 
 configure_minio_macos() {
-  local root="$1" api_port="$2" ui_port="$3" public_url="$4"
+  local root="$1" api_port="$2" ui_port="$3"
   local bin="/usr/local/bin/minio"
   [ -d /opt/homebrew/bin ] && bin="/opt/homebrew/bin/minio"
   local data="${root}/data"
   local plist="/Library/LaunchDaemons/com.locals3.minio.plist"
-  local minio_user minio_pass
-  minio_user="$(env_trim "LOCALS3_ROOT_USER")"
-  minio_pass="$(env_trim "LOCALS3_ROOT_PASSWORD")"
-  [ -z "$minio_user" ] && minio_user="admin"
-  [ -z "$minio_pass" ] && minio_pass="StrongPassword123"
   mkdir -p "$root" "$data"
   install_minio_binary "$bin"
 
@@ -358,10 +274,8 @@ configure_minio_macos() {
     <string>--console-address</string><string>:$ui_port</string>
   </array>
   <key>EnvironmentVariables</key><dict>
-    <key>MINIO_ROOT_USER</key><string>$minio_user</string>
-    <key>MINIO_ROOT_PASSWORD</key><string>$minio_pass</string>
-    <key>MINIO_SERVER_URL</key><string>$public_url</string>
-    <key>MINIO_BROWSER_REDIRECT_URL</key><string>$public_url</string>
+    <key>MINIO_ROOT_USER</key><string>admin</string>
+    <key>MINIO_ROOT_PASSWORD</key><string>StrongPassword123</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -415,11 +329,7 @@ EOF
   nginx -t
   if has_cmd systemctl; then
     systemctl unmask nginx >/dev/null 2>&1 || true
-    if systemctl is-active --quiet nginx 2>/dev/null; then
-      systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
-    else
-      systemctl start nginx >/dev/null 2>&1 || true
-    fi
+    systemctl restart nginx >/dev/null 2>&1 || systemctl start nginx >/dev/null 2>&1 || true
   else
     service nginx restart >/dev/null 2>&1 || service nginx start >/dev/null 2>&1 || true
   fi
@@ -488,21 +398,13 @@ trust_cert() {
 main() {
   relaunch_elevated "$@"
   local os root cert_dir https_port api_port ui_port domain lan_ans enable_lan lan_ip public_ip use_public_ip proxy_host
-  local minio_user minio_pass
-  local env_host env_lan
   os="$(detect_os)"
   [ "$os" = "unknown" ] && { err "Unsupported OS."; exit 1; }
   info "===== Local S3 Storage Installer (${os}) - Native Mode ====="
 
-  env_host="$(env_trim "LOCALS3_HOST")"
-  if [ -n "$env_host" ]; then
-    domain="$(normalize_host_input "$env_host")"
-    info "Using host from LOCALS3_HOST: $domain"
-  else
-    read -r -p "Enter local domain/URL for HTTPS (default: localhost): " domain
-    domain="$(normalize_host_input "${domain:-}")"
-  fi
-  if [ "$domain" = "localhost" ] && [ -z "$env_host" ]; then
+  read -r -p "Enter local domain/URL for HTTPS (default: localhost): " domain
+  domain="$(normalize_host_input "${domain:-}")"
+  if [ "$domain" = "localhost" ]; then
     public_ip="$(get_public_ipv4)"
     if [ -n "$public_ip" ]; then
       read -r -p "Detected public/static IP ${public_ip}. Use it instead of localhost? (Y/n): " use_public_ip
@@ -512,13 +414,8 @@ main() {
       fi
     fi
   fi
-  env_lan="$(echo "$(env_trim "LOCALS3_ENABLE_LAN")" | tr '[:upper:]' '[:lower:]')"
-  if [ -n "$env_lan" ]; then
-    lan_ans="$env_lan"
-  else
-    read -r -p "Allow LAN access from other computers? (y/N): " lan_ans
-    lan_ans="$(echo "${lan_ans:-n}" | tr '[:upper:]' '[:lower:]')"
-  fi
+  read -r -p "Allow LAN access from other computers? (y/N): " lan_ans
+  lan_ans="$(echo "${lan_ans:-n}" | tr '[:upper:]' '[:lower:]')"
   enable_lan=false
   lan_ip=""
   if [ "$lan_ans" = "y" ] || [ "$lan_ans" = "yes" ]; then
@@ -527,36 +424,25 @@ main() {
   fi
 
   https_port="$(resolve_https_port_unix)"
-  https_port="$(sanitize_port_value "$https_port")"
-  [ -z "$https_port" ] && { err "Could not determine a valid HTTPS port."; exit 1; }
   if [ "$https_port" != "443" ]; then
     warn "Using HTTPS port: $https_port"
   fi
-  api_port="$(resolve_port_from_env_or_pick "LOCALS3_API_PORT" 9000 19000 29000)"
-  ui_port="$(resolve_port_from_env_or_pick "LOCALS3_UI_PORT" 9001 19001 29001)"
+  api_port="$(pick_port 9000 19000 29000)"
+  ui_port="$(pick_port 9001 19001 29001)"
   [ -z "$api_port" ] && { err "No free API port."; exit 1; }
   [ -z "$ui_port" ] && { err "No free UI port."; exit 1; }
-  if [ "$ui_port" = "$api_port" ]; then
-    err "MinIO UI port cannot equal API port (${api_port})."
-    exit 1
-  fi
 
   root="/opt/locals3"
   [ "$os" = "macos" ] && root="/usr/local/locals3"
   cert_dir="${root}/certs"
   mkdir -p "$root" "$cert_dir"
-  proxy_host="$domain"
-  if [ "$proxy_host" = "localhost" ] && [ -n "$lan_ip" ]; then
-    proxy_host="$lan_ip"
-  fi
-  local public_url="https://${proxy_host}:${https_port}"
 
   if [ "$os" = "linux" ]; then
     ensure_prereqs_linux
-    configure_minio_linux "$root" "$api_port" "$ui_port" "$public_url"
+    configure_minio_linux "$root" "$api_port" "$ui_port"
   else
     ensure_prereqs_macos
-    configure_minio_macos "$root" "$api_port" "$ui_port" "$public_url"
+    configure_minio_macos "$root" "$api_port" "$ui_port"
   fi
 
   ensure_hosts_entry "$domain" "127.0.0.1"
@@ -565,7 +451,9 @@ main() {
 
   if [ "$os" = "linux" ]; then
     configure_nginx_linux "$domain" "$https_port" "$ui_port" "$cert_dir"
-    open_firewall_port_linux "$https_port"
+    if [ "$enable_lan" = true ] && has_cmd ufw; then
+      ufw allow "${https_port}/tcp" >/dev/null 2>&1 || true
+    fi
   else
     configure_nginx_macos "$domain" "$https_port" "$ui_port" "$cert_dir"
   fi
@@ -574,19 +462,27 @@ main() {
   echo "===== INSTALLATION COMPLETE ====="
   echo "MinIO Console (direct): http://localhost:${ui_port}"
   echo "MinIO API (direct):     http://localhost:${api_port}"
-  echo "Proxy URL:              https://${proxy_host}:${https_port}"
+  proxy_host="$domain"
+  if [ "$proxy_host" = "localhost" ] && [ -n "$lan_ip" ]; then
+    proxy_host="$lan_ip"
+  fi
+  if [ "$https_port" -eq 443 ]; then
+    echo "Proxy URL:              https://${proxy_host}"
+  else
+    echo "Proxy URL:              https://${proxy_host}:${https_port}"
+  fi
   if [ "$enable_lan" = true ] && [ -n "$lan_ip" ]; then
-    echo "LAN URL:                https://${lan_ip}:${https_port}"
+    if [ "$https_port" -eq 443 ]; then
+      echo "LAN URL:                https://${lan_ip}"
+    else
+      echo "LAN URL:                https://${lan_ip}:${https_port}"
+    fi
     echo "DNS mapping needed:     ${domain} -> ${lan_ip}"
   fi
   echo ""
   echo "Login:"
-  minio_user="$(env_trim "LOCALS3_ROOT_USER")"
-  minio_pass="$(env_trim "LOCALS3_ROOT_PASSWORD")"
-  [ -z "$minio_user" ] && minio_user="admin"
-  [ -z "$minio_pass" ] && minio_pass="StrongPassword123"
-  echo "  Username: $minio_user"
-  echo "  Password: $minio_pass"
+  echo "  Username: admin"
+  echo "  Password: StrongPassword123"
 }
 
 # The main runner now lives in ../setup-storage.sh. This core file only defines

@@ -285,8 +285,8 @@ function Start-ContainersFallback([string]$dockerCtx, [string]$ngconf, [string]$
     "--label", $Script:LocalS3Label,
     "--label", "com.locals3.role=minio",
     "--network", $network,
-    "-e", "MINIO_ROOT_USER=$($Script:ActiveAccessKey)",
-    "-e", "MINIO_ROOT_PASSWORD=$($Script:ActiveSecretKey)",
+    "-e", "MINIO_ROOT_USER=admin",
+    "-e", "MINIO_ROOT_PASSWORD=StrongPassword123",
     "-e", "MINIO_API_PORT=9000",
     "-e", "MINIO_CONSOLE_PORT=9001",
     "-e", "MINIO_ADMIN_CONSOLE_PORT=9002",
@@ -339,14 +339,10 @@ function Write-FilesAndUp {
   $browserSessionDuration = Resolve-BrowserSessionDuration
   Info "Web session/share-link max duration: $browserSessionDuration"
 
-  $enableLan = Resolve-BoolFromEnv -envName "LOCALS3_ENABLE_LAN" -defaultValue $true
-  Info ("LAN access: " + ($(if ($enableLan) { "enabled" } else { "disabled" })))
+  $enableLan = $true
+  Info "LAN access: enabled"
   $lanIp = Get-LanIPv4
-  if ($enableLan) {
-    if ($lanIp) { Info "Detected LAN IP: $lanIp" } else { Warn "Could not detect LAN IPv4 automatically. LAN URL will not be shown." }
-  } else {
-    $lanIp = $null
-  }
+  if ($lanIp) { Info "Detected LAN IP: $lanIp" } else { Warn "Could not detect LAN IPv4 automatically. LAN URL will not be shown." }
 
   $prev = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
@@ -356,49 +352,34 @@ function Write-FilesAndUp {
   Info "Using Docker context: $dockerCtx"
   Prompt-CleanupPreviousServers -dockerCtx $dockerCtx
 
-  $requestedHttps = Get-EnvTrim "LOCALS3_HTTPS_PORT"
-  if (-not [string]::IsNullOrWhiteSpace($requestedHttps)) {
-    $httpsPort = 0
-    if (-not [int]::TryParse($requestedHttps, [ref]$httpsPort) -or $httpsPort -lt 1 -or $httpsPort -gt 65535) {
-      Err "Invalid LOCALS3_HTTPS_PORT value: $requestedHttps"
+  $httpsPort = 443
+  if (-not (Port-Free $httpsPort)) {
+    Warn "Port 443 is already in use."
+    $listeners = Get-PortListeners 443
+    if ($listeners.Count -gt 0) {
+      Write-Host "Port 443 listeners:"
+      $listeners | Format-Table -AutoSize | Out-String | Write-Host
+    }
+    $httpsPort = Pick-Port @(8443,9443,10443)
+    if (-not $httpsPort) {
+      Err "Port 443 is busy and no free alternate HTTPS port is available (8443/9443/10443)."
       exit 1
     }
-    if (-not (Port-Free $httpsPort)) {
-      Err "Requested HTTPS port $httpsPort from LOCALS3_HTTPS_PORT is already in use."
-      exit 1
-    }
-  } else {
-    $httpsPort = 443
-    if (-not (Port-Free $httpsPort)) {
-      Warn "Port 443 is already in use."
-      $listeners = Get-PortListeners 443
-      if ($listeners.Count -gt 0) {
-        Write-Host "Port 443 listeners:"
-        $listeners | Format-Table -AutoSize | Out-String | Write-Host
-      }
-      $httpsPort = Pick-Port @(8443,9443,10443)
-      if (-not $httpsPort) {
-        Err "Port 443 is busy and no free alternate HTTPS port is available (8443/9443/10443)."
-        exit 1
-      }
-      Warn "Using alternate HTTPS port: $httpsPort"
-    }
+    Warn "Using alternate HTTPS port: $httpsPort"
   }
 
-  $minioApi = Resolve-RequiredPort -label "MinIO API" -candidates @(9000,19000,29000) -defaultPort 9000
-  $minioUI = Resolve-RequiredPort -label "MinIO Console UI" -candidates @(9001,19001,29001) -defaultPort 9001
+  $minioApi = Pick-Port @(9000,19000,29000)
+  $minioUI = Pick-Port @(9001,19001,29001)
   if (-not $minioApi) { Err "No free port for MinIO API (9000/19000/29000)."; exit 1 }
   if (-not $minioUI) { Err "No free port for MinIO UI (9001/19001/29001)."; exit 1 }
-  if ($minioUI -eq $minioApi) {
-    Err "MinIO Console UI port cannot equal MinIO API port ($minioApi)."
-    exit 1
-  }
 
   $consoleCandidates = @(9443,10443,11443,12443,13443) | Where-Object { $_ -ne $httpsPort }
   $consoleHttpsPort = Resolve-RequiredPort -label "MinIO Console HTTPS" -candidates $consoleCandidates -defaultPort ($httpsPort + 1000)
 
-  Ensure-FirewallPort -port $httpsPort
-  Ensure-FirewallPort -port $consoleHttpsPort
+  if ($enableLan) {
+    Ensure-FirewallPort -port $httpsPort
+    Ensure-FirewallPort -port $consoleHttpsPort
+  }
 
   $displayHost = if ($domain -eq "localhost" -and $lanIp) { $lanIp } else { $domain }
   $publicUrl = if ($httpsPort -eq 443) { "https://$displayHost" } else { "https://${displayHost}:$httpsPort" }
@@ -424,8 +405,8 @@ services:
       - "com.locals3.installer=true"
       - "com.locals3.role=minio"
     environment:
-      MINIO_ROOT_USER: $($Script:ActiveAccessKey)
-      MINIO_ROOT_PASSWORD: $($Script:ActiveSecretKey)
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: StrongPassword123
       MINIO_API_PORT: "9000"
       MINIO_CONSOLE_PORT: "9001"
       MINIO_ADMIN_CONSOLE_PORT: "9002"
@@ -652,8 +633,8 @@ server {
   }
   Write-Host ""
   Write-Host "Login:"
-  Write-Host "  Username : $Script:ActiveAccessKey"
-  Write-Host "  Password : $Script:ActiveSecretKey"
+  Write-Host "  Username : admin"
+  Write-Host "  Password : StrongPassword123"
   Write-Host ""
   Write-Host "Pre-configured buckets:"
   Write-Host "  images    (public-read + CORS enabled)"

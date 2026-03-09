@@ -107,8 +107,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   <system.webServer>
     <security>
       <requestFiltering>
-        <requestLimits maxAllowedContentLength="4294967295" maxUrl="32768" maxQueryString="32768" />
-        <allowDoubleEscaping>true</allowDoubleEscaping>
+        <requestLimits maxAllowedContentLength="4294967295" />
       </requestFiltering>
     </security>
     <rewrite>
@@ -118,10 +117,20 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
           <conditions>
             <add input="{SERVER_PORT}" pattern="^$consoleHttpsPort$" />
           </conditions>
+          <serverVariables>
+            <set name="HTTP_X_FORWARDED_PROTO" value="http" />
+            <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
+            <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
+          </serverVariables>
           <action type="Rewrite" url="http://127.0.0.1:$uiPort/{R:1}" />
         </rule>
         <rule name="MinIOApiProxy" stopProcessing="true">
           <match url="(.*)" />
+          <serverVariables>
+            <set name="HTTP_X_FORWARDED_PROTO" value="https" />
+            <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
+            <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
+          </serverVariables>
           <action type="Rewrite" url="http://127.0.0.1:$targetPort/{R:1}" />
         </rule>
       </rules>
@@ -148,17 +157,20 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
     exit 1
   }
 
-  # Ensure rewrite/proxy/requestFiltering sections are unlocked (avoid 500.19 config errors).
   try {
-    & $env:windir\system32\inetsrv\appcmd.exe unlock config /section:system.webServer/rewrite | Out-Null
-    & $env:windir\system32\inetsrv\appcmd.exe unlock config /section:system.webServer/proxy | Out-Null
-    & $env:windir\system32\inetsrv\appcmd.exe unlock config /section:system.webServer/security/requestFiltering | Out-Null
+    $allowedVars = Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/rewrite/allowedServerVariables" -Name "." -ErrorAction Stop
+    foreach ($varName in @("HTTP_X_FORWARDED_PROTO","HTTP_X_FORWARDED_HOST","HTTP_X_FORWARDED_FOR")) {
+      $alreadyAllowed = $false
+      if ($allowedVars -and $allowedVars.Collection) {
+        $alreadyAllowed = $null -ne ($allowedVars.Collection | Where-Object { $_.Attributes["name"].Value -eq $varName } | Select-Object -First 1)
+      }
+      if (-not $alreadyAllowed) {
+        Add-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/rewrite/allowedServerVariables" -Name "." -Value @{ name = $varName } -ErrorAction Stop | Out-Null
+      }
+    }
   } catch {
-    Warn "Could not unlock IIS config sections automatically."
+    Warn "Could not update IIS Rewrite allowed server variables automatically. If proxy requests fail, allow HTTP_X_FORWARDED_PROTO/HOST/FOR in IIS Rewrite settings."
   }
-
-  # ServerVariables are not required for core proxy functionality and can trigger 500 errors
-  # when the rewrite module blocks them. Keep this minimal to avoid IIS errors.
 
   # Remove legacy LocalS3 certs before generating a fresh trust chain.
   # Older versions stored a self-signed localhost leaf in Root, which can cause Go to
@@ -249,15 +261,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
       Remove-Website -Name $legacySite
     }
   }
-  # Ensure a dedicated app pool for LocalS3 with no managed runtime.
-  if (-not (Test-Path "IIS:\AppPools\$siteName")) {
-    New-WebAppPool -Name $siteName | Out-Null
-  }
-  Set-ItemProperty "IIS:\AppPools\$siteName" -Name managedRuntimeVersion -Value "" | Out-Null
-  Set-ItemProperty "IIS:\AppPools\$siteName" -Name startMode -Value "AlwaysRunning" | Out-Null
-  Set-ItemProperty "IIS:\AppPools\$siteName" -Name autoStart -Value $true | Out-Null
   New-Website -Name $siteName -PhysicalPath $siteRoot -Port 80 -Force | Out-Null
-  Set-ItemProperty "IIS:\Sites\$siteName" -Name applicationPool -Value $siteName | Out-Null
   # Stop and remove all bindings (including the default HTTP port-80) before adding only HTTPS.
   # Leaving the port-80 binding causes a conflict with Default Web Site, which prevents startup.
   Stop-Website -Name $siteName -ErrorAction SilentlyContinue
@@ -303,8 +307,10 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   }
 
   if ($domain -ne "localhost") { Ensure-HostsEntry -domain $domain }
-  Ensure-FirewallPort -port $httpsPort
-  Ensure-FirewallPort -port $consoleHttpsPort
+  if ($lanIp) {
+    Ensure-FirewallPort -port $httpsPort
+    Ensure-FirewallPort -port $consoleHttpsPort
+  }
 
   $proxyUri = if ($httpsPort -eq 443) { "https://$domain/" } else { "https://${domain}:$httpsPort/" }
   $consoleProxyUri = if ($consoleHttpsPort -eq 80) { "http://$domain/" } else { "http://${domain}:$consoleHttpsPort/" }
@@ -328,8 +334,8 @@ function Install-IISMode {
   Info "Using local domain: $domain"
   $browserSessionDuration = Resolve-BrowserSessionDuration
   Info "Web session/share-link max duration: $browserSessionDuration"
-  $enableLan = Resolve-BoolFromEnv -envName "LOCALS3_ENABLE_LAN" -defaultValue $true
-  Info ("LAN access: " + ($(if ($enableLan) { "enabled" } else { "disabled" })))
+  $enableLan = $true
+  Info "LAN access: enabled"
   $lanIp = $null
   if ($enableLan) {
     $lanIp = Get-LanIPv4
@@ -417,20 +423,6 @@ function Install-IISMode {
 
 
 function Resolve-HttpsPortForIIS {
-  $envHttps = Get-EnvTrim "LOCALS3_HTTPS_PORT"
-  if (-not [string]::IsNullOrWhiteSpace($envHttps)) {
-    $forced = 0
-    if (-not [int]::TryParse($envHttps, [ref]$forced) -or $forced -lt 1 -or $forced -gt 65535) {
-      Err "Invalid LOCALS3_HTTPS_PORT value: $envHttps"
-      exit 1
-    }
-    if ((-not (Port-Free $forced)) -or (-not (Test-IISBindingPortAvailable -port $forced -protocol "https" -excludeSite "LocalS3"))) {
-      Err "Requested HTTPS port $forced from LOCALS3_HTTPS_PORT is unavailable."
-      exit 1
-    }
-    return $forced
-  }
-
   if ((Port-Free 443) -and (Test-IISBindingPortAvailable -port 443 -protocol "https" -excludeSite "LocalS3")) {
     return 443
   }
