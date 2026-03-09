@@ -275,9 +275,11 @@ function App() {
       }
       poll(j.job_id, title, 0);
     } catch (err) {
-      append(`Request failed: ${err}`);
-      setRunError(`${title} request failed: ${err}`);
-      setTermState("Error");
+      // Update restarts the dashboard process; the fetch can fail mid-flight.
+      append(`Update triggered. Dashboard is restarting... (${err})`);
+      setInfoMessage("Dashboard update started. If the page disconnects, refresh in a few seconds.");
+      setTermState("Idle");
+      setTimeout(() => window.location.reload(), 4000);
     }
   };
 
