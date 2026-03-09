@@ -490,6 +490,11 @@ function Get-PublicIPv4 {
 }
 
 function Resolve-InstallHost([string]$prompt) {
+  $mode = ($env:LOCALS3_HOST_MODE | ForEach-Object { $_.Trim().ToLowerInvariant() }) 2>$null
+  $hostIp = ($env:LOCALS3_HOST_IP | ForEach-Object { $_.Trim() }) 2>$null
+  if ($mode -eq "lan" -and $hostIp) {
+    return (Normalize-HostInput $hostIp)
+  }
   if ($env:LOCALS3_HOST -and (-not [string]::IsNullOrWhiteSpace($env:LOCALS3_HOST))) {
     $domain = Normalize-HostInput $env:LOCALS3_HOST
     return $domain

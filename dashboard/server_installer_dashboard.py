@@ -1821,7 +1821,7 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
     requested_mode = (form.get("LOCALS3_HOST_MODE", [""])[0] or "").strip().lower()
     requested_ip = (form.get("LOCALS3_HOST_IP", [""])[0] or "").strip()
-    if requested_mode == "lan" and requested_ip:
+    if (requested_mode in ("", "lan")) and requested_ip:
         form["LOCALS3_HOST"] = [requested_ip]
     elif requested_mode == "custom" and requested_host:
         form["LOCALS3_HOST"] = [requested_host]
