@@ -28,7 +28,7 @@ from urllib.parse import parse_qs
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "s3-fix-2026-03-09-1028"
+BUILD_ID = "s3-fix-2026-03-09-1209"
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
@@ -1509,11 +1509,124 @@ def run_linux_s3_installer(form=None, live_cb=None):
         'echo "8443"; '
         '}; '
     )
+    safe_cleanup_fn = (
+        'cleanup_previous_locals3(){ '
+        'local root="/opt/locals3"; '
+        '[ "$(detect_os)" = "macos" ] && root="/usr/local/locals3"; '
+        'if has_cmd systemctl; then '
+        '  systemctl stop locals3-minio >/dev/null 2>&1 || true; '
+        '  systemctl stop locals3-nginx >/dev/null 2>&1 || true; '
+        'fi; '
+        'if [ -f /opt/locals3/nginx/nginx.pid ]; then '
+        '  kill "$(cat /opt/locals3/nginx/nginx.pid)" >/dev/null 2>&1 || true; '
+        '  rm -f /opt/locals3/nginx/nginx.pid || true; '
+        'fi; '
+        'if [ -d "$root" ]; then rm -rf "${root}/tmp" >/dev/null 2>&1 || true; fi; '
+        '}; '
+    )
+    safe_nginx_fn = r'''
+configure_nginx_linux() {
+  local domain="$1" https_port="$2" target_port="$3" cert_dir="$4"
+  cat > /etc/nginx/conf.d/locals3.conf <<EOF
+server {
+    listen ${https_port} ssl;
+    server_name ${domain} localhost;
+    ssl_certificate ${cert_dir}/localhost.crt;
+    ssl_certificate_key ${cert_dir}/localhost.key;
+    location / {
+        proxy_pass http://127.0.0.1:${target_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
+  nginx -t || { err "Nginx config test failed."; exit 1; }
+
+  if has_cmd systemctl; then
+    systemctl unmask nginx >/dev/null 2>&1 || true
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+      systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
+    else
+      systemctl start nginx >/dev/null 2>&1 || true
+    fi
+    if ! port_free "$https_port"; then
+      return
+    fi
+  elif has_cmd service; then
+    service nginx reload >/dev/null 2>&1 || service nginx restart >/dev/null 2>&1 || true
+    if ! port_free "$https_port"; then
+      return
+    fi
+  fi
+
+  warn "System nginx could not bind HTTPS port ${https_port}. Trying isolated LocalS3 nginx..."
+  local standalone_dir="/opt/locals3/nginx"
+  local standalone_conf="${standalone_dir}/nginx-standalone.conf"
+  local standalone_pid="${standalone_dir}/nginx.pid"
+  mkdir -p "$standalone_dir"
+  if [ -f "$standalone_pid" ]; then
+    kill "$(cat "$standalone_pid")" >/dev/null 2>&1 || true
+    rm -f "$standalone_pid" || true
+  fi
+
+  cat > "$standalone_conf" <<EOF
+pid ${standalone_pid};
+events {}
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    sendfile on;
+    access_log    ${standalone_dir}/access.log;
+    error_log     ${standalone_dir}/error.log;
+    server {
+        listen ${https_port} ssl;
+        server_name ${domain} localhost;
+        ssl_certificate ${cert_dir}/localhost.crt;
+        ssl_certificate_key ${cert_dir}/localhost.key;
+        location / {
+            proxy_pass http://127.0.0.1:${target_port};
+            proxy_http_version 1.1;
+            proxy_set_header Host \$http_host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+    }
+}
+EOF
+  nginx -t -c "$standalone_conf" || { err "Isolated nginx config test failed."; exit 1; }
+  nginx -c "$standalone_conf" >/dev/null 2>&1 || true
+  if ! port_free "$https_port"; then
+    return
+  fi
+
+  err "Nginx did not start correctly on port ${https_port}."
+  if has_cmd systemctl; then
+    warn "nginx.service status:"
+    systemctl status nginx --no-pager -l 2>/dev/null || true
+  fi
+  if [ -f "${standalone_dir}/error.log" ]; then
+    warn "Isolated nginx error log:"
+    tail -n 80 "${standalone_dir}/error.log" 2>/dev/null || true
+  fi
+  exit 1
+}
+'''
     launcher = (
         f"{env_exports}"
         f"source '{local_core}'; "
         f"source '{local_cleanup}'; "
         f"source '{local_platform}'; "
+        f"{safe_cleanup_fn}"
+        f"{safe_nginx_fn}"
         f"{force_port_fn}"
         "run_linux_macos_install"
     )
@@ -1556,6 +1669,11 @@ if [ -f /etc/nginx/conf.d/locals3.conf ]; then
     service nginx reload >/dev/null 2>&1 || service nginx restart >/dev/null 2>&1 || true
   fi
 fi
+if [ -f /opt/locals3/nginx/nginx.pid ]; then
+  kill "$(cat /opt/locals3/nginx/nginx.pid)" >/dev/null 2>&1 || true
+  rm -f /opt/locals3/nginx/nginx.pid >/dev/null 2>&1 || true
+fi
+pkill -f "nginx -c /opt/locals3/nginx/nginx-standalone.conf" >/dev/null 2>&1 || true
 if [ -f /Library/LaunchDaemons/com.locals3.minio.plist ]; then
   launchctl bootout system /Library/LaunchDaemons/com.locals3.minio.plist >/dev/null 2>&1 || true
 fi
