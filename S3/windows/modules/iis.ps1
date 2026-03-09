@@ -240,7 +240,15 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
       Remove-Website -Name $legacySite
     }
   }
+  # Ensure a dedicated app pool for LocalS3 with no managed runtime.
+  if (-not (Test-Path "IIS:\AppPools\$siteName")) {
+    New-WebAppPool -Name $siteName | Out-Null
+  }
+  Set-ItemProperty "IIS:\AppPools\$siteName" -Name managedRuntimeVersion -Value "" | Out-Null
+  Set-ItemProperty "IIS:\AppPools\$siteName" -Name startMode -Value "AlwaysRunning" | Out-Null
+  Set-ItemProperty "IIS:\AppPools\$siteName" -Name autoStart -Value $true | Out-Null
   New-Website -Name $siteName -PhysicalPath $siteRoot -Port 80 -Force | Out-Null
+  Set-ItemProperty "IIS:\Sites\$siteName" -Name applicationPool -Value $siteName | Out-Null
   # Stop and remove all bindings (including the default HTTP port-80) before adding only HTTPS.
   # Leaving the port-80 binding causes a conflict with Default Web Site, which prevents startup.
   Stop-Website -Name $siteName -ErrorAction SilentlyContinue

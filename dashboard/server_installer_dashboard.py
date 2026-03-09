@@ -666,6 +666,39 @@ def get_service_items():
         if rc_task == 0 and out_task:
             try:
                 task_obj = json.loads(out_task)
+                task_urls = []
+                task_ports = []
+                if _is_locals3_name(task_obj.get("Name", "")):
+                    rc_bind, out_bind = run_capture(
+                        [
+                            "powershell.exe",
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command",
+                            "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
+                            "Get-WebBinding -Name 'LocalS3' | Select-Object protocol,bindingInformation | ConvertTo-Json -Depth 2",
+                        ],
+                        timeout=20,
+                    )
+                    if rc_bind == 0 and out_bind:
+                        try:
+                            raw_bind = json.loads(out_bind)
+                            binds = raw_bind if isinstance(raw_bind, list) else [raw_bind]
+                            for b in binds:
+                                proto = str(b.get("protocol", "http") or "http").lower()
+                                bind = str(b.get("bindingInformation", "") or "")
+                                port = parse_port_from_addr(bind)
+                                if port and str(port).isdigit():
+                                    task_ports.append({"port": int(port), "protocol": "tcp"})
+                                    scheme = "https" if proto == "https" else "http"
+                                    host = preferred_host
+                                    if int(port) in (80, 443):
+                                        task_urls.append(f"{scheme}://{host}")
+                                    else:
+                                        task_urls.append(f"{scheme}://{host}:{port}")
+                        except Exception:
+                            pass
                 items.append(
                     {
                         "kind": "task",
@@ -674,8 +707,8 @@ def get_service_items():
                         "status": str(task_obj.get("State", "") or ""),
                         "autostart": bool(task_obj.get("Enabled", True)),
                         "platform": "windows",
-                        "urls": [],
-                        "ports": [],
+                        "urls": sorted(set(task_urls)),
+                        "ports": task_ports,
                     }
                 )
             except Exception:
