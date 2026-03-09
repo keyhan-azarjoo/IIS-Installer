@@ -28,7 +28,7 @@ from urllib.parse import parse_qs
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "s3-fix-2026-03-06-1658"
+BUILD_ID = "s3-fix-2026-03-09-1028"
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
@@ -1102,27 +1102,56 @@ def find_app_dll_dir(root_dir: Path):
     return dlls[0].parent, dlls[0].name
 
 
-def ensure_repo_files(relative_paths, live_cb=None):
+def _download_file_with_timeout(url, target_path, timeout_sec=30):
+    with urllib.request.urlopen(url, timeout=timeout_sec) as resp:
+        data = resp.read()
+    with open(target_path, "wb") as fh:
+        fh.write(data)
+
+
+def ensure_repo_files(relative_paths, live_cb=None, refresh=True, retries=2):
     for rel in relative_paths:
         rel_path = Path(rel)
         target = ROOT / rel_path
-        if target.exists():
+        exists_before = target.exists()
+        if exists_before and (not refresh):
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp_target = target.with_suffix(target.suffix + ".download")
         url = f"{REPO_RAW_BASE}/{rel_path.as_posix()}"
-        message = f"Downloading required file on demand: {rel_path.as_posix()}"
+        if exists_before and refresh:
+            message = f"Updating required file: {rel_path.as_posix()}"
+        else:
+            message = f"Downloading required file on demand: {rel_path.as_posix()}"
         if live_cb:
             live_cb(message + "\n")
         else:
             print(message)
-        try:
-            urllib.request.urlretrieve(url, tmp_target)
-            os.replace(tmp_target, target)
-        except Exception as ex:
-            if tmp_target.exists():
-                tmp_target.unlink(missing_ok=True)
-            raise RuntimeError(f"Failed to download required file '{rel_path.as_posix()}': {ex}") from ex
+
+        last_error = None
+        for attempt in range(1, max(1, retries) + 1):
+            try:
+                _download_file_with_timeout(url, tmp_target, timeout_sec=30)
+                os.replace(tmp_target, target)
+                last_error = None
+                break
+            except Exception as ex:
+                last_error = ex
+                if tmp_target.exists():
+                    tmp_target.unlink(missing_ok=True)
+                if live_cb:
+                    live_cb(f"[WARN] Download attempt {attempt} failed for {rel_path.as_posix()}: {ex}\n")
+                if attempt < max(1, retries):
+                    time.sleep(1)
+        if last_error is not None:
+            if target.exists():
+                warn_msg = f"[WARN] Using cached file for {rel_path.as_posix()} after update failure: {last_error}"
+                if live_cb:
+                    live_cb(warn_msg + "\n")
+                else:
+                    print(warn_msg)
+                continue
+            raise RuntimeError(f"Failed to download required file '{rel_path.as_posix()}': {last_error}") from last_error
 
 
 def is_local_tcp_port_listening(port):
@@ -1353,7 +1382,7 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         return 1, "Windows S3 installer can only run on Windows hosts."
     if not is_windows_admin():
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
-    ensure_repo_files(S3_WINDOWS_FILES, live_cb=live_cb)
+    ensure_repo_files(S3_WINDOWS_FILES, live_cb=live_cb, refresh=True)
 
     selected_mode = (form.get("S3_MODE", [mode])[0] or mode or "iis").strip().lower()
     if selected_mode not in ("iis", "docker"):
@@ -1397,7 +1426,9 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
 def run_linux_s3_installer(form=None, live_cb=None):
     if os.name == "nt":
         return 1, "Linux S3 installer can only run on Linux/macOS hosts."
-    ensure_repo_files(S3_LINUX_FILES, live_cb=live_cb)
+    if live_cb:
+        live_cb("[INFO] Checking and updating S3 installer files...\n")
+    ensure_repo_files(S3_LINUX_FILES, live_cb=live_cb, refresh=True)
     form = form or {}
     if live_cb:
         live_cb(f"[DEBUG] Dashboard build: {BUILD_ID}\n")
@@ -1413,15 +1444,21 @@ def run_linux_s3_installer(form=None, live_cb=None):
             stop_code, stop_out = run_linux_s3_stop(live_cb=live_cb)
             if stop_code != 0 and live_cb and stop_out:
                 live_cb(stop_out + "\n")
-            if is_local_tcp_port_listening(requested_https):
-                auto_port = pick_free_local_tcp_port([9443, 10443, 11443, 12443, 13443, 8443, 15443, 16443])
-                if auto_port:
-                    if live_cb:
-                        live_cb(f"Port {requested_https} is still busy after reclaim attempt. Auto-selected free port {auto_port}.\n")
-                    form["LOCALS3_HTTPS_PORT"] = [str(auto_port)]
-                    requested_https = str(auto_port)
-                else:
-                    return 1, f"Requested HTTPS port {requested_https} is still in use and no fallback port was found."
+            # Selected HTTPS port is strict: never auto-switch to another port.
+            # Give the OS a short moment to release sockets after stop/reload.
+            still_busy = False
+            for _ in range(6):
+                if is_local_tcp_port_listening(requested_https):
+                    still_busy = True
+                    time.sleep(1)
+                    continue
+                still_busy = False
+                break
+            if still_busy:
+                return 1, (
+                    f"Requested HTTPS port {requested_https} is still busy after LocalS3 reclaim attempt. "
+                    "Please stop the process using this port or choose another port."
+                )
         else:
             return 1, f"Requested HTTPS port {requested_https} is already in use by another app. Choose another port."
 
@@ -1737,7 +1774,7 @@ def start_live_job(title, runner):
     with JOBS_LOCK:
         JOBS[job_id] = {
             "title": title,
-            "output": "",
+            "output": f"[{time.strftime('%H:%M:%S')}] Job accepted: {title}\n",
             "done": False,
             "exit_code": None,
             "created": time.time(),

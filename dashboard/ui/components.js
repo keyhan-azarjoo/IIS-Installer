@@ -53,6 +53,16 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
   const [uploading, setUploading] = React.useState(false);
   const [uploadInfo, setUploadInfo] = React.useState("");
   const [uploadedPath, setUploadedPath] = React.useState("");
+  const s3Actions = ["/run/s3_linux", "/run/s3_windows", "/run/s3_windows_iis", "/run/s3_windows_docker"];
+  const isS3Install = s3Actions.includes(action);
+  const httpsPortField = (fields || []).find((f) => f.name === "LOCALS3_HTTPS_PORT");
+  const [httpsPort, setHttpsPort] = React.useState((httpsPortField && httpsPortField.defaultValue) ? String(httpsPortField.defaultValue) : "");
+  const [httpsPortState, setHttpsPortState] = React.useState({
+    checking: false,
+    usable: true,
+    error: false,
+    message: "",
+  });
   const uploadInputRef = React.useRef(null);
   const formRef = React.useRef(null);
   const sourcePathField = (fields || []).find((f) => f.name === "SourceValue" || f.name === "SOURCE_VALUE");
@@ -132,8 +142,98 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
     }
   };
 
+  React.useEffect(() => {
+    if (!isS3Install || !httpsPortField) return undefined;
+    const p = String(httpsPort || "").trim();
+
+    if (!p) {
+      setHttpsPortState({
+        checking: false,
+        usable: false,
+        error: true,
+        message: "HTTPS port is required.",
+      });
+      return undefined;
+    }
+    if (!/^\d+$/.test(p) || Number(p) < 1 || Number(p) > 65535) {
+      setHttpsPortState({
+        checking: false,
+        usable: false,
+        error: true,
+        message: "Port must be a number between 1 and 65535.",
+      });
+      return undefined;
+    }
+
+    let canceled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setHttpsPortState((prev) => ({ ...prev, checking: true }));
+        const fd = new FormData();
+        fd.append("port", p);
+        fd.append("protocol", "tcp");
+        const resp = await fetch("/api/system/port_check", {
+          method: "POST",
+          headers: { "X-Requested-With": "fetch" },
+          body: fd,
+        });
+        const j = await resp.json();
+        if (canceled) return;
+        if (!j.ok) {
+          setHttpsPortState({
+            checking: false,
+            usable: false,
+            error: true,
+            message: j.error || "Could not validate port availability.",
+          });
+          return;
+        }
+        if (j.busy && !j.managed_owner) {
+          setHttpsPortState({
+            checking: false,
+            usable: false,
+            error: true,
+            message: `Port ${p} is already in use by another service.`,
+          });
+          return;
+        }
+        if (j.busy && j.managed_owner) {
+          setHttpsPortState({
+            checking: false,
+            usable: true,
+            error: false,
+            message: `Port ${p} is used by existing S3 and can be replaced.`,
+          });
+          return;
+        }
+        setHttpsPortState({
+          checking: false,
+          usable: true,
+          error: false,
+          message: `Port ${p} is available.`,
+        });
+      } catch (err) {
+        if (canceled) return;
+        setHttpsPortState({
+          checking: false,
+          usable: false,
+          error: true,
+          message: `Port check failed: ${err}`,
+        });
+      }
+    }, 250);
+
+    return () => {
+      canceled = true;
+      clearTimeout(timer);
+    };
+  }, [httpsPort, isS3Install, !!httpsPortField]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isS3Install && httpsPortField && (httpsPortState.checking || !httpsPortState.usable)) {
+      return;
+    }
     const formEl = formRef.current || e.currentTarget;
     let sourcePathValue = "";
     if (sourcePathKey) {
@@ -175,7 +275,30 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
         <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>{title}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{description}</Typography>
         <Box ref={formRef} component="form" onSubmit={handleSubmit}>
-          {(fields || []).map((f) => <Field key={f.name} field={f} />)}
+          {(fields || []).map((f) => {
+            if (isS3Install && f.name === "LOCALS3_HTTPS_PORT") {
+              return (
+                <TextField
+                  key={f.name}
+                  fullWidth
+                  size="small"
+                  name={f.name}
+                  label={f.label}
+                  value={httpsPort}
+                  placeholder={f.placeholder || ""}
+                  required
+                  onChange={(ev) => setHttpsPort(ev.target.value)}
+                  error={httpsPortState.error}
+                  helperText={httpsPortState.checking ? "Checking port availability..." : (httpsPortState.message || " ")}
+                  FormHelperTextProps={{
+                    sx: httpsPortState.error ? { color: "error.main", fontWeight: 700 } : {},
+                  }}
+                  sx={{ mb: 1.5 }}
+                />
+              );
+            }
+            return <Field key={f.name} field={f} />;
+          })}
           {(fields || []).some((f) => f.enableUpload) && (
             <Box sx={{ mb: 1.5 }}>
               <Typography variant="caption" sx={{ display: "block", mb: 0.5, color: "text.secondary" }}>
@@ -191,7 +314,13 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
               {!!uploadedPath && <Typography variant="caption" sx={{ display: "block", color: "success.main" }}>Server path: {uploadedPath}</Typography>}
             </Box>
           )}
-          <Button type="submit" variant="contained" fullWidth sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, bgcolor: color || "#1d4ed8" }}>
+          <Button
+            type="submit"
+            variant="contained"
+            fullWidth
+            disabled={uploading || (isS3Install && !!httpsPortField && (httpsPortState.checking || !httpsPortState.usable))}
+            sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, bgcolor: color || "#1d4ed8" }}
+          >
             Start
           </Button>
         </Box>

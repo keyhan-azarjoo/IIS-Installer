@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import ctypes
+import json
 import re
 import os
 import platform
@@ -15,10 +16,12 @@ from pathlib import Path
 
 REPO = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 DASHBOARD_FILES = [
+    "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
     "dashboard/ui/components.js",
     "dashboard/ui/app.js",
 ]
+LINUX_SERVICE_NAME = "server-installer-dashboard.service"
 
 
 def is_repo_layout(root: Path) -> bool:
@@ -271,6 +274,191 @@ def check_local_http(port: int, attempts: int = 8, delay: float = 0.5):
     return False, str(last_error) if last_error else "Unknown error"
 
 
+def run_capture(cmd, timeout=30):
+    try:
+        out = subprocess.check_output(
+            cmd,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=timeout,
+        )
+        return 0, out
+    except subprocess.CalledProcessError as ex:
+        return ex.returncode, ex.output or ""
+    except Exception as ex:
+        return 1, str(ex)
+
+
+def resolve_root() -> Path:
+    cwd_root = Path.cwd()
+    script_root = Path(__file__).resolve().parents[1]
+    if is_repo_layout(script_root):
+        return script_root
+    if is_repo_layout(cwd_root):
+        return cwd_root
+    root = cache_root()
+    ensure_files(root)
+    return root
+
+
+def port_owner_state(port: int):
+    pids = find_listener_pids_windows(port) if os.name == "nt" else find_listener_pids_linux(port)
+    if not pids:
+        return "free", set(), set()
+    own = {pid for pid in pids if is_dashboard_process(pid)}
+    foreign = set(pids) - own
+    if own and not foreign:
+        return "dashboard", own, foreign
+    return "foreign", own, foreign
+
+
+def choose_port_allowing_dashboard_owner(bind_host: str, preferred_port: int):
+    candidates = []
+    for p in [preferred_port, 80, 443]:
+        if p and p not in candidates:
+            candidates.append(p)
+
+    diagnostics = []
+    for port in candidates:
+        ok, err = can_bind(bind_host, port)
+        if ok:
+            diagnostics.append((port, "free", "available for local bind"))
+            return port, diagnostics
+        owner_state, own, foreign = port_owner_state(port)
+        if owner_state == "dashboard":
+            diagnostics.append((port, "dashboard", f"already owned by dashboard process(es): {', '.join(map(str, sorted(own)))}"))
+            return port, diagnostics
+        diagnostics.append((port, "foreign", f"unavailable ({err}); owner pid(s): {', '.join(map(str, sorted(foreign)))}"))
+    return None, diagnostics
+
+
+def run_dashboard_foreground(root: Path, bind_host: str, selected_port: int, display_host: str, preclean: bool = True) -> int:
+    app = root / "dashboard" / "server_installer_dashboard.py"
+    if not app.exists():
+        print(f"Dashboard script not found: {app}", file=sys.stderr)
+        return 1
+
+    if preclean:
+        preclean_ports = []
+        for p in [selected_port, 80, 443]:
+            if p and p not in preclean_ports:
+                preclean_ports.append(p)
+        print("Pre-run checks:")
+        for p in preclean_ports:
+            changed, note = stop_existing_dashboard_on_port(p)
+            if changed:
+                print(f"- Port {p}: {note}")
+            elif note != "no listener":
+                print(f"- Port {p}: {note}")
+
+    cmd = [sys.executable, str(app), "--host", bind_host, "--port", str(selected_port)]
+    proc = subprocess.Popen(cmd, cwd=str(root))
+
+    ok, detail = check_local_http(selected_port)
+    print("Startup diagnostics:")
+    print(f"- Bind host: {bind_host}")
+    print(f"- Selected port: {selected_port}")
+    print(f"- Dashboard URL: http://{display_host}:{selected_port}")
+    print(f"- Local URL: http://127.0.0.1:{selected_port}")
+    if ok:
+        print(f"- Local HTTP check: PASS (HTTP {detail})")
+    else:
+        if proc.poll() is not None:
+            print(f"- Local HTTP check: FAIL ({detail})")
+            print(f"- Dashboard process exited early with code {proc.returncode}.")
+        else:
+            print(f"- Local HTTP check: FAIL ({detail})")
+            print("- Process is running but localhost is not responding yet.")
+    return proc.wait()
+
+
+def install_or_update_linux_service(root: Path, bind_host: str, selected_port: int, display_host: str) -> int:
+    if os.name == "nt":
+        return 1
+    if os.geteuid() != 0:
+        print("Linux service installation requires root. Re-run with sudo.", file=sys.stderr)
+        return 1
+
+    script_path = (root / "dashboard" / "start-server-dashboard.py").resolve()
+    app_path = (root / "dashboard" / "server_installer_dashboard.py").resolve()
+    if not script_path.exists() or not app_path.exists():
+        print("Required dashboard files are missing after sync.", file=sys.stderr)
+        return 1
+
+    owner_state, own, foreign = port_owner_state(selected_port)
+    if owner_state == "foreign":
+        print(
+            f"Port {selected_port} is owned by another process ({', '.join(map(str, sorted(foreign)))}). "
+            "Choose another port.",
+            file=sys.stderr,
+        )
+        return 1
+    if owner_state == "dashboard":
+        stop_existing_dashboard_on_port(selected_port)
+
+    unit_path = Path("/etc/systemd/system") / LINUX_SERVICE_NAME
+    unit_text = f"""[Unit]
+Description=Server Installer Dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={root}
+ExecStart={sys.executable} {script_path} --run-server --host {bind_host} --port {selected_port}
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    unit_path.write_text(unit_text, encoding="utf-8")
+    rc, out = run_capture(["systemctl", "daemon-reload"], timeout=30)
+    if rc != 0:
+        print(f"systemctl daemon-reload failed:\n{out}", file=sys.stderr)
+        return 1
+    rc, out = run_capture(["systemctl", "enable", LINUX_SERVICE_NAME], timeout=30)
+    if rc != 0 and "Created symlink" not in out and "already enabled" not in out.lower():
+        print(f"systemctl enable failed:\n{out}", file=sys.stderr)
+        return 1
+    rc, out = run_capture(["systemctl", "restart", LINUX_SERVICE_NAME], timeout=40)
+    if rc != 0:
+        print(f"systemctl restart failed:\n{out}", file=sys.stderr)
+        run_capture(["systemctl", "status", LINUX_SERVICE_NAME, "--no-pager", "-l"], timeout=30)
+        return 1
+
+    state_file = root / "dashboard" / "service-state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "service": LINUX_SERVICE_NAME,
+                "root": str(root),
+                "host": bind_host,
+                "port": selected_port,
+                "updated_at": int(time.time()),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    ok, detail = check_local_http(selected_port)
+    print(f"OS detected: {platform.system()}")
+    print(f"Service: {LINUX_SERVICE_NAME} (enabled, restarted)")
+    print(f"Dashboard URL: http://{display_host}:{selected_port}")
+    print(f"Local URL: http://127.0.0.1:{selected_port}")
+    if ok:
+        print(f"Local HTTP check: PASS (HTTP {detail})")
+    else:
+        print(f"Local HTTP check: FAIL ({detail})")
+        print(f"Inspect logs: journalctl -u {LINUX_SERVICE_NAME} -n 120 --no-pager")
+    print("Re-running this same command will update files and restart the service.")
+    return 0
+
+
 def is_windows_admin() -> bool:
     if os.name != "nt":
         return True
@@ -304,89 +492,47 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="auto")
     parser.add_argument("--port", type=int, default=8090)
+    parser.add_argument("--run-server", action="store_true", help="Internal mode: run dashboard process in foreground.")
     args = parser.parse_args()
 
     if relaunch_as_admin_if_needed():
         return 0
-
-    cwd_root = Path.cwd()
-    script_root = Path(__file__).resolve().parents[1]
-    if is_repo_layout(script_root):
-        root = script_root
-    elif is_repo_layout(cwd_root):
-        root = cwd_root
-    else:
-        root = cache_root()
-        ensure_files(root)
-
-    app = root / "dashboard" / "server_installer_dashboard.py"
-    if not app.exists():
-        print(f"Dashboard script not found: {app}", file=sys.stderr)
-        return 1
 
     display_host = preferred_host(args.host)
     bind_host = args.host
     if (not bind_host) or bind_host in ("auto", "0.0.0.0"):
         bind_host = "0.0.0.0"
 
-    preclean_ports = []
-    for p in [args.port, 80, 443]:
-        if p and p not in preclean_ports:
-            preclean_ports.append(p)
-    print("Pre-run checks:")
-    for p in preclean_ports:
-        changed, note = stop_existing_dashboard_on_port(p)
-        if changed:
-            print(f"- Port {p}: {note}")
-        elif note != "no listener":
-            print(f"- Port {p}: {note}")
+    root = resolve_root()
+    if args.run_server:
+        return run_dashboard_foreground(root, bind_host, args.port, display_host, preclean=False)
 
-    selected_port, diagnostics = choose_port(bind_host, args.port)
+    selected_port, diagnostics = choose_port_allowing_dashboard_owner(bind_host, args.port)
     if selected_port is None:
         print("No usable port found for dashboard startup.", file=sys.stderr)
-        for port, ok, err in diagnostics:
-            if ok:
-                print(f"- Port {port}: available", file=sys.stderr)
-            else:
-                print(f"- Port {port}: unavailable -> {err}", file=sys.stderr)
+        for port, state, note in diagnostics:
+            print(f"- Port {port}: {state} -> {note}", file=sys.stderr)
         print("Port checks validate local bind only. For remote access, firewall/security-group must also allow the port.", file=sys.stderr)
         return 1
 
     print("Port checks:")
-    for port, ok, err in diagnostics:
-        if ok:
+    for port, state, note in diagnostics:
+        if state == "free":
             print(f"- Port {port}: available for local bind")
+        elif state == "dashboard":
+            print(f"- Port {port}: owned by existing dashboard (will be replaced)")
         else:
-            print(f"- Port {port}: unavailable ({err})")
+            print(f"- Port {port}: {note}")
 
     if selected_port != args.port:
         print(f"Requested port {args.port} is unavailable. Falling back to {selected_port}.")
 
-    print(f"OS detected: {platform.system()}")
-    print(f"Dashboard URL: http://{display_host}:{selected_port}")
-    print(f"Local URL: http://127.0.0.1:{selected_port}")
-    print("Port checks validate local bind only. For remote access, firewall/security-group must also allow this port.")
+    if os.name != "nt":
+        return install_or_update_linux_service(root, bind_host, selected_port, display_host)
 
-    cmd = [sys.executable, str(app), "--host", bind_host, "--port", str(selected_port)]
-    proc = subprocess.Popen(cmd, cwd=str(root))
-
-    ok, detail = check_local_http(selected_port)
-    print("Startup diagnostics:")
-    print(f"- Bind host: {bind_host}")
-    print(f"- Selected port: {selected_port}")
-    if ok:
-        print(f"- Local HTTP check: PASS (HTTP {detail})")
-        print("- If remote access still times out, the blocker is external to the app (UFW/iptables/cloud firewall/security-group).")
-    else:
-        if proc.poll() is not None:
-            print(f"- Local HTTP check: FAIL ({detail})")
-            print(f"- Dashboard process exited early with code {proc.returncode}.")
-            print("- Read the error lines above for the exact bind/startup failure.")
-        else:
-            print(f"- Local HTTP check: FAIL ({detail})")
-            print("- Process is running but localhost is not responding yet. This usually indicates startup/runtime errors in the dashboard process output.")
-
-    return proc.wait()
+    # Windows fallback: keep previous behavior (foreground process).
+    print("Service install mode is currently automatic on Linux systemd. Running in foreground on this OS.")
+    return run_dashboard_foreground(root, bind_host, selected_port, display_host)
 
 
 if __name__ == "__main__":

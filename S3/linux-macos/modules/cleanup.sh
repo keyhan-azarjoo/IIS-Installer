@@ -4,12 +4,11 @@ cleanup_previous_locals3() {
 
   if has_cmd systemctl; then
     systemctl stop locals3-minio >/dev/null 2>&1 || true
-    systemctl stop nginx >/dev/null 2>&1 || true
+    # Do not stop the host nginx service globally; other apps/panels may depend on it.
+    systemctl stop locals3-nginx >/dev/null 2>&1 || true
   fi
 
-  if [ "$(detect_os)" = "macos" ] && has_cmd brew; then
-    brew services stop nginx >/dev/null 2>&1 || true
-  fi
+  # Do not stop brew nginx globally on macOS during LocalS3 cleanup.
 
   if [ -d "$root" ]; then
     rm -rf "${root}/tmp" >/dev/null 2>&1 || true

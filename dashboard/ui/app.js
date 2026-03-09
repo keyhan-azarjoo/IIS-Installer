@@ -190,40 +190,27 @@ function App() {
     const isS3Install = action === "/run/s3_linux" || action === "/run/s3_windows" || action === "/run/s3_windows_iis" || action === "/run/s3_windows_docker";
     setRunError("");
     if (isS3Install) {
-      // If requested HTTPS port is busy, ask user for another port before start.
-      while (true) {
-        const p = String(body.get("LOCALS3_HTTPS_PORT") || "").trim();
-        if (!p) break;
+      // Strict pre-check: do not start if port is owned by another app.
+      const p = String(body.get("LOCALS3_HTTPS_PORT") || "").trim();
+      if (p) {
         const fd = new FormData();
         fd.append("port", p);
         fd.append("protocol", "tcp");
         const chk = await fetch("/api/system/port_check", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
         const pj = await chk.json();
-        if (!pj.ok) break;
-        if (!pj.busy) break;
-        if (pj.managed_owner) {
-          const ownMsg = `Port ${p} is used by existing S3 (${pj.owner_hint || "managed service"}). Proceeding to update/reclaim on the same port.`;
-          setInfoMessage(ownMsg);
-          append(ownMsg);
-          break;
-        }
-        const busyMsg = `S3 HTTPS port ${p} is already in use. Please choose another port.`;
-        setInfoMessage(busyMsg);
-        append(busyMsg);
-        const next = window.prompt(`Port ${p} is busy. Enter another HTTPS port for S3:`, "9443");
-        if (next === null) {
-          append(`[${new Date().toLocaleTimeString()}] ${title} cancelled (port ${p} is busy).`);
-          setInfoMessage(`Cancelled. Port ${p} is busy and no replacement was provided.`);
+        if (pj.ok && pj.busy && !pj.managed_owner) {
+          const busyMsg = `S3 HTTPS port ${p} is already in use by another service. Choose a different port.`;
+          setRunError(busyMsg);
+          setInfoMessage(busyMsg);
+          append(`[${new Date().toLocaleTimeString()}] ${title} cancelled (${busyMsg})`);
           setTermState("Idle");
           return;
         }
-        const trimmed = String(next).trim();
-        if (!/^\d+$/.test(trimmed) || Number(trimmed) < 1 || Number(trimmed) > 65535) {
-          window.alert("Invalid port. Please enter a number between 1 and 65535.");
-          setInfoMessage("Invalid port entered. Please use a number between 1 and 65535.");
-          continue;
+        if (pj.ok && pj.busy && pj.managed_owner) {
+          const ownMsg = `Port ${p} is used by existing S3 (${pj.owner_hint || "managed service"}). Proceeding to update/reclaim on the same port.`;
+          setInfoMessage(ownMsg);
+          append(ownMsg);
         }
-        body.set("LOCALS3_HTTPS_PORT", trimmed);
       }
     }
     try {
