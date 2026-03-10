@@ -295,6 +295,17 @@ def check_local_http(port: int, attempts: int = 8, delay: float = 0.5, use_https
     return False, str(last_error) if last_error else "Unknown error"
 
 
+def wait_for_local_http(port: int, seconds: int, use_https: bool = False):
+    last_detail = "Unknown error"
+    for _ in range(max(1, seconds)):
+        ok, detail = check_local_http(port, attempts=1, delay=0.25, use_https=use_https)
+        last_detail = detail
+        if ok:
+            return True, detail
+        time.sleep(1)
+    return False, last_detail
+
+
 def run_capture(cmd, timeout=30):
     try:
         out = subprocess.check_output(
@@ -562,14 +573,8 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         return 1
     run_capture(["schtasks", "/Run", "/TN", task_name], timeout=20)
 
-    # Give the scheduled task a moment to come online.
-    ok = False
-    detail = ""
-    for _ in range(15):
-        ok, detail = check_local_http(selected_port, use_https=use_https)
-        if ok:
-            break
-        time.sleep(1)
+    # Give the scheduled task a brief chance to come online before using the fallback.
+    ok, detail = wait_for_local_http(selected_port, seconds=8, use_https=use_https)
 
     if not ok:
         # Fallback: run a detached process so the dashboard still starts even if schtasks is queued.
@@ -594,14 +599,10 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
                     stderr=log_fp,
                     creationflags=creation_flags,
                 )
-            # Re-check after fallback
-            for _ in range(10):
-                ok, detail = check_local_http(selected_port, use_https=use_https)
-                if ok:
-                    break
-                time.sleep(1)
-        except Exception:
-            pass
+            # Re-check after fallback.
+            ok, detail = wait_for_local_http(selected_port, seconds=12, use_https=use_https)
+        except Exception as ex:
+            detail = f"Fallback launch failed: {ex}"
 
     state_file = root / "dashboard" / "service-state.json"
     state_file.write_text(
