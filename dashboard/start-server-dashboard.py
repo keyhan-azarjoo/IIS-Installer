@@ -323,6 +323,15 @@ def run_capture(cmd, timeout=30):
         return 1, str(ex)
 
 
+def try_open_append_log(*paths):
+    for path in paths:
+        try:
+            return open(path, "a", encoding="utf-8")
+        except Exception:
+            continue
+    return None
+
+
 def resolve_root() -> Path:
     if DASHBOARD_LOCAL_ROOT:
         local_root = Path(DASHBOARD_LOCAL_ROOT)
@@ -579,26 +588,35 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     if not ok:
         # Fallback: run a detached process so the dashboard still starts even if schtasks is queued.
         try:
-            with open(log_path, "a", encoding="utf-8") as log_fp:
-                creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-                detached_cmd = [
-                    python_exe,
-                    str(script_path),
-                    "--run-server",
-                    "--host",
-                    bind_host,
-                    "--port",
-                    str(selected_port),
-                ]
-                if use_https:
-                    detached_cmd += ["--https", "--cert", cert_path, "--key", key_path]
-                subprocess.Popen(
-                    detached_cmd,
-                    cwd=str(root),
-                    stdout=log_fp,
-                    stderr=log_fp,
-                    creationflags=creation_flags,
-                )
+            fallback_log_path = log_dir / "server-installer-dashboard-fallback.log"
+            log_fp = try_open_append_log(log_path, fallback_log_path)
+            creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            detached_cmd = [
+                python_exe,
+                str(script_path),
+                "--run-server",
+                "--host",
+                bind_host,
+                "--port",
+                str(selected_port),
+            ]
+            if use_https:
+                detached_cmd += ["--https", "--cert", cert_path, "--key", key_path]
+            popen_kwargs = {
+                "cwd": str(root),
+                "creationflags": creation_flags,
+            }
+            if log_fp is not None:
+                popen_kwargs["stdout"] = log_fp
+                popen_kwargs["stderr"] = log_fp
+            else:
+                popen_kwargs["stdout"] = subprocess.DEVNULL
+                popen_kwargs["stderr"] = subprocess.DEVNULL
+            try:
+                subprocess.Popen(detached_cmd, **popen_kwargs)
+            finally:
+                if log_fp is not None:
+                    log_fp.close()
             # Re-check after fallback.
             ok, detail = wait_for_local_http(selected_port, seconds=12, use_https=use_https)
         except Exception as ex:
