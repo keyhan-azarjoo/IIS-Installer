@@ -53,10 +53,19 @@ if (!(Test-Path $certPath) -or !(Test-Path $keyPath)) {
     $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert),
     [System.Base64FormattingOptions]::InsertLineBreaks
   ) + "`n-----END CERTIFICATE-----"
-  $keyPem = "-----BEGIN PRIVATE KEY-----`n" + [Convert]::ToBase64String(
-    $rsa.ExportPkcs8PrivateKey(),
-    [System.Base64FormattingOptions]::InsertLineBreaks
-  ) + "`n-----END PRIVATE KEY-----"
+  if ($rsa.PSObject.Methods.Name -contains "ExportPkcs8PrivateKey") {
+    $keyBytes = $rsa.ExportPkcs8PrivateKey()
+    $keyPem = "-----BEGIN PRIVATE KEY-----`n" + [Convert]::ToBase64String(
+      $keyBytes,
+      [System.Base64FormattingOptions]::InsertLineBreaks
+    ) + "`n-----END PRIVATE KEY-----"
+  } else {
+    $keyBytes = $rsa.ExportRSAPrivateKey()
+    $keyPem = "-----BEGIN RSA PRIVATE KEY-----`n" + [Convert]::ToBase64String(
+      $keyBytes,
+      [System.Base64FormattingOptions]::InsertLineBreaks
+    ) + "`n-----END RSA PRIVATE KEY-----"
+  }
   Set-Content -Path $certPath -Value $certPem -Encoding ascii
   Set-Content -Path $keyPath -Value $keyPem -Encoding ascii
 }
