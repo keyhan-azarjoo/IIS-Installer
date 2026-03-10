@@ -480,6 +480,17 @@ function Get-PublicIPv4 {
 }
 
 function Resolve-InstallHost([string]$prompt) {
+  # Prefer explicit host/IP passed from dashboard
+  try {
+    if ($env:LOCALS3_HOST_IP -and (-not [string]::IsNullOrWhiteSpace($env:LOCALS3_HOST_IP))) {
+      return (Normalize-HostInput $env:LOCALS3_HOST_IP)
+    }
+  } catch {}
+  try {
+    if ($env:LOCALS3_HOST -and (-not [string]::IsNullOrWhiteSpace($env:LOCALS3_HOST))) {
+      return (Normalize-HostInput $env:LOCALS3_HOST)
+    }
+  } catch {}
   $domainInput = Read-Host $prompt
   $domain = Normalize-HostInput $domainInput
 

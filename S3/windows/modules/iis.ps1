@@ -107,7 +107,8 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   <system.webServer>
     <security>
       <requestFiltering>
-        <requestLimits maxAllowedContentLength="4294967295" />
+        <requestLimits maxAllowedContentLength="4294967295" maxUrl="16384" maxQueryString="16384" />
+        <allowDoubleEscaping>true</allowDoubleEscaping>
       </requestFiltering>
     </security>
     <rewrite>
@@ -118,7 +119,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
             <add input="{SERVER_PORT}" pattern="^$consoleHttpsPort$" />
           </conditions>
           <serverVariables>
-            <set name="HTTP_X_FORWARDED_PROTO" value="http" />
+            <set name="HTTP_X_FORWARDED_PROTO" value="https" />
             <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
             <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
           </serverVariables>
@@ -280,7 +281,11 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   if ($mainBind) {
     try { $mainBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (main): $($_.Exception.Message)" }
   }
-  New-WebBinding -Name $siteName -Protocol "http" -Port $consoleHttpsPort -IPAddress "*" -HostHeader "" | Out-Null
+  New-WebBinding -Name $siteName -Protocol "https" -Port $consoleHttpsPort -IPAddress "*" -HostHeader "" -SslFlags 0 | Out-Null
+  $consoleBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "*:${consoleHttpsPort}:" } | Select-Object -First 1
+  if ($consoleBind) {
+    try { $consoleBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (console): $($_.Exception.Message)" }
+  }
   if ($lanIp) {
     New-WebBinding -Name $siteName -Protocol "https" -Port $httpsPort -IPAddress $lanIp -HostHeader "" -SslFlags 0 | Out-Null
     $apiIpBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "${lanIp}:${httpsPort}:" } | Select-Object -First 1
@@ -387,7 +392,7 @@ function Install-IISMode {
   $publicUrl = if ($httpsPort -eq 443) { "https://$displayHost" } else { "https://${displayHost}:$httpsPort" }
   # If the selected host is localhost but LAN access is enabled, do not force a browser
   # redirect target. That allows users opening the console by LAN IP to stay on that IP.
-  $consoleBrowserUrl = if ($consoleHttpsPort -eq 80) { "http://$domain" } else { "http://${domain}:$consoleHttpsPort" }
+  $consoleBrowserUrl = if ($consoleHttpsPort -eq 443) { "https://$domain" } else { "https://${domain}:$consoleHttpsPort" }
   $consoleRedirectUrl = if ($domain -eq "localhost" -and $lanIp) { "" } else { $consoleBrowserUrl }
 
   Ensure-IISInstalled
