@@ -19,7 +19,7 @@ These installers deploy only from prebuilt published output.
 Run higher-level dashboard mode (cross-platform, single URL):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py' -OutFile '.\\start-server-dashboard.py'; $py=(Get-Command python -ErrorAction SilentlyContinue).Source; if(-not $py){$py=(Get-Command py -ErrorAction SilentlyContinue).Source}; if(-not $py){Write-Host 'Python not found. Install Python 3 and retry.'; exit 1}; & $py .\\start-server-dashboard.py"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/bootstrap.ps1' -OutFile '.\\bootstrap.ps1'; & powershell -NoProfile -ExecutionPolicy Bypass -File .\\bootstrap.ps1"
 ```
 
 Dashboard URLs:
