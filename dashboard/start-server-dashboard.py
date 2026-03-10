@@ -376,6 +376,8 @@ def run_dashboard_foreground(root: Path, bind_host: str, selected_port: int, dis
         else:
             print(f"- Local HTTP check: FAIL ({detail})")
             print("- Process is running but localhost is not responding yet.")
+    print("")
+    print(f"Dashboard ready: http://{display_host}:{selected_port}")
     return proc.wait()
 
 
@@ -532,6 +534,8 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     print(f"Service: {task_name} (scheduled task, enabled)")
     print(f"Dashboard URL: http://{display_host}:{selected_port}")
     print(f"Local URL: http://127.0.0.1:{selected_port}")
+    print("")
+    print(f"Dashboard ready: http://{display_host}:{selected_port}")
     print("Re-running this same command will update files and restart the service.")
     return 0
 
