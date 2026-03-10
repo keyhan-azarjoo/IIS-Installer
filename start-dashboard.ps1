@@ -2,7 +2,7 @@
 param(
     [string]$Host = "auto",
     [int]$Port = 8090,
-    [switch]$Http
+    [switch]$Https
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath $bootstrapScript)) {
 }
 
 $env:SERVER_INSTALLER_LOCAL_ROOT = $repoRoot
-if ($Http) {
+if (-not $Https) {
     Remove-Item Env:\DASHBOARD_HTTPS -ErrorAction SilentlyContinue
     Remove-Item Env:\DASHBOARD_CERT -ErrorAction SilentlyContinue
     Remove-Item Env:\DASHBOARD_KEY -ErrorAction SilentlyContinue
@@ -30,6 +30,12 @@ if ($Port) {
 
 Write-Host "Using local repo: $repoRoot"
 Write-Host "Starting dashboard launcher..."
+if ($Https) {
+    Write-Host "Mode: HTTPS"
+}
+else {
+    Write-Host "Mode: HTTP"
+}
 
 Push-Location $repoRoot
 try {
