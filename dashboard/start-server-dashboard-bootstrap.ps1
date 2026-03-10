@@ -113,7 +113,16 @@ function ConvertTo-CertificatePem([System.Security.Cryptography.X509Certificates
 }
 
 function ConvertTo-PrivateKeyPem([System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert) {
-  $rsa = $Cert.GetRSAPrivateKey()
+  $rsa = $null
+  try {
+    $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Cert)
+  } catch {
+    try {
+      $rsa = $Cert.PrivateKey
+    } catch {
+      $rsa = $null
+    }
+  }
   if (-not $rsa) {
     throw "RSA private key is not available for the generated dashboard certificate."
   }
