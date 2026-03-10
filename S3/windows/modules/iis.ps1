@@ -258,7 +258,11 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
 
   foreach ($legacySite in @("LocalS3", "LocalS3-IIS", "LocalS3-Console")) {
     if (Test-Path "IIS:\Sites\$legacySite") {
-      Remove-Website -Name $legacySite
+      try {
+        Remove-Website -Name $legacySite
+      } catch {
+        Warn "Could not remove legacy IIS site '$legacySite': $($_.Exception.Message)"
+      }
     }
   }
   New-Website -Name $siteName -PhysicalPath $siteRoot -Port 80 -Force | Out-Null
