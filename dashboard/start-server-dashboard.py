@@ -501,9 +501,16 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     if owner_state == "dashboard":
         stop_existing_dashboard_on_port(selected_port)
 
-    python_exe = sys.executable
+    python_exe = resolve_windows_python()
     task_name = "ServerInstallerDashboard"
-    task_cmd = f"\"{python_exe}\" \"{script_path}\" --run-server --host {bind_host} --port {selected_port}"
+    log_dir = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "server-installer-dashboard.log"
+    task_cmd = (
+        'cmd.exe /c "'
+        f'"{python_exe}" "{script_path}" --run-server --host {bind_host} --port {selected_port} '
+        f'>> "{log_path}" 2>&1"'
+    )
     rc, out = run_capture(
         [
             "schtasks",
@@ -527,6 +534,36 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         return 1
     run_capture(["schtasks", "/Run", "/TN", task_name], timeout=20)
 
+    # Give the scheduled task a moment to come online.
+    ok = False
+    detail = ""
+    for _ in range(15):
+        ok, detail = check_local_http(selected_port)
+        if ok:
+            break
+        time.sleep(1)
+
+    if not ok:
+        # Fallback: run a detached process so the dashboard still starts even if schtasks is queued.
+        try:
+            with open(log_path, "a", encoding="utf-8") as log_fp:
+                creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+                subprocess.Popen(
+                    [python_exe, str(script_path), "--run-server", "--host", bind_host, "--port", str(selected_port)],
+                    cwd=str(root),
+                    stdout=log_fp,
+                    stderr=log_fp,
+                    creationflags=creation_flags,
+                )
+            # Re-check after fallback
+            for _ in range(10):
+                ok, detail = check_local_http(selected_port)
+                if ok:
+                    break
+                time.sleep(1)
+        except Exception:
+            pass
+
     state_file = root / "dashboard" / "service-state.json"
     state_file.write_text(
         json.dumps(
@@ -546,10 +583,27 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     print(f"Service: {task_name} (scheduled task, enabled)")
     print(f"Dashboard URL: http://{display_host}:{selected_port}")
     print(f"Local URL: http://127.0.0.1:{selected_port}")
+    print(f"Log file: {log_path}")
+    if ok:
+        print(f"Local HTTP check: PASS (HTTP {detail})")
+    else:
+        print(f"Local HTTP check: FAIL ({detail})")
+        print(f"Inspect log: {log_path}")
     print("")
     print(f"Dashboard ready: http://{display_host}:{selected_port}")
     print("Re-running this same command will update files and restart the service.")
     return 0
+
+
+def resolve_windows_python() -> str:
+    env_override = os.environ.get("SERVER_INSTALLER_PYTHON", "").strip()
+    if env_override and Path(env_override).exists():
+        return env_override
+    program_data = Path(os.environ.get("ProgramData", "C:/ProgramData"))
+    embedded = program_data / "Server-Installer" / "python" / "python.exe"
+    if embedded.exists():
+        return str(embedded)
+    return sys.executable
 
 
 def is_windows_admin() -> bool:

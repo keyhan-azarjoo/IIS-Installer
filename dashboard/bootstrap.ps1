@@ -8,7 +8,9 @@ function Get-CommandPath([string]$name) {
   return $null
 }
 
-$root = Join-Path $env:TEMP "server-installer-bootstrap"
+$root = Join-Path $env:ProgramData "Server-Installer"
+New-Item -ItemType Directory -Force -Path $root | Out-Null
+$pyDir = Join-Path $root "python"
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 
 $repo = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
@@ -24,7 +26,6 @@ if (-not $python) {
   Write-Host "[INFO] Python not found. Bootstrapping embeddable Python..."
   $pyVer = "3.14.2"
   $pyZip = Join-Path $root "python-embed.zip"
-  $pyDir = Join-Path $root "python"
   $pyUrl = "https://www.python.org/ftp/python/$pyVer/python-$pyVer-embeddable-amd64.zip"
   Invoke-WebRequest -Uri $pyUrl -OutFile $pyZip
   if (Test-Path $pyDir) { Remove-Item -Recurse -Force $pyDir }
