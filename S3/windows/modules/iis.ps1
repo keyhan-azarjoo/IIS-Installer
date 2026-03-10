@@ -119,7 +119,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
             <add input="{SERVER_PORT}" pattern="^$consoleHttpsPort$" />
           </conditions>
           <serverVariables>
-            <set name="HTTP_X_FORWARDED_PROTO" value="https" />
+            <set name="HTTP_X_FORWARDED_PROTO" value="http" />
             <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
             <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
           </serverVariables>
@@ -259,11 +259,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
 
   foreach ($legacySite in @("LocalS3", "LocalS3-IIS", "LocalS3-Console")) {
     if (Test-Path "IIS:\Sites\$legacySite") {
-      try {
-        Remove-Website -Name $legacySite
-      } catch {
-        Warn "Could not remove legacy IIS site '$legacySite': $($_.Exception.Message)"
-      }
+      Remove-Website -Name $legacySite
     }
   }
   New-Website -Name $siteName -PhysicalPath $siteRoot -Port 80 -Force | Out-Null
@@ -281,11 +277,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   if ($mainBind) {
     try { $mainBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (main): $($_.Exception.Message)" }
   }
-  New-WebBinding -Name $siteName -Protocol "https" -Port $consoleHttpsPort -IPAddress "*" -HostHeader "" -SslFlags 0 | Out-Null
-  $consoleBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "*:${consoleHttpsPort}:" } | Select-Object -First 1
-  if ($consoleBind) {
-    try { $consoleBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (console): $($_.Exception.Message)" }
-  }
+  New-WebBinding -Name $siteName -Protocol "http" -Port $consoleHttpsPort -IPAddress "*" -HostHeader "" | Out-Null
   if ($lanIp) {
     New-WebBinding -Name $siteName -Protocol "https" -Port $httpsPort -IPAddress $lanIp -HostHeader "" -SslFlags 0 | Out-Null
     $apiIpBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "${lanIp}:${httpsPort}:" } | Select-Object -First 1
@@ -368,8 +360,14 @@ function Install-IISMode {
   $httpsPort = Resolve-HttpsPortForIIS
   if ($httpsPort -ne 443) { Warn "Using HTTPS port: $httpsPort" }
 
-  $apiPort = Resolve-RequiredPort -label "MinIO API" -candidates @(9000,19000,29000,39000,49000,59000) -defaultPort 9000
-  $uiPort = Resolve-RequiredPort -label "MinIO Console UI" -candidates @(9001,19001,29001,39001,49001,59001) -defaultPort 9001
+  $apiPort = Resolve-EnvPort -envName "LOCALS3_API_PORT" -label "MinIO API"
+  if (-not $apiPort) {
+    $apiPort = Resolve-RequiredPort -label "MinIO API" -candidates @(9000,19000,29000,39000,49000,59000) -defaultPort 9000
+  }
+  $uiPort = Resolve-EnvPort -envName "LOCALS3_UI_PORT" -label "MinIO Console UI"
+  if (-not $uiPort) {
+    $uiPort = Resolve-RequiredPort -label "MinIO Console UI" -candidates @(9001,19001,29001,39001,49001,59001) -defaultPort 9001
+  }
   if ($uiPort -eq $apiPort) {
     Warn "MinIO UI port cannot equal API port ($apiPort)."
     $uiPort = Resolve-RequiredPort -label "MinIO Console UI" -candidates @() -defaultPort ($apiPort + 1)
@@ -377,7 +375,10 @@ function Install-IISMode {
   # Console HTTPS proxy port: try httpsPort+1000 range (e.g. 8443→9443)
   # Exclude $httpsPort so the API and console bindings do not collide.
   $consoleCandidates = @(9443,10443,11443,12443,13443) | Where-Object { $_ -ne $httpsPort }
-  $consoleHttpsPort = Resolve-RequiredPort -label "MinIO Console" -candidates $consoleCandidates -defaultPort ($httpsPort + 1000)
+  $consoleHttpsPort = Resolve-EnvPort -envName "LOCALS3_CONSOLE_PORT" -label "MinIO Console" -requireIisBinding
+  if (-not $consoleHttpsPort) {
+    $consoleHttpsPort = Resolve-RequiredPort -label "MinIO Console" -candidates $consoleCandidates -defaultPort ($httpsPort + 1000)
+  }
   if (-not (Test-IISBindingPortAvailable -port $consoleHttpsPort -protocol "http" -excludeSite "LocalS3")) {
     Warn "IIS already has an HTTP binding on port $consoleHttpsPort. Choosing another console port."
     $alternateConsoleCandidates = $consoleCandidates | Where-Object {
@@ -392,7 +393,7 @@ function Install-IISMode {
   $publicUrl = if ($httpsPort -eq 443) { "https://$displayHost" } else { "https://${displayHost}:$httpsPort" }
   # If the selected host is localhost but LAN access is enabled, do not force a browser
   # redirect target. That allows users opening the console by LAN IP to stay on that IP.
-  $consoleBrowserUrl = if ($consoleHttpsPort -eq 443) { "https://$domain" } else { "https://${domain}:$consoleHttpsPort" }
+  $consoleBrowserUrl = if ($consoleHttpsPort -eq 80) { "http://$domain" } else { "http://${domain}:$consoleHttpsPort" }
   $consoleRedirectUrl = if ($domain -eq "localhost" -and $lanIp) { "" } else { $consoleBrowserUrl }
 
   Ensure-IISInstalled
@@ -432,6 +433,28 @@ function Install-IISMode {
 
 
 function Resolve-HttpsPortForIIS {
+  if ($env:LOCALS3_HTTPS_PORT -and (-not [string]::IsNullOrWhiteSpace($env:LOCALS3_HTTPS_PORT))) {
+    $raw = $env:LOCALS3_HTTPS_PORT.Trim()
+    $port = 0
+    if (-not [int]::TryParse($raw, [ref]$port)) {
+      Err "LOCALS3_HTTPS_PORT must be numeric."
+      exit 1
+    }
+    if ($port -lt 1 -or $port -gt 65535) {
+      Err "LOCALS3_HTTPS_PORT must be between 1 and 65535."
+      exit 1
+    }
+    if (-not (Port-Free $port)) {
+      Err "Requested HTTPS port $port is already in use."
+      exit 1
+    }
+    if (-not (Test-IISBindingPortAvailable -port $port -protocol "https" -excludeSite "LocalS3")) {
+      Err "Requested HTTPS port $port is already bound in IIS."
+      exit 1
+    }
+    return $port
+  }
+
   if ((Port-Free 443) -and (Test-IISBindingPortAvailable -port 443 -protocol "https" -excludeSite "LocalS3")) {
     return 443
   }
@@ -445,6 +468,36 @@ function Resolve-HttpsPortForIIS {
 
   Err "No available IIS HTTPS port was found in the default range (8443, 9443, 10443, 11443, 12443)."
   exit 1
+}
+
+function Resolve-EnvPort {
+  param(
+    [string]$envName,
+    [string]$label,
+    [switch]$requireIisBinding
+  )
+  $raw = ""
+  try { $raw = (Get-Item -Path "env:$envName" -ErrorAction SilentlyContinue).Value } catch {}
+  if (-not $raw -or [string]::IsNullOrWhiteSpace($raw)) { return $null }
+  $raw = $raw.Trim()
+  $port = 0
+  if (-not [int]::TryParse($raw, [ref]$port)) {
+    Err "$envName must be numeric."
+    exit 1
+  }
+  if ($port -lt 1 -or $port -gt 65535) {
+    Err "$envName must be between 1 and 65535."
+    exit 1
+  }
+  if (-not (Port-Free $port)) {
+    Err "Requested $label port $port is already in use."
+    exit 1
+  }
+  if ($requireIisBinding -and (-not (Test-IISBindingPortAvailable -port $port -protocol "http" -excludeSite "LocalS3"))) {
+    Err "Requested $label port $port is already bound in IIS."
+    exit 1
+  }
+  return $port
 }
 
 function Test-IISBindingPortAvailable([int]$port, [string]$protocol, [string]$excludeSite = "") {
