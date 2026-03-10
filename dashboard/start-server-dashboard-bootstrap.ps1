@@ -2,6 +2,12 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+$enableHttps = $env:DASHBOARD_HTTPS
+if ([string]::IsNullOrWhiteSpace($enableHttps)) {
+  $enableHttps = "0"
+}
+$enableHttps = $enableHttps.ToLowerInvariant() -in @("1", "true", "yes", "y", "on")
+
 function Get-CommandPath([string]$name) {
   $cmd = Get-Command $name -ErrorAction SilentlyContinue
   if ($cmd) { return $cmd.Source }
@@ -13,6 +19,23 @@ function Test-RepoLayout([string]$Path) {
   $dashboardRoot = Join-Path $Path "dashboard"
   return (Test-Path (Join-Path $dashboardRoot "start-server-dashboard.py")) -and
          (Test-Path (Join-Path $dashboardRoot "server_installer_dashboard.py"))
+}
+
+function Get-LocalIPv4Addresses {
+  $ips = @()
+  try {
+    $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.IPAddress -and
+        $_.IPAddress -ne "127.0.0.1" -and
+        $_.IPAddress -notlike "169.254.*" -and
+        $_.PrefixOrigin -ne "WellKnown"
+      } |
+      Select-Object -ExpandProperty IPAddress -Unique
+  } catch {
+    $ips = @()
+  }
+  return @($ips)
 }
 
 function ConvertTo-DerLength([int]$Length) {
@@ -82,6 +105,114 @@ function ConvertTo-RsaPrivateKeyPem([System.Security.Cryptography.RSA]$Rsa) {
   ) + "`n-----END RSA PRIVATE KEY-----"
 }
 
+function ConvertTo-CertificatePem([System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert) {
+  return "-----BEGIN CERTIFICATE-----`n" + [Convert]::ToBase64String(
+    $Cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert),
+    [System.Base64FormattingOptions]::InsertLineBreaks
+  ) + "`n-----END CERTIFICATE-----"
+}
+
+function ConvertTo-PrivateKeyPem([System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert) {
+  $rsa = $Cert.GetRSAPrivateKey()
+  if (-not $rsa) {
+    throw "RSA private key is not available for the generated dashboard certificate."
+  }
+
+  try {
+    $keyBytes = $rsa.ExportPkcs8PrivateKey()
+    return "-----BEGIN PRIVATE KEY-----`n" + [Convert]::ToBase64String(
+      $keyBytes,
+      [System.Base64FormattingOptions]::InsertLineBreaks
+    ) + "`n-----END PRIVATE KEY-----"
+  } catch {
+    try {
+      if ($rsa -is [System.Security.Cryptography.RSACng]) {
+        $keyBytes = $rsa.Key.Export([System.Security.Cryptography.CngKeyBlobFormat]::Pkcs8PrivateBlob)
+        return "-----BEGIN PRIVATE KEY-----`n" + [Convert]::ToBase64String(
+          $keyBytes,
+          [System.Base64FormattingOptions]::InsertLineBreaks
+        ) + "`n-----END PRIVATE KEY-----"
+      }
+    } catch {
+    }
+    return ConvertTo-RsaPrivateKeyPem -Rsa $rsa
+  }
+}
+
+function Ensure-DashboardCaCertificate([string]$CertPath, [string]$KeyPath) {
+  $friendlyNames = @("ServerInstallerDashboard Root CA", "ServerInstallerDashboard HTTPS")
+  $rootSubject = "CN=ServerInstallerDashboard Root CA"
+
+  Get-ChildItem Cert:\LocalMachine\My | Where-Object {
+    $_.FriendlyName -in $friendlyNames
+  } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+  $existingRoot = Get-ChildItem Cert:\LocalMachine\Root | Where-Object {
+    $_.FriendlyName -eq "ServerInstallerDashboard Root CA" -and $_.Subject -eq $rootSubject
+  } | Select-Object -First 1
+
+  $rootCa = $null
+  if ($existingRoot) {
+    $rootCa = Get-ChildItem Cert:\LocalMachine\My | Where-Object {
+      $_.Thumbprint -eq $existingRoot.Thumbprint
+    } | Select-Object -First 1
+  }
+
+  if (-not $rootCa) {
+    $rootBcExt = "2.5.29.19={critical}{text}ca=true&pathlength=1"
+    $rootCa = New-SelfSignedCertificate -Subject $rootSubject `
+      -FriendlyName "ServerInstallerDashboard Root CA" `
+      -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
+      -KeyExportPolicy Exportable `
+      -KeyUsage CertSign, CRLSign, DigitalSignature `
+      -TextExtension @($rootBcExt) `
+      -CertStoreLocation "Cert:\LocalMachine\My" `
+      -NotAfter (Get-Date).AddYears(5)
+
+    if (-not $rootCa) {
+      throw "Dashboard root CA certificate was not created."
+    }
+
+    $rootTmp = Join-Path $env:TEMP "server-installer-dashboard-root-ca.cer"
+    try {
+      $rootExport = Export-Certificate -Cert "Cert:\LocalMachine\My\$($rootCa.Thumbprint)" -FilePath $rootTmp -Force
+      Import-Certificate -FilePath $rootExport.FullName -CertStoreLocation "Cert:\LocalMachine\Root" | Out-Null
+    } finally {
+      Remove-Item -Path $rootTmp -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  $dnsSans = @("localhost", $env:COMPUTERNAME) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+  $ipSans = @("127.0.0.1") + (Get-LocalIPv4Addresses)
+  $sanParts = @()
+  foreach ($dns in $dnsSans) {
+    $sanParts += "DNS=$dns"
+  }
+  foreach ($ip in ($ipSans | Select-Object -Unique)) {
+    $sanParts += "IPAddress=$ip"
+  }
+  $sanExt = "2.5.29.17={text}" + ($sanParts -join "&")
+  $leafBcExt = "2.5.29.19={critical}{text}ca=false"
+  $serverAuthExt = "2.5.29.37={text}1.3.6.1.5.5.7.3.1"
+
+  $leafCert = New-SelfSignedCertificate -Subject "CN=localhost" `
+    -FriendlyName "ServerInstallerDashboard HTTPS" `
+    -Signer $rootCa `
+    -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
+    -KeyExportPolicy Exportable `
+    -KeyUsage DigitalSignature, KeyEncipherment `
+    -TextExtension @($sanExt, $leafBcExt, $serverAuthExt) `
+    -CertStoreLocation "Cert:\LocalMachine\My" `
+    -NotAfter (Get-Date).AddYears(3)
+
+  if (-not $leafCert) {
+    throw "Dashboard HTTPS leaf certificate was not created."
+  }
+
+  Set-Content -Path $CertPath -Value (ConvertTo-CertificatePem -Cert $leafCert) -Encoding ascii
+  Set-Content -Path $KeyPath -Value (ConvertTo-PrivateKeyPem -Cert $leafCert) -Encoding ascii
+}
+
 $root = Join-Path $env:ProgramData "Server-Installer"
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 $pyDir = Join-Path $root "python"
@@ -113,52 +244,22 @@ if (-not $python) {
   $python = Join-Path $pyDir "python.exe"
 }
 
-$certDir = Join-Path $root "certs"
-New-Item -ItemType Directory -Force -Path $certDir | Out-Null
-$certPath = Join-Path $certDir "dashboard.crt"
-$keyPath = Join-Path $certDir "dashboard.key"
-
-if (!(Test-Path $certPath) -or !(Test-Path $keyPath)) {
-  Write-Host "[INFO] Generating HTTPS certificate..."
-  $rsa = [System.Security.Cryptography.RSA]::Create(2048)
-  $req = New-Object System.Security.Cryptography.X509Certificates.CertificateRequest(
-    "CN=ServerInstallerDashboard",
-    $rsa,
-    [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-    [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
-  )
-  $cert = $req.CreateSelfSigned([DateTimeOffset]::Now.AddDays(-1), [DateTimeOffset]::Now.AddYears(5))
-  $certPem = "-----BEGIN CERTIFICATE-----`n" + [Convert]::ToBase64String(
-    $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert),
-    [System.Base64FormattingOptions]::InsertLineBreaks
-  ) + "`n-----END CERTIFICATE-----"
-  try {
-    $keyBytes = $rsa.ExportPkcs8PrivateKey()
-    $keyPem = "-----BEGIN PRIVATE KEY-----`n" + [Convert]::ToBase64String(
-      $keyBytes,
-      [System.Base64FormattingOptions]::InsertLineBreaks
-    ) + "`n-----END PRIVATE KEY-----"
-  } catch {
-    try {
-      if ($rsa -is [System.Security.Cryptography.RSACng]) {
-        $keyBytes = $rsa.Key.Export([System.Security.Cryptography.CngKeyBlobFormat]::Pkcs8PrivateBlob)
-        $keyPem = "-----BEGIN PRIVATE KEY-----`n" + [Convert]::ToBase64String(
-          $keyBytes,
-          [System.Base64FormattingOptions]::InsertLineBreaks
-        ) + "`n-----END PRIVATE KEY-----"
-      } else {
-        throw "RSA provider does not support CNG export."
-      }
-    } catch {
-      $keyPem = ConvertTo-RsaPrivateKeyPem -Rsa $rsa
-    }
-  }
-  Set-Content -Path $certPath -Value $certPem -Encoding ascii
-  Set-Content -Path $keyPath -Value $keyPem -Encoding ascii
-}
-
 Write-Host "[INFO] Starting dashboard..."
-$env:DASHBOARD_HTTPS = "1"
-$env:DASHBOARD_CERT = $certPath
-$env:DASHBOARD_KEY = $keyPath
+if ($enableHttps) {
+  $certDir = Join-Path $root "certs"
+  New-Item -ItemType Directory -Force -Path $certDir | Out-Null
+  $certPath = Join-Path $certDir "dashboard.crt"
+  $keyPath = Join-Path $certDir "dashboard.key"
+
+  Write-Host "[INFO] Generating HTTPS certificate chain..."
+  Ensure-DashboardCaCertificate -CertPath $certPath -KeyPath $keyPath
+
+  $env:DASHBOARD_HTTPS = "1"
+  $env:DASHBOARD_CERT = $certPath
+  $env:DASHBOARD_KEY = $keyPath
+} else {
+  Remove-Item Env:\DASHBOARD_HTTPS -ErrorAction SilentlyContinue
+  Remove-Item Env:\DASHBOARD_CERT -ErrorAction SilentlyContinue
+  Remove-Item Env:\DASHBOARD_KEY -ErrorAction SilentlyContinue
+}
 & $python $dashboard
