@@ -178,15 +178,44 @@ function Resolve-DockerContext([string[]]$preferredContexts) {
 }
 
 function Find-DockerDesktopCli {
-  $candidates = @(
-    "C:\Program Files\Docker\Docker\DockerCli.exe",
-    "C:\Program Files\Docker\Docker\resources\DockerCli.exe",
-    "C:\Program Files\Docker\Docker\resources\bin\com.docker.cli.exe"
+  $roots = @(
+    $env:ProgramW6432,
+    $env:ProgramFiles,
+    ${env:ProgramFiles(x86)},
+    (Join-Path $env:SystemDrive "Program Files"),
+    (Join-Path $env:SystemDrive "Program Files (x86)"),
+    $env:LocalAppData
+  ) | Where-Object { $_ } | Select-Object -Unique
+
+  $relativeCandidates = @(
+    "Docker\Docker\DockerCli.exe",
+    "Docker\Docker\resources\DockerCli.exe",
+    "Docker\Docker\resources\bin\com.docker.cli.exe",
+    "Programs\Docker\Docker\DockerCli.exe",
+    "Programs\Docker\Docker\resources\DockerCli.exe",
+    "Programs\Docker\Docker\resources\bin\com.docker.cli.exe"
   )
+
+  $candidates = New-Object System.Collections.Generic.List[string]
+  foreach ($root in $roots) {
+    foreach ($relative in $relativeCandidates) {
+      $candidates.Add((Join-Path $root $relative)) | Out-Null
+    }
+  }
 
   foreach ($path in $candidates) {
     if (Test-Path $path) {
       return $path
+    }
+  }
+
+  foreach ($root in $roots) {
+    if (-not (Test-Path $root)) { continue }
+    $found = Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -in @("DockerCli.exe", "com.docker.cli.exe") } |
+      Select-Object -First 1
+    if ($found -and $found.FullName) {
+      return $found.FullName
     }
   }
 
