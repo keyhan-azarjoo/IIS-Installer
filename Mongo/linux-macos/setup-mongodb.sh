@@ -69,6 +69,24 @@ wait_for_port() {
   return 1
 }
 
+test_https_url() {
+  local url="$1"
+  if has_cmd curl; then
+    curl -kfsS --max-time 10 "$url" >/dev/null 2>&1
+    return $?
+  fi
+  return 0
+}
+
+dump_mongo_debug() {
+  warn "Docker container status:"
+  docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+  warn "Caddy logs:"
+  docker logs --tail 120 localmongo-https 2>&1 || true
+  warn "Mongo web logs:"
+  docker logs --tail 80 localmongo-web 2>&1 || true
+}
+
 ensure_docker_linux() {
   if has_cmd docker && docker info >/dev/null 2>&1; then
     info "Docker is already available."
@@ -270,6 +288,12 @@ EOF
     lan_url="https://${host_value}:${https_port}"
   fi
   mongo_url="mongodb://localhost:${mongo_port}/"
+
+  if ! test_https_url "$https_url"; then
+    err "Local HTTPS endpoint did not respond correctly: $https_url"
+    dump_mongo_debug
+    exit 1
+  fi
 
   printf '\n===== INSTALLATION COMPLETE =====\n'
   printf 'Compass-style web UI (HTTPS): %s\n' "$https_url"
