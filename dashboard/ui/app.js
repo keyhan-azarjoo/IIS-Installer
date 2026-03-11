@@ -1050,6 +1050,7 @@ function App() {
                   <Typography variant="body2">Windows service: native `mongod` install</Typography>
                   <Typography variant="body2">Docker: optional, not required</Typography>
                   <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "native"})` : "Not installed yet"}</Typography>
+                  {!!mongo.web_version && <Typography variant="body2">Web Version: {mongo.web_version}</Typography>}
                   {!!mongo.https_url && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongo.https_url}</Typography>}
                   {!!mongo.connection_string && <Typography variant="body2">Connection: {mongo.connection_string}</Typography>}
                 </CardContent>

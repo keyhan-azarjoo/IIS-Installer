@@ -494,6 +494,104 @@ function Ensure-NativeMongoBinary {
   return (Install-MongoFromZip)
 }
 
+function Find-MongoshExe {
+  $cmd = Get-Command "mongosh.exe" -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.Source -and (Test-Path $cmd.Source)) {
+    return $cmd.Source
+  }
+
+  foreach ($base in @($env:ProgramFiles, $env:ProgramW6432, (Join-Path $env:SystemDrive "Program Files"))) {
+    if ([string]::IsNullOrWhiteSpace($base)) { continue }
+    $shellRoot = Join-Path $base "MongoDB"
+    if (-not (Test-Path $shellRoot)) { continue }
+    $shellExe = Get-ChildItem -Path $shellRoot -Recurse -Filter "mongosh.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($shellExe -and $shellExe.FullName) {
+      return $shellExe.FullName
+    }
+  }
+
+  return $null
+}
+
+function Ensure-MongoshExe {
+  $mongosh = Find-MongoshExe
+  if ($mongosh) {
+    return $mongosh
+  }
+
+  if (Has-Cmd "winget") {
+    Info "Attempting mongosh install via winget..."
+    foreach ($pkg in @("MongoDB.Shell", "MongoDB.mongosh")) {
+      $prev = $ErrorActionPreference
+      $ErrorActionPreference = "Continue"
+      try {
+        & winget install -e --id $pkg --accept-source-agreements --accept-package-agreements --silent --disable-interactivity 2>$null | Out-Null
+      } catch {}
+      $exitCode = $LASTEXITCODE
+      $ErrorActionPreference = $prev
+      if ($exitCode -eq 0) {
+        $mongosh = Find-MongoshExe
+        if ($mongosh) {
+          return $mongosh
+        }
+      }
+    }
+  }
+
+  return $null
+}
+
+function Write-NativeMongoConfig([string]$cfgPath, [string[]]$bindIps, [int]$mongoPort, [string]$dataDir, [string]$logPath, [bool]$authEnabled) {
+  $config = @"
+storage:
+  dbPath: "$($dataDir -replace '\\','\\')"
+systemLog:
+  destination: file
+  path: "$($logPath -replace '\\','\\')"
+  logAppend: true
+net:
+  bindIp: "$($bindIps -join ',')"
+  port: $mongoPort
+"@
+  if ($authEnabled) {
+    $config += @"
+security:
+  authorization: enabled
+"@
+  }
+  [System.IO.File]::WriteAllText($cfgPath, $config, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Initialize-NativeMongoAuthentication([string]$mongoshExe, [int]$mongoPort, [string]$mongoUser, [string]$mongoPassword) {
+  if ([string]::IsNullOrWhiteSpace($mongoshExe) -or -not (Test-Path $mongoshExe)) {
+    return $false
+  }
+
+  $initScript = Join-Path $Script:MongoRoot "config\init-admin.js"
+  $js = @"
+const admin = db.getSiblingDB('admin');
+const existing = admin.getUser('$mongoUser');
+if (!existing) {
+  admin.createUser({
+    user: '$mongoUser',
+    pwd: '$mongoPassword',
+    roles: [{ role: 'root', db: 'admin' }]
+  });
+}
+"@
+  [System.IO.File]::WriteAllText($initScript, $js, (New-Object System.Text.UTF8Encoding($false)))
+
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $mongoshExe "mongodb://127.0.0.1:$mongoPort/admin" --quiet --file $initScript 2>$null | Out-Null
+  } catch {}
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $prev
+  Remove-Item -Force -Path $initScript -ErrorAction SilentlyContinue
+  return ($exitCode -eq 0)
+}
+
 function Remove-ExistingNativeLocalMongo {
   $service = Get-Service -Name $Script:NativeMongoServiceName -ErrorAction SilentlyContinue
   if ($service) {
@@ -517,7 +615,7 @@ function Remove-ExistingNativeLocalMongo {
   }
 }
 
-function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$hostValue, [int]$mongoPort, [string]$version) {
+function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$hostValue, [int]$mongoPort, [string]$version, [string]$connectionString, [string]$webVersion) {
   $primaryHost = if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") { $hostValue } else { "localhost" }
   $metadata = [ordered]@{
     mode = $mode
@@ -525,8 +623,9 @@ function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$ho
     mongod_path = $mongodExe
     host = $primaryHost
     mongo_port = $mongoPort
-    connection_string = "mongodb://${primaryHost}:$mongoPort/"
+    connection_string = $connectionString
     version = $version
+    web_version = $webVersion
   }
   $json = $metadata | ConvertTo-Json -Depth 4
   [System.IO.File]::WriteAllText((Get-LocalMongoMetadataPath), $json, (New-Object System.Text.UTF8Encoding($false)))
@@ -558,19 +657,7 @@ function Install-NativeLocalMongo([string]$hostValue, [int]$mongoPort, [string]$
   if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") {
     $bindIps += $hostValue
   }
-
-  $config = @"
-storage:
-  dbPath: "$($dataDir -replace '\\','\\')"
-systemLog:
-  destination: file
-  path: "$($logPath -replace '\\','\\')"
-  logAppend: true
-net:
-  bindIp: "$($bindIps -join ',')"
-  port: $mongoPort
-"@
-  [System.IO.File]::WriteAllText($cfgPath, $config, (New-Object System.Text.UTF8Encoding($false)))
+  Write-NativeMongoConfig -cfgPath $cfgPath -bindIps $bindIps -mongoPort $mongoPort -dataDir $dataDir -logPath $logPath -authEnabled $false
 
   & $mongodExe --config $cfgPath --install --serviceName $Script:NativeMongoServiceName --serviceDisplayName $Script:NativeMongoServiceName | Out-Null
   if ($LASTEXITCODE -ne 0) {
@@ -586,7 +673,27 @@ net:
   }
 
   Ensure-FirewallPort -port $mongoPort
-  Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version
+  $authEnabled = $false
+  $mongoshExe = Ensure-MongoshExe
+  if ($mongoshExe) {
+    Info "Initializing MongoDB admin user..."
+    if (Initialize-NativeMongoAuthentication -mongoshExe $mongoshExe -mongoPort $mongoPort -mongoUser $mongoUser -mongoPassword $mongoPassword) {
+      Write-NativeMongoConfig -cfgPath $cfgPath -bindIps $bindIps -mongoPort $mongoPort -dataDir $dataDir -logPath $logPath -authEnabled $true
+      Restart-Service -Name $Script:NativeMongoServiceName -Force
+      if (-not (Wait-TcpPort -targetHost "127.0.0.1" -port $mongoPort -maxSeconds 45)) {
+        Err "MongoDB service did not restart cleanly after enabling authentication."
+        exit 1
+      }
+      $authEnabled = $true
+    } else {
+      Warn "Could not initialize MongoDB admin user automatically. Compass authentication will fail until a user is created."
+    }
+  } else {
+    Warn "mongosh is not available, so MongoDB authentication could not be initialized automatically."
+  }
+
+  $primaryConnection = if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") { "mongodb://${hostValue}:$mongoPort/" } else { "mongodb://localhost:$mongoPort/" }
+  Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version -connectionString $primaryConnection -webVersion "native-service"
 
   Write-Host ""
   Write-Host "===== INSTALLATION COMPLETE ====="
@@ -600,9 +707,17 @@ net:
   if ($version) {
     Write-Host "MongoDB version:               $version"
   }
+  Write-Host "Web version:                   native-service"
   Write-Host "Data path:                     $dataDir"
   Write-Host "Log path:                      $logPath"
-  Write-Host "Admin/User fields:             saved for compatibility; native Windows mode does not deploy the Docker web UI."
+  if ($authEnabled) {
+    Write-Host "MongoDB root user:             $mongoUser"
+    Write-Host "MongoDB root password:         $mongoPassword"
+  } else {
+    Write-Host "Authentication:                not initialized automatically"
+  }
+  Write-Host "TLS/SSL:                       disabled in native Windows mode"
+  Write-Host "Admin/User fields:             native Windows mode does not deploy the Docker web UI."
   Write-Host ""
   Write-Host "MongoDB is installed as a native Windows service and set to start automatically."
 }

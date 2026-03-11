@@ -536,7 +536,7 @@ def get_mongo_info():
         elif port.isdigit():
             info["connection_string"] = f"mongodb://{preferred_host}:{int(port)}/"
         if native.get("mode") == "native":
-            info["web_version"] = "native"
+            info["web_version"] = str(native.get("web_version") or "native")
 
     if command_exists("docker"):
         for name in ("localmongo-mongodb", "localmongo-web", "localmongo-https"):
@@ -743,7 +743,7 @@ def get_windows_native_mongo_info():
         "$meta=Join-Path $root 'install-info.json'; "
         "$cfg=Join-Path $root 'config\\mongod.cfg'; "
         "$svc=Get-Service -Name 'LocalMongoDB' -ErrorAction SilentlyContinue; "
-        "$obj=[ordered]@{installed=$false;version='';connection='';port='';mode=''}; "
+        "$obj=[ordered]@{installed=$false;version='';connection='';port='';mode='';web_version=''}; "
         "if($svc){$obj.installed=$true}; "
         "if(Test-Path $meta){ "
         "  try { "
@@ -752,6 +752,7 @@ def get_windows_native_mongo_info():
         "    if($m.connection_string){$obj.connection=[string]$m.connection_string}; "
         "    if($m.mongo_port){$obj.port=[string]$m.mongo_port}; "
         "    if($m.mode){$obj.mode=[string]$m.mode}; "
+        "    if($m.web_version){$obj.web_version=[string]$m.web_version}; "
         "    $obj.installed=$true; "
         "  } catch {} "
         "} "
