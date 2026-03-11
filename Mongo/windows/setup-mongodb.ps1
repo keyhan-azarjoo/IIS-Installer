@@ -159,6 +159,13 @@ function Resolve-DockerContext([string[]]$preferredContexts) {
 
   foreach ($ctx in $candidates) {
     $osType = Get-DockerOsType -dockerCtx $ctx
+    if ($osType -eq "linux") {
+      return $ctx
+    }
+  }
+
+  foreach ($ctx in $candidates) {
+    $osType = Get-DockerOsType -dockerCtx $ctx
     if ($osType) {
       return $ctx
     }
