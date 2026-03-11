@@ -2102,7 +2102,7 @@ def run_windows_mongo_installer(form, live_cb=None):
         return 1, "Windows MongoDB installer can only run on Windows hosts."
     if not is_windows_admin():
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
-    ensure_repo_files(MONGO_WINDOWS_FILES, live_cb=live_cb, refresh=False)
+    ensure_repo_files(MONGO_WINDOWS_FILES, live_cb=live_cb, refresh=True)
 
     env = os.environ.copy()
     for key in [
@@ -2155,7 +2155,7 @@ def run_windows_mongo_installer(form, live_cb=None):
 def run_unix_mongo_installer(form=None, live_cb=None):
     if os.name == "nt":
         return 1, "Linux/macOS MongoDB installer can only run on Linux or macOS hosts."
-    ensure_repo_files(MONGO_UNIX_FILES, live_cb=live_cb, refresh=False)
+    ensure_repo_files(MONGO_UNIX_FILES, live_cb=live_cb, refresh=True)
     form = form or {}
 
     env = os.environ.copy()
