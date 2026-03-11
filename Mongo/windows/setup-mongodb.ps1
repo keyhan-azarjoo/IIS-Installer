@@ -178,6 +178,26 @@ function Resolve-DockerContext([string[]]$preferredContexts) {
 }
 
 function Find-DockerDesktopCli {
+  $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+  if ($dockerCommand -and $dockerCommand.Source) {
+    $dockerExeDir = Split-Path -Path $dockerCommand.Source -Parent
+    $derivedCandidates = @(
+      (Join-Path $dockerExeDir "..\..\DockerCli.exe"),
+      (Join-Path $dockerExeDir "..\DockerCli.exe"),
+      (Join-Path $dockerExeDir "com.docker.cli.exe")
+    )
+    foreach ($candidate in $derivedCandidates) {
+      try {
+        $resolved = [System.IO.Path]::GetFullPath($candidate)
+      } catch {
+        $resolved = $candidate
+      }
+      if (Test-Path $resolved) {
+        return $resolved
+      }
+    }
+  }
+
   $roots = @(
     $env:ProgramW6432,
     $env:ProgramFiles,
