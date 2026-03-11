@@ -297,7 +297,7 @@ EOF
     --name localmongo-mongodb \
     --label com.localmongo.installer=true \
     --label com.localmongo.role=mongodb \
-    --restart unless-stopped \
+    --restart always \
     --network localmongo-net \
     -p "0.0.0.0:${mongo_port}:27017" \
     -e "MONGO_INITDB_ROOT_USERNAME=${mongo_user}" \
@@ -309,7 +309,7 @@ EOF
     --name localmongo-web \
     --label com.localmongo.installer=true \
     --label com.localmongo.role=web \
-    --restart unless-stopped \
+    --restart always \
     --network localmongo-net \
     -p "127.0.0.1:${web_port}:8081" \
     -e "ME_CONFIG_MONGODB_SERVER=localmongo-mongodb" \
@@ -326,7 +326,7 @@ EOF
     --name localmongo-https \
     --label com.localmongo.installer=true \
     --label com.localmongo.role=https \
-    --restart unless-stopped \
+    --restart always \
     --network localmongo-net \
     -p "0.0.0.0:${https_port}:${https_port}" \
     -v "${caddyfile}:/etc/caddy/Caddyfile:ro" \

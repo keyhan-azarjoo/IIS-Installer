@@ -168,7 +168,7 @@ $($addresses -join ", ") {
     --name localmongo-mongodb `
     --label $Script:MongoLabel `
     --label "com.localmongo.role=mongodb" `
-    --restart unless-stopped `
+    --restart always `
     --network localmongo-net `
     -p "${mongoPort}:27017" `
     -e "MONGO_INITDB_ROOT_USERNAME=$mongoUser" `
@@ -185,7 +185,7 @@ $($addresses -join ", ") {
     --name localmongo-web `
     --label $Script:MongoLabel `
     --label "com.localmongo.role=web" `
-    --restart unless-stopped `
+    --restart always `
     --network localmongo-net `
     -p "127.0.0.1:${webPort}:8081" `
     -e "ME_CONFIG_MONGODB_SERVER=localmongo-mongodb" `
@@ -207,7 +207,7 @@ $($addresses -join ", ") {
     --name localmongo-https `
     --label $Script:MongoLabel `
     --label "com.localmongo.role=https" `
-    --restart unless-stopped `
+    --restart always `
     --network localmongo-net `
     -p "${httpsPort}:${httpsPort}" `
     -v "${caddyfilePath}:/etc/caddy/Caddyfile:ro" `
