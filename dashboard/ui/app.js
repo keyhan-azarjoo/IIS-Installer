@@ -678,6 +678,28 @@ function App() {
       return patt.test(text);
     });
   }, [services]);
+  const mongoDisplayServices = React.useMemo(() => {
+    if ((mongoServices || []).length > 0) return mongoServices;
+    if (!mongo.installed) return [];
+    let fallbackPort = 27017;
+    try {
+      const raw = String(mongo.connection_string || "").trim();
+      const hostPart = raw.replace(/^mongodb:\/\//, "").replace(/\/.*$/, "").trim();
+      const portText = hostPart.includes(":") ? hostPart.split(":").pop() : "27017";
+      if (/^\d+$/.test(portText)) fallbackPort = Number(portText);
+    } catch (_) {}
+    const fallbackUrl = mongo.https_url ? String(mongo.https_url).trim() : (mongo.web_version === "native-service" ? "/mongo/native-ui" : "");
+    return [{
+      kind: cfg.os === "windows" ? "service" : "docker",
+      name: cfg.os === "windows" ? "LocalMongoDB" : "localmongo-mongodb",
+      display_name: mongo.server_version ? `MongoDB ${mongo.server_version}` : "MongoDB",
+      status: "running",
+      sub_status: "running",
+      autostart: true,
+      urls: fallbackUrl ? [fallbackUrl] : [],
+      ports: fallbackPort ? [{ port: fallbackPort, protocol: "tcp" }] : [],
+    }];
+  }, [cfg.os, mongo.connection_string, mongo.https_url, mongo.installed, mongo.server_version, mongo.web_version, mongoServices]);
 
   const clientOs = React.useMemo(() => {
     const raw = `${navigator.userAgent || ""} ${(navigator.platform || "")}`.toLowerCase();
@@ -719,7 +741,7 @@ function App() {
     const host = (systemInfo?.public_ip || (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "localhost");
     return buildMongoUri(host);
   }, [mongo.auth_enabled, mongo.connection_string, systemInfo]);
-  const mongoServiceUrls = React.useMemo(() => uniqUrls((mongoServices || []).flatMap((svc) => svc?.urls || [])), [mongoServices]);
+  const mongoServiceUrls = React.useMemo(() => uniqUrls((mongoDisplayServices || []).flatMap((svc) => svc?.urls || [])), [mongoDisplayServices]);
   const mongoWebsiteUrl = React.useMemo(() => {
     if (mongo.https_url) return String(mongo.https_url).trim();
     if (cfg.os === "windows" && mongo.web_version === "native-service") return "/mongo/native-ui";
@@ -1189,17 +1211,17 @@ function App() {
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
-                      color={hasStoppedServices(mongoServices) ? "success" : "error"}
-                      disabled={serviceBusy || mongoServices.length === 0}
-                      onClick={() => batchServiceAction(mongoServices, "MongoDB", hasStoppedServices(mongoServices) ? "start" : "stop")}
+                      color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
+                      disabled={serviceBusy || mongoDisplayServices.length === 0}
+                      onClick={() => batchServiceAction(mongoDisplayServices, "MongoDB", hasStoppedServices(mongoDisplayServices) ? "start" : "stop")}
                       sx={{ textTransform: "none" }}
                     >
-                      {hasStoppedServices(mongoServices) ? "Start All MongoDB" : "Stop All MongoDB"}
+                      {hasStoppedServices(mongoDisplayServices) ? "Start All MongoDB" : "Stop All MongoDB"}
                     </Button>
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
-                    {mongoServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
-                    {mongoServices.map((svc) => (
+                    {mongoDisplayServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
+                    {mongoDisplayServices.map((svc) => (
                       <Paper key={`mongo-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                         <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                           <Box sx={{ minWidth: 250 }}>
@@ -1280,17 +1302,17 @@ function App() {
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
-                      color={hasStoppedServices(mongoServices) ? "success" : "error"}
-                      disabled={serviceBusy || mongoServices.length === 0}
-                      onClick={() => batchServiceAction(mongoServices, "MongoDB", hasStoppedServices(mongoServices) ? "start" : "stop")}
+                      color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
+                      disabled={serviceBusy || mongoDisplayServices.length === 0}
+                      onClick={() => batchServiceAction(mongoDisplayServices, "MongoDB", hasStoppedServices(mongoDisplayServices) ? "start" : "stop")}
                       sx={{ textTransform: "none" }}
                     >
-                      {hasStoppedServices(mongoServices) ? "Start All MongoDB" : "Stop All MongoDB"}
+                      {hasStoppedServices(mongoDisplayServices) ? "Start All MongoDB" : "Stop All MongoDB"}
                     </Button>
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
-                    {mongoServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
-                    {mongoServices.map((svc) => (
+                    {mongoDisplayServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
+                    {mongoDisplayServices.map((svc) => (
                       <Paper key={`mongo-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                         <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                           <Box sx={{ minWidth: 250 }}>
