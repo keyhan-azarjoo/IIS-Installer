@@ -76,6 +76,22 @@ pick_port() {
   echo ""
 }
 
+pick_distinct_port() {
+  local used="$1"
+  shift
+  local p
+  for p in "$@"; do
+    if [ "$p" = "$used" ]; then
+      continue
+    fi
+    if port_free "$p"; then
+      echo "$p"
+      return
+    fi
+  done
+  echo ""
+}
+
 resolve_https_port_unix() {
   local choice custom_port picked
 
@@ -311,15 +327,35 @@ generate_cert() {
 }
 
 configure_nginx_linux() {
-  local domain="$1" https_port="$2" target_port="$3" cert_dir="$4"
+  local domain="$1" api_https_port="$2" api_target_port="$3" console_https_port="$4" console_target_port="$5" cert_dir="$6"
   cat > /etc/nginx/conf.d/locals3.conf <<EOF
 server {
-    listen ${https_port} ssl;
+    listen ${api_https_port} ssl;
     server_name ${domain} localhost;
     ssl_certificate ${cert_dir}/localhost.crt;
     ssl_certificate_key ${cert_dir}/localhost.key;
     location / {
-        proxy_pass http://127.0.0.1:${target_port};
+        proxy_pass http://127.0.0.1:${api_target_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host \$http_host;
+        proxy_set_header X-Forwarded-Port \$server_port;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Ssl on;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+server {
+    listen ${console_https_port} ssl;
+    server_name ${domain} localhost;
+    ssl_certificate ${cert_dir}/localhost.crt;
+    ssl_certificate_key ${cert_dir}/localhost.key;
+    location / {
+        proxy_pass http://127.0.0.1:${console_target_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -341,11 +377,11 @@ EOF
     service nginx restart >/dev/null 2>&1 || service nginx start >/dev/null 2>&1 || true
   fi
 
-  if ! port_free "$https_port"; then
+  if ! port_free "$api_https_port" && ! port_free "$console_https_port"; then
     return
   fi
 
-  err "Nginx did not start correctly on port ${https_port}."
+  err "Nginx did not start correctly on ports ${api_https_port}/${console_https_port}."
   if has_cmd systemctl; then
     warn "nginx.service status:"
     systemctl status nginx --no-pager -l 2>/dev/null || true
@@ -354,19 +390,39 @@ EOF
 }
 
 configure_nginx_macos() {
-  local domain="$1" https_port="$2" target_port="$3" cert_dir="$4"
+  local domain="$1" api_https_port="$2" api_target_port="$3" console_https_port="$4" console_target_port="$5" cert_dir="$6"
   local prefix
   prefix="$(brew --prefix)"
   local confd="${prefix}/etc/nginx/servers"
   mkdir -p "$confd"
   cat > "${confd}/locals3.conf" <<EOF
 server {
-    listen ${https_port} ssl;
+    listen ${api_https_port} ssl;
     server_name ${domain} localhost;
     ssl_certificate ${cert_dir}/localhost.crt;
     ssl_certificate_key ${cert_dir}/localhost.key;
     location / {
-        proxy_pass http://127.0.0.1:${target_port};
+        proxy_pass http://127.0.0.1:${api_target_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host \$http_host;
+        proxy_set_header X-Forwarded-Port \$server_port;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Ssl on;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+server {
+    listen ${console_https_port} ssl;
+    server_name ${domain} localhost;
+    ssl_certificate ${cert_dir}/localhost.crt;
+    ssl_certificate_key ${cert_dir}/localhost.key;
+    location / {
+        proxy_pass http://127.0.0.1:${console_target_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -407,7 +463,7 @@ trust_cert() {
 
 main() {
   relaunch_elevated "$@"
-  local os root cert_dir https_port api_port ui_port domain lan_ans enable_lan lan_ip public_ip use_public_ip proxy_host proxy_url
+  local os root cert_dir https_port console_https_port api_port ui_port domain lan_ans enable_lan lan_ip public_ip use_public_ip proxy_host api_url console_url
   os="$(detect_os)"
   [ "$os" = "unknown" ] && { err "Unsupported OS."; exit 1; }
   info "===== Local S3 Storage Installer (${os}) - Native Mode ====="
@@ -441,15 +497,22 @@ main() {
   ui_port="$(pick_port 9001 19001 29001)"
   [ -z "$api_port" ] && { err "No free API port."; exit 1; }
   [ -z "$ui_port" ] && { err "No free UI port."; exit 1; }
+  console_https_port="$(pick_distinct_port "$https_port" 9443 10443 18443 8444)"
+  [ -z "$console_https_port" ] && { err "No free Console HTTPS port."; exit 1; }
 
   proxy_host="$domain"
   if [ "$proxy_host" = "localhost" ] && [ -n "$lan_ip" ]; then
     proxy_host="$lan_ip"
   fi
   if [ "$https_port" -eq 443 ]; then
-    proxy_url="https://${proxy_host}"
+    api_url="https://${proxy_host}"
   else
-    proxy_url="https://${proxy_host}:${https_port}"
+    api_url="https://${proxy_host}:${https_port}"
+  fi
+  if [ "$console_https_port" -eq 443 ]; then
+    console_url="https://${proxy_host}"
+  else
+    console_url="https://${proxy_host}:${console_https_port}"
   fi
 
   root="/opt/locals3"
@@ -459,10 +522,10 @@ main() {
 
   if [ "$os" = "linux" ]; then
     ensure_prereqs_linux
-    configure_minio_linux "$root" "$api_port" "$ui_port" "$proxy_url" "$proxy_url"
+    configure_minio_linux "$root" "$api_port" "$ui_port" "$api_url" "$console_url"
   else
     ensure_prereqs_macos
-    configure_minio_macos "$root" "$api_port" "$ui_port" "$proxy_url" "$proxy_url"
+    configure_minio_macos "$root" "$api_port" "$ui_port" "$api_url" "$console_url"
   fi
 
   ensure_hosts_entry "$domain" "127.0.0.1"
@@ -470,25 +533,28 @@ main() {
   trust_cert "${cert_dir}/localhost.crt"
 
   if [ "$os" = "linux" ]; then
-    configure_nginx_linux "$domain" "$https_port" "$ui_port" "$cert_dir"
+    configure_nginx_linux "$domain" "$https_port" "$api_port" "$console_https_port" "$ui_port" "$cert_dir"
     if [ "$enable_lan" = true ] && has_cmd ufw; then
       ufw allow "${https_port}/tcp" >/dev/null 2>&1 || true
+      ufw allow "${console_https_port}/tcp" >/dev/null 2>&1 || true
     fi
   else
-    configure_nginx_macos "$domain" "$https_port" "$ui_port" "$cert_dir"
+    configure_nginx_macos "$domain" "$https_port" "$api_port" "$console_https_port" "$ui_port" "$cert_dir"
   fi
 
   echo ""
   echo "===== INSTALLATION COMPLETE ====="
   echo "MinIO Console (direct): http://localhost:${ui_port}"
   echo "MinIO API (direct):     http://localhost:${api_port}"
-  echo "Proxy URL:              ${proxy_url}"
+  echo "API URL:                ${api_url}"
+  echo "Console URL:            ${console_url}"
   if [ "$enable_lan" = true ] && [ -n "$lan_ip" ]; then
     if [ "$https_port" -eq 443 ]; then
-      echo "LAN URL:                https://${lan_ip}"
+      echo "LAN API URL:            https://${lan_ip}"
     else
-      echo "LAN URL:                https://${lan_ip}:${https_port}"
+      echo "LAN API URL:            https://${lan_ip}:${https_port}"
     fi
+    echo "LAN Console Port:       ${console_https_port}"
     echo "DNS mapping needed:     ${domain} -> ${lan_ip}"
   fi
   echo ""
