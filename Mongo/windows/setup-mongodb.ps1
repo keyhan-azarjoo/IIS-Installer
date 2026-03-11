@@ -143,17 +143,33 @@ function Switch-DockerToLinuxContainers {
     return $false
   }
   Info "Docker is running Windows containers. Switching Docker Desktop to Linux containers..."
-  $prev = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  & $dockerCli -SwitchLinuxEngine 2>$null | Out-Null
-  $exitCode = $LASTEXITCODE
-  $ErrorActionPreference = $prev
-  if ($exitCode -ne 0) {
-    return $false
+  foreach ($args in @(
+    @("-SwitchLinuxEngine"),
+    @("-SwitchDaemon")
+  )) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      & $dockerCli @args 2>$null | Out-Null
+    } catch {}
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($exitCode -eq 0) {
+      for ($i = 0; $i -lt 24; $i++) {
+        Start-Sleep -Seconds 5
+        try {
+          if (Test-DockerEngine) {
+            $dockerCtx = Get-ActiveDockerContext
+            $osType = Get-DockerOsType -dockerCtx $dockerCtx
+            if ($osType -eq "linux") {
+              return $true
+            }
+          }
+        } catch {}
+      }
+    }
   }
-  Start-Sleep -Seconds 8
-  Wait-DockerEngine
-  return $true
+  return $false
 }
 
 function Ensure-DockerLinuxEngine([string]$dockerCtx) {
