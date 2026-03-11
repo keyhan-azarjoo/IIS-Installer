@@ -214,7 +214,7 @@ EOF
     --label com.localmongo.role=mongodb \
     --restart unless-stopped \
     --network localmongo-net \
-    -p "${mongo_port}:27017" \
+    -p "0.0.0.0:${mongo_port}:27017" \
     -e "MONGO_INITDB_ROOT_USERNAME=${mongo_user}" \
     -e "MONGO_INITDB_ROOT_PASSWORD=${mongo_password}" \
     -v localmongo-data:/data/db \
@@ -243,7 +243,7 @@ EOF
     --label com.localmongo.role=https \
     --restart unless-stopped \
     --network localmongo-net \
-    -p "${https_port}:443" \
+    -p "0.0.0.0:${https_port}:${https_port}" \
     -v "${caddyfile}:/etc/caddy/Caddyfile:ro" \
     -v "${data_dir}:/data" \
     -v "${config_dir}:/config" \

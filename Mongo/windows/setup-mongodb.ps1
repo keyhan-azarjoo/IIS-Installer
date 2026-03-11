@@ -197,7 +197,7 @@ $($addresses -join ", ") {
     --label "com.localmongo.role=https" `
     --restart unless-stopped `
     --network localmongo-net `
-    -p "${httpsPort}:443" `
+    -p "${httpsPort}:${httpsPort}" `
     -v "${caddyfilePath}:/etc/caddy/Caddyfile:ro" `
     -v "${dataDir}:/data" `
     -v "${configDir}:/config" `
