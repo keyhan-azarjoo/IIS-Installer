@@ -192,7 +192,7 @@ function Ensure-DockerLinuxEngine {
   $osType = Get-DockerOsType
   if ($osType -eq "linux") {
     Info "Docker Engine is using Linux containers."
-    return
+    return $true
   }
 
   if ($osType -eq "windows") {
@@ -207,13 +207,14 @@ function Ensure-DockerLinuxEngine {
     $ok = Install-DockerDesktopDirect
     if (-not $ok) {
       Err "Automatic Docker Desktop installation/repair failed."
-      Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
-      exit 1
+      Warn "Falling back to IIS/native S3 mode."
+      return $false
     }
     if (-not (Wait-DockerDesktopFiles -maxSeconds 120)) {
       Err "Docker Desktop files did not appear after install/repair."
       Warn "The installer completed, but Docker Desktop binaries are still unavailable."
-      exit 1
+      Warn "Falling back to IIS/native S3 mode."
+      return $false
     }
     Try-EnableDockerCliFromDefaultPath
     Start-DockerDesktop
@@ -221,8 +222,8 @@ function Ensure-DockerLinuxEngine {
     $dockerCli = Find-DockerSwitchCli
     if (-not $dockerCli) {
       Err "Docker Desktop switch CLI not found after repair/install."
-      Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
-      exit 1
+      Warn "Falling back to IIS/native S3 mode."
+      return $false
     }
   }
   Info "Using Docker switch CLI: $dockerCli"
@@ -234,8 +235,8 @@ function Ensure-DockerLinuxEngine {
   $ErrorActionPreference = $prev
   if ($switchExit -ne 0) {
     Err "Failed to request Docker Desktop Linux engine switch."
-    Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
-    exit 1
+    Warn "Falling back to IIS/native S3 mode."
+    return $false
   }
 
   Info "Waiting for Docker Linux engine..."
@@ -246,7 +247,7 @@ function Ensure-DockerLinuxEngine {
     $osType = Get-DockerOsType
     if ($osType -eq "linux") {
       Info "Docker Engine is using Linux containers."
-      return
+      return $true
     }
     if ($elapsed % 30 -eq 0) {
       Info "Waiting for Linux engine... ($elapsed/120s)"
@@ -254,8 +255,8 @@ function Ensure-DockerLinuxEngine {
   }
 
   Err "Docker Desktop did not switch to Linux containers in time."
-  Warn "Open Docker Desktop manually and confirm 'Switch to Windows containers...' is shown, which means Linux mode is active."
-  exit 1
+  Warn "Falling back to IIS/native S3 mode."
+  return $false
 }
 
 # ---------------------------------------------------------------------------
@@ -931,13 +932,17 @@ function Invoke-LocalS3DockerPreparation {
   if (Finish-Or-Restart) { return $false }
   Sanitize-DockerEnv
   Wait-DockerEngine
-  Ensure-DockerLinuxEngine
+  if (-not (Ensure-DockerLinuxEngine)) { return $false }
   Reset-RestartCount
   Ensure-DockerCompose
   return $true
 }
 
 function Invoke-LocalS3DockerSetup {
-  if (-not (Invoke-LocalS3DockerPreparation)) { return }
+  if (-not (Invoke-LocalS3DockerPreparation)) {
+    Warn "Docker mode prerequisites could not be completed automatically. Continuing with IIS/native S3 mode."
+    Invoke-LocalS3IISSetup
+    return
+  }
   Write-FilesAndUp
 }
