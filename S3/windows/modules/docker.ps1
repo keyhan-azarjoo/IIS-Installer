@@ -96,6 +96,69 @@ function Test-DockerEngine {
   return $ok
 }
 
+function Get-DockerOsType {
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $out = docker info --format "{{.OSType}}" 2>$null
+  $exit = $LASTEXITCODE
+  $ErrorActionPreference = $prev
+  if ($exit -ne 0) {
+    return ""
+  }
+  return (($out | Out-String).Trim())
+}
+
+function Ensure-DockerLinuxEngine {
+  $osType = Get-DockerOsType
+  if ($osType -eq "linux") {
+    Info "Docker Engine is using Linux containers."
+    return
+  }
+
+  if ($osType -eq "windows") {
+    Warn "Docker Engine is using Windows containers. Switching to Linux containers..."
+  } else {
+    Warn "Docker Engine type is unknown. Attempting to switch Docker Desktop to Linux containers..."
+  }
+
+  $dockerCli = "C:\Program Files\Docker\Docker\DockerCli.exe"
+  if (-not (Test-Path $dockerCli)) {
+    Err "DockerCli.exe not found at $dockerCli"
+    Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
+    exit 1
+  }
+
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  & $dockerCli -SwitchLinuxEngine 2>&1 | Out-Null
+  $switchExit = $LASTEXITCODE
+  $ErrorActionPreference = $prev
+  if ($switchExit -ne 0) {
+    Err "Failed to request Docker Desktop Linux engine switch."
+    Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
+    exit 1
+  }
+
+  Info "Waiting for Docker Linux engine..."
+  $elapsed = 0
+  while ($elapsed -lt 120) {
+    Start-Sleep -Seconds 5
+    $elapsed += 5
+    $osType = Get-DockerOsType
+    if ($osType -eq "linux") {
+      Info "Docker Engine is using Linux containers."
+      return
+    }
+    if ($elapsed % 30 -eq 0) {
+      Info "Waiting for Linux engine... ($elapsed/120s)"
+    }
+  }
+
+  Err "Docker Desktop did not switch to Linux containers in time."
+  Warn "Open Docker Desktop manually and confirm 'Switch to Windows containers...' is shown, which means Linux mode is active."
+  exit 1
+}
+
 # ---------------------------------------------------------------------------
 # Self-healing: terminate stuck WSL distros + restart Docker Desktop
 # ---------------------------------------------------------------------------
@@ -742,6 +805,7 @@ function Invoke-LocalS3DockerPreparation {
   if (Finish-Or-Restart) { return $false }
   Sanitize-DockerEnv
   Wait-DockerEngine
+  Ensure-DockerLinuxEngine
   Reset-RestartCount
   Ensure-DockerCompose
   return $true
