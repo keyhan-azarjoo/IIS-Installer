@@ -961,6 +961,11 @@ function App() {
     if (cfg.os === "windows" && mongo.web_version === "native-service") return "/mongo/native-ui";
     return mongoServiceUrls.find((url) => /^https?:\/\//i.test(String(url || ""))) || "";
   }, [cfg.os, mongo.https_url, mongo.web_version, mongoServiceUrls]);
+  const s3WindowsDockerSupported = cfg.os !== "windows" ? true : cfg.s3_windows_docker_supported !== false;
+  const s3WindowsDockerReason = String(cfg.s3_windows_docker_reason || "").trim();
+  const s3WindowsModeOptions = React.useMemo(() => (
+    s3WindowsDockerSupported ? ["iis", "docker"] : ["iis"]
+  ), [s3WindowsDockerSupported]);
 
   const s3ServiceUrls = React.useMemo(() => uniqUrls((s3Services || []).flatMap((svc) => svc?.urls || [])), [s3Services]);
   const s3ConsoleUrl = React.useMemo(() => {
@@ -1225,7 +1230,7 @@ function App() {
                 description="Choose IIS or Docker mode, host type (local/DNS/IP), and ports."
                 action="/run/s3_windows"
                 fields={[
-                  { name: "S3_MODE", label: "Mode", type: "select", options: ["iis", "docker"], defaultValue: "iis" },
+                  { name: "S3_MODE", label: "Mode", type: "select", options: s3WindowsModeOptions, defaultValue: "iis" },
                   { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
                   { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
                   { name: "LOCALS3_API_PORT", label: "MinIO API Port", defaultValue: "9000", required: true, placeholder: "9000" },
@@ -1237,6 +1242,11 @@ function App() {
                 onRun={run}
                 color="#0f766e"
               />
+              {!s3WindowsDockerSupported && (
+                <Alert severity="warning" sx={{ mt: 1.5 }}>
+                  Docker mode is disabled on this Windows host. {s3WindowsDockerReason || "This machine is not currently usable for Linux-container Docker workloads."}
+                </Alert>
+              )}
             </Grid>
             <Grid item xs={12} md={4}>
               <ActionCard

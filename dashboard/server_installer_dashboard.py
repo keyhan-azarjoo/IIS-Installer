@@ -463,7 +463,7 @@ def get_dotnet_info():
 
 
 def get_docker_info():
-    info = {"installed": False, "version": "", "server_version": "", "running": False}
+    info = {"installed": False, "version": "", "server_version": "", "running": False, "os_type": ""}
     rc, out = run_capture(["docker", "--version"])
     if rc == 0 and out:
         info["installed"] = True
@@ -472,7 +472,30 @@ def get_docker_info():
         if rc2 == 0 and out2:
             info["server_version"] = out2.strip()
             info["running"] = True
+        rc3, out3 = run_capture(["docker", "info", "--format", "{{.OSType}}"])
+        if rc3 == 0 and out3:
+            info["os_type"] = out3.strip().lower()
     return info
+
+
+def get_windows_s3_docker_support():
+    support = {"supported": True, "reason": ""}
+    if os.name != "nt":
+        return support
+    docker = get_docker_info()
+    if not docker.get("installed"):
+        support["supported"] = False
+        support["reason"] = "Docker Desktop is not installed."
+        return support
+    if not docker.get("running"):
+        support["supported"] = False
+        support["reason"] = "Docker Desktop is not running."
+        return support
+    if docker.get("os_type") != "linux":
+        support["supported"] = False
+        support["reason"] = "Docker Desktop is not using Linux containers."
+        return support
+    return support
 
 
 def get_iis_info():
@@ -2498,6 +2521,12 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
     selected_mode = (form.get("S3_MODE", [mode])[0] or mode or "iis").strip().lower()
     if selected_mode not in ("iis", "docker"):
         selected_mode = "iis"
+    docker_support = get_windows_s3_docker_support()
+    if selected_mode == "docker" and not docker_support.get("supported", True):
+        reason = str(docker_support.get("reason") or "Docker mode is not available on this Windows host.")
+        if live_cb:
+            live_cb(f"[WARN] {reason} Falling back to IIS mode.\n")
+        selected_mode = "iis"
     mode_choice = "2\n" if selected_mode == "docker" else "1\n"
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
     requested_mode = (form.get("LOCALS3_HOST_MODE", [""])[0] or "").strip().lower()
@@ -3872,10 +3901,13 @@ if (firstInput) firstInput.focus();
 
 
 def page_dashboard_mui(message="", system_name=""):
+    s3_docker = get_windows_s3_docker_support() if (system_name or platform.system()).lower() == "windows" else {"supported": True, "reason": ""}
     config = {
         "os": (system_name or platform.system()).lower(),
         "os_label": platform.system(),
         "message": message or "",
+        "s3_windows_docker_supported": bool(s3_docker.get("supported", True)),
+        "s3_windows_docker_reason": str(s3_docker.get("reason") or ""),
     }
     return """<!doctype html>
 <html>
