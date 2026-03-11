@@ -525,6 +525,46 @@ function App() {
     });
   }, [services]);
 
+  const mongoCompassDownloadUrl = "https://www.mongodb.com/try/download/compass";
+  const mongoCompassUri = React.useMemo(() => {
+    if (mongo.connection_string) {
+      return mongo.connection_string;
+    }
+    const host = (systemInfo?.public_ip || (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "localhost");
+    return `mongodb://${host}:27017/`;
+  }, [mongo.connection_string, systemInfo]);
+
+  const copyText = async (text, label) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const tmp = document.createElement("textarea");
+        tmp.value = text;
+        document.body.appendChild(tmp);
+        tmp.select();
+        document.execCommand("copy");
+        document.body.removeChild(tmp);
+      }
+      setInfoMessage(`${label} copied.`);
+    } catch (err) {
+      setInfoMessage(`Could not copy ${label}: ${err}`);
+    }
+  };
+
+  const tryOpenCompass = () => {
+    try {
+      window.location.href = mongoCompassUri;
+      if (cfg.os === "linux") {
+        setInfoMessage("Tried to open Compass via mongodb:// URI. Linux browser handlers are usually not registered automatically.");
+      } else {
+        setInfoMessage("Tried to open Compass via mongodb:// URI. This works only if Compass is installed and registered as the URL handler.");
+      }
+    } catch (err) {
+      setInfoMessage(`Could not launch Compass: ${err}`);
+    }
+  };
+
   const renderPage = () => {
     if (page === "home") {
       return (
@@ -864,6 +904,15 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>MongoDB Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
+                    <Button variant="outlined" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
+                      Download Compass
+                    </Button>
+                    <Button variant="outlined" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} sx={{ textTransform: "none" }}>
+                      Copy Compass URI
+                    </Button>
+                    <Button variant="outlined" onClick={tryOpenCompass} sx={{ textTransform: "none" }}>
+                      Try Open Compass
+                    </Button>
                     {!!mongo.https_url && (
                       <Button variant="contained" disabled={serviceBusy} onClick={() => window.open(mongo.https_url, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
                         Open Compass-Style UI
@@ -938,6 +987,15 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>MongoDB Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
+                    <Button variant="outlined" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
+                      Download Compass
+                    </Button>
+                    <Button variant="outlined" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} sx={{ textTransform: "none" }}>
+                      Copy Compass URI
+                    </Button>
+                    <Button variant="outlined" onClick={tryOpenCompass} sx={{ textTransform: "none" }}>
+                      Try Open Compass
+                    </Button>
                     {!!mongo.https_url && (
                       <Button variant="contained" disabled={serviceBusy} onClick={() => window.open(mongo.https_url, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
                         Open Compass-Style UI
