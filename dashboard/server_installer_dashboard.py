@@ -745,8 +745,8 @@ def get_windows_native_mongo_info():
         "$meta=Join-Path $root 'install-info.json'; "
         "$cfg=Join-Path $root 'config\\mongod.cfg'; "
         "$svc=Get-Service -Name 'LocalMongoDB' -ErrorAction SilentlyContinue; "
-        "$obj=[ordered]@{installed=$false;version='';connection='';port='';mode='';web_version='';auth_enabled=$false}; "
-        "if($svc){$obj.installed=$true}; "
+        "$obj=[ordered]@{installed=$false;version='';connection='';port='';mode='';web_version='';auth_enabled=$false;status=''}; "
+        "if($svc){$obj.installed=$true; $obj.status=[string]$svc.Status}; "
         "if(Test-Path $meta){ "
         "  try { "
         "    $m=Get-Content -LiteralPath $meta -Raw | ConvertFrom-Json; "
@@ -792,6 +792,7 @@ def get_service_items():
     )
     preferred_host = choose_service_host()
     native_mongo = get_windows_native_mongo_info() if os.name == "nt" else {}
+    mongo_info = get_mongo_info()
 
     if os.name == "nt":
         cmd = [
@@ -1072,6 +1073,63 @@ def get_service_items():
                         "ports": ports,
                     }
                 )
+
+    has_mongo_items = any(_is_mongo_name(x.get("name", "")) or _is_mongo_name(x.get("display_name", "")) for x in items)
+    if (not has_mongo_items) and mongo_info.get("installed"):
+        fallback_ports = []
+        fallback_urls = []
+        connection = str(mongo_info.get("connection_string") or "").strip()
+        https_url = str(mongo_info.get("https_url") or "").strip()
+        if connection:
+            try:
+                port_text = connection.replace("mongodb://", "").split("/", 1)[0].rsplit(":", 1)[1]
+                if str(port_text).isdigit():
+                    fallback_ports.append({"port": int(port_text), "protocol": "tcp"})
+            except Exception:
+                pass
+        if https_url:
+            fallback_urls.append(https_url)
+
+        if os.name == "nt":
+            items.append(
+                {
+                    "kind": "service",
+                    "name": "LocalMongoDB",
+                    "display_name": "MongoDB Windows Service",
+                    "status": str(native_mongo.get("status") or "Running"),
+                    "start_type": "Automatic",
+                    "platform": "windows",
+                    "urls": fallback_urls,
+                    "ports": fallback_ports,
+                }
+            )
+        elif command_exists("systemctl"):
+            items.append(
+                {
+                    "kind": "service",
+                    "name": "localmongo-stack.service",
+                    "display_name": "LocalMongoDB",
+                    "status": "active",
+                    "sub_status": "running",
+                    "autostart": True,
+                    "platform": "linux",
+                    "urls": fallback_urls,
+                    "ports": fallback_ports,
+                }
+            )
+        else:
+            items.append(
+                {
+                    "kind": "docker",
+                    "name": "localmongo-mongodb",
+                    "display_name": f"MongoDB {mongo_info.get('server_version') or ''}".strip(),
+                    "status": "running",
+                    "autostart": True,
+                    "platform": "docker",
+                    "urls": fallback_urls,
+                    "ports": fallback_ports,
+                }
+            )
 
     items.sort(key=lambda x: (x.get("kind", ""), x.get("name", "").lower()))
     return items
