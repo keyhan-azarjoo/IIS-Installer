@@ -101,6 +101,11 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   $Script:IISCertThumb = ""
   $siteName = "LocalS3"
   New-Item -ItemType Directory -Force -Path $siteRoot | Out-Null
+  if (Test-Path "IIS:\Sites\$siteName") {
+    try { Stop-Website -Name $siteName -ErrorAction SilentlyContinue } catch {}
+  }
+  try { Stop-WebAppPool -Name "DefaultAppPool" -ErrorAction SilentlyContinue | Out-Null } catch {}
+  Start-Sleep -Seconds 2
   $webConfig = @"
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
@@ -138,7 +143,27 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   </system.webServer>
 </configuration>
 "@
-  [System.IO.File]::WriteAllText((Join-Path $siteRoot "web.config"), $webConfig, (New-Object System.Text.UTF8Encoding($false)))
+  $webConfigPath = Join-Path $siteRoot "web.config"
+  $webConfigTmp = "$webConfigPath.tmp"
+  $webConfigWritten = $false
+  for ($attempt = 1; $attempt -le 8; $attempt++) {
+    try {
+      [System.IO.File]::WriteAllText($webConfigTmp, $webConfig, (New-Object System.Text.UTF8Encoding($false)))
+      Move-Item -Path $webConfigTmp -Destination $webConfigPath -Force
+      $webConfigWritten = $true
+      break
+    } catch {
+      Remove-Item -Path $webConfigTmp -Force -ErrorAction SilentlyContinue
+      if ($attempt -lt 8) {
+        Start-Sleep -Milliseconds 750
+      }
+    }
+  }
+  if (-not $webConfigWritten) {
+    Err "Failed to update IIS web.config at $webConfigPath because the file remained locked."
+    Warn "Stop the existing LocalS3 IIS site/app pool, then rerun the installer."
+    exit 1
+  }
 
   try {
     Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/proxy" -Name "enabled" -Value "True" -ErrorAction Stop | Out-Null
