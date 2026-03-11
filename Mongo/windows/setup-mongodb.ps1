@@ -538,6 +538,48 @@ function Ensure-MongoshExe {
     }
   }
 
+  $downloadRoot = Join-Path $Script:MongoRoot "downloads"
+  $extractRoot = Join-Path $downloadRoot "mongosh-extract"
+  $nativeRoot = Join-Path $Script:MongoRoot "mongosh"
+  $version = Get-EnvOrDefault "LOCALMONGOSH_VERSION" "2.5.10"
+  $zipPath = Join-Path $downloadRoot "mongosh-windows.zip"
+  $customUrl = Get-EnvOrDefault "LOCALMONGOSH_DOWNLOAD_URL" ""
+  $urls = @()
+
+  if ($customUrl) {
+    $urls += $customUrl
+  } else {
+    $urls += @(
+      "https://downloads.mongodb.com/compass/mongosh-$version-win32-x64.zip",
+      "https://fastdl.mongodb.org/mongosh/mongosh-$version-win32-x64.zip"
+    )
+  }
+
+  Info "Attempting mongosh ZIP download..."
+  New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+  $ok = Download-FileFast -urls $urls -outFile $zipPath
+  if ($ok) {
+    if (Test-Path $extractRoot) {
+      Remove-Item -Recurse -Force -Path $extractRoot -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $nativeRoot) {
+      Remove-Item -Recurse -Force -Path $nativeRoot -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $extractRoot, $nativeRoot | Out-Null
+    try {
+      Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
+      $shellExe = Get-ChildItem -Path $extractRoot -Recurse -Filter "mongosh.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($shellExe -and $shellExe.FullName) {
+        $installRoot = Split-Path -Path $shellExe.FullName -Parent | Split-Path -Parent
+        Copy-Item -Path (Join-Path $installRoot "*") -Destination $nativeRoot -Recurse -Force
+        $localMongosh = Join-Path $nativeRoot "bin\mongosh.exe"
+        if (Test-Path $localMongosh) {
+          return $localMongosh
+        }
+      }
+    } catch {}
+  }
+
   return $null
 }
 
@@ -589,6 +631,30 @@ if (!existing) {
   $exitCode = $LASTEXITCODE
   $ErrorActionPreference = $prev
   Remove-Item -Force -Path $initScript -ErrorAction SilentlyContinue
+  return ($exitCode -eq 0)
+}
+
+function Test-NativeMongoAuthentication([string]$mongoshExe, [int]$mongoPort, [string]$mongoUser, [string]$mongoPassword) {
+  if ([string]::IsNullOrWhiteSpace($mongoshExe) -or -not (Test-Path $mongoshExe)) {
+    return $false
+  }
+  $testScript = Join-Path $Script:MongoRoot "config\test-auth.js"
+  $js = @"
+const result = db.runCommand({ ping: 1 });
+if (!result || result.ok !== 1) {
+  quit(2);
+}
+"@
+  [System.IO.File]::WriteAllText($testScript, $js, (New-Object System.Text.UTF8Encoding($false)))
+  $uri = "mongodb://$([uri]::EscapeDataString($mongoUser)):$([uri]::EscapeDataString($mongoPassword))@127.0.0.1:$mongoPort/admin?authSource=admin"
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $mongoshExe $uri --quiet --file $testScript 2>$null | Out-Null
+  } catch {}
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $prev
+  Remove-Item -Force -Path $testScript -ErrorAction SilentlyContinue
   return ($exitCode -eq 0)
 }
 
@@ -685,7 +751,17 @@ function Install-NativeLocalMongo([string]$hostValue, [int]$mongoPort, [string]$
         Err "MongoDB service did not restart cleanly after enabling authentication."
         exit 1
       }
-      $authEnabled = $true
+      if (Test-NativeMongoAuthentication -mongoshExe $mongoshExe -mongoPort $mongoPort -mongoUser $mongoUser -mongoPassword $mongoPassword) {
+        $authEnabled = $true
+      } else {
+        Warn "MongoDB service restarted, but admin login validation failed. Leaving authentication disabled in installer metadata."
+        Write-NativeMongoConfig -cfgPath $cfgPath -bindIps $bindIps -mongoPort $mongoPort -dataDir $dataDir -logPath $logPath -authEnabled $false
+        Restart-Service -Name $Script:NativeMongoServiceName -Force
+        if (-not (Wait-TcpPort -targetHost "127.0.0.1" -port $mongoPort -maxSeconds 45)) {
+          Err "MongoDB service did not restart cleanly after reverting authentication."
+          exit 1
+        }
+      }
     } else {
       Warn "Could not initialize MongoDB admin user automatically. Compass authentication will fail until a user is created."
     }
