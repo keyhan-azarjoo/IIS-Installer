@@ -4,7 +4,7 @@ $ProgressPreference = "SilentlyContinue"
 
 $enableHttps = $env:DASHBOARD_HTTPS
 if ([string]::IsNullOrWhiteSpace($enableHttps)) {
-  $enableHttps = "0"
+  $enableHttps = "1"
 }
 $enableHttps = $enableHttps.ToLowerInvariant() -in @("1", "true", "yes", "y", "on")
 
@@ -350,21 +350,15 @@ if (-not $python) {
 }
 
 Write-Host "[INFO] Starting dashboard..."
-if ($enableHttps) {
-  $certDir = Join-Path $root "certs"
-  New-Item -ItemType Directory -Force -Path $certDir | Out-Null
-  $certPath = Join-Path $certDir "dashboard.crt"
-  $keyPath = Join-Path $certDir "dashboard.key"
+$certDir = Join-Path $root "certs"
+New-Item -ItemType Directory -Force -Path $certDir | Out-Null
+$certPath = Join-Path $certDir "dashboard.crt"
+$keyPath = Join-Path $certDir "dashboard.key"
 
-  Write-Host "[INFO] Generating HTTPS certificate chain..."
-  Ensure-DashboardCaCertificate -CertPath $certPath -KeyPath $keyPath
+Write-Host "[INFO] Generating HTTPS certificate chain..."
+Ensure-DashboardCaCertificate -CertPath $CertPath -KeyPath $KeyPath
 
-  $env:DASHBOARD_HTTPS = "1"
-  $env:DASHBOARD_CERT = $certPath
-  $env:DASHBOARD_KEY = $keyPath
-} else {
-  Remove-Item Env:\DASHBOARD_HTTPS -ErrorAction SilentlyContinue
-  Remove-Item Env:\DASHBOARD_CERT -ErrorAction SilentlyContinue
-  Remove-Item Env:\DASHBOARD_KEY -ErrorAction SilentlyContinue
-}
+$env:DASHBOARD_HTTPS = "1"
+$env:DASHBOARD_CERT = $certPath
+$env:DASHBOARD_KEY = $keyPath
 & $python $dashboard

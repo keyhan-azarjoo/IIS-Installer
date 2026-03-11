@@ -1,8 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Host = "auto",
-    [int]$Port = 8090,
-    [switch]$Https
+    [string]$BindHost = "auto",
+    [int]$Port = 8090
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,15 +13,11 @@ if (-not (Test-Path -LiteralPath $bootstrapScript)) {
 }
 
 $env:SERVER_INSTALLER_LOCAL_ROOT = $repoRoot
-if (-not $Https) {
-    Remove-Item Env:\DASHBOARD_HTTPS -ErrorAction SilentlyContinue
-    Remove-Item Env:\DASHBOARD_CERT -ErrorAction SilentlyContinue
-    Remove-Item Env:\DASHBOARD_KEY -ErrorAction SilentlyContinue
-}
+$env:DASHBOARD_HTTPS = "1"
 
 $argsList = @()
-if ($Host) {
-    $argsList += @("--host", $Host)
+if ($BindHost) {
+    $argsList += @("--host", $BindHost)
 }
 if ($Port) {
     $argsList += @("--port", "$Port")
@@ -30,12 +25,7 @@ if ($Port) {
 
 Write-Host "Using local repo: $repoRoot"
 Write-Host "Starting dashboard launcher..."
-if ($Https) {
-    Write-Host "Mode: HTTPS"
-}
-else {
-    Write-Host "Mode: HTTP"
-}
+Write-Host "Mode: HTTPS only"
 
 Push-Location $repoRoot
 try {

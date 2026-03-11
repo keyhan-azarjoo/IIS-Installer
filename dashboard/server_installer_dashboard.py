@@ -4225,6 +4225,10 @@ def main():
     parser.add_argument("--key", default="")
     args = parser.parse_args()
 
+    if not args.https:
+        print("Dashboard requires HTTPS. Start it with start-dashboard.ps1 or start-dashboard.sh.")
+        return
+
     try:
         server = ThreadingHTTPServer((args.host, args.port), Handler)
     except OSError as ex:

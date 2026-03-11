@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -436,15 +437,14 @@ def run_dashboard_foreground(root: Path, bind_host: str, selected_port: int, dis
 
     cmd = [sys.executable, str(app), "--host", bind_host, "--port", str(selected_port)]
     use_https, cert_path, key_path = resolve_https_config()
-    if use_https:
-        cmd += ["--https", "--cert", cert_path, "--key", key_path]
+    cmd += ["--https", "--cert", cert_path, "--key", key_path]
     proc = subprocess.Popen(cmd, cwd=str(root))
 
     ok, detail = check_local_http(selected_port, use_https=use_https)
     print("Startup diagnostics:")
     print(f"- Bind host: {bind_host}")
     print(f"- Selected port: {selected_port}")
-    scheme = "https" if use_https else "http"
+    scheme = "https"
     print(f"- Dashboard URL: {scheme}://{display_host}:{selected_port}")
     print(f"- Local URL: {scheme}://127.0.0.1:{selected_port}")
     if ok:
@@ -485,6 +485,7 @@ def install_or_update_linux_service(root: Path, bind_host: str, selected_port: i
     if owner_state == "dashboard":
         stop_existing_dashboard_on_port(selected_port)
 
+    use_https, cert_path, key_path = resolve_https_config()
     unit_path = Path("/etc/systemd/system") / LINUX_SERVICE_NAME
     unit_text = f"""[Unit]
 Description=Server Installer Dashboard
@@ -493,7 +494,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={root}
-ExecStart={sys.executable} {script_path} --run-server --host {bind_host} --port {selected_port}
+ExecStart={sys.executable} {script_path} --run-server --host {bind_host} --port {selected_port} --https --cert {cert_path} --key {key_path}
 Restart=always
 RestartSec=2
 Environment=PYTHONUNBUFFERED=1
@@ -532,11 +533,11 @@ WantedBy=multi-user.target
         encoding="utf-8",
     )
 
-    ok, detail = check_local_http(selected_port)
+    ok, detail = check_local_http(selected_port, use_https=use_https)
     print(f"OS detected: {platform.system()}")
     print(f"Service: {LINUX_SERVICE_NAME} (enabled, restarted)")
-    print(f"Dashboard URL: http://{display_host}:{selected_port}")
-    print(f"Local URL: http://127.0.0.1:{selected_port}")
+    print(f"Dashboard URL: https://{display_host}:{selected_port}")
+    print(f"Local URL: https://127.0.0.1:{selected_port}")
     if ok:
         print(f"Local HTTP check: PASS (HTTP {detail})")
     else:
@@ -586,8 +587,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         "--port",
         str(selected_port),
     ]
-    if use_https:
-        task_args += ["--https", "--cert", cert_path, "--key", key_path]
+    task_args += ["--https", "--cert", cert_path, "--key", key_path]
     quoted_args = subprocess.list2cmdline(task_args)
     task_script.write_text(
         "@echo off\r\n"
@@ -636,8 +636,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
                 "--port",
                 str(selected_port),
             ]
-            if use_https:
-                detached_cmd += ["--https", "--cert", cert_path, "--key", key_path]
+            detached_cmd += ["--https", "--cert", cert_path, "--key", key_path]
             popen_kwargs = {
                 "cwd": str(root),
                 "creationflags": creation_flags,
@@ -673,11 +672,10 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         encoding="utf-8",
     )
 
-    scheme = "https" if use_https else "http"
     print(f"OS detected: {platform.system()}")
     print(f"Service: {task_name} (scheduled task, enabled)")
-    print(f"Dashboard URL: {scheme}://{display_host}:{selected_port}")
-    print(f"Local URL: {scheme}://127.0.0.1:{selected_port}")
+    print(f"Dashboard URL: https://{display_host}:{selected_port}")
+    print(f"Local URL: https://127.0.0.1:{selected_port}")
     print(f"Log file: {log_path}")
     if ok:
         print(f"Local HTTP check: PASS (HTTP {detail})")
@@ -701,14 +699,105 @@ def resolve_windows_python() -> str:
     return sys.executable
 
 
+def get_local_ipv4_addresses():
+    ips = []
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if ip and not ip.startswith("127.") and ip not in ips:
+                ips.append(ip)
+    except Exception:
+        pass
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("8.8.8.8", 53))
+        ip = sock.getsockname()[0]
+        sock.close()
+        if ip and not ip.startswith("127.") and ip not in ips:
+            ips.append(ip)
+    except Exception:
+        pass
+    return ips
+
+
+def ensure_unix_https_material(cert_path: Path, key_path: Path) -> None:
+    cert_path.parent.mkdir(parents=True, exist_ok=True)
+    names = ["localhost", socket.gethostname()]
+    san_entries = ["DNS:localhost", "IP:127.0.0.1"]
+    for name in names:
+        if name and name not in ("localhost",) and f"DNS:{name}" not in san_entries:
+            san_entries.append(f"DNS:{name}")
+    for ip in get_local_ipv4_addresses():
+        entry = f"IP:{ip}"
+        if entry not in san_entries:
+            san_entries.append(entry)
+
+    config_text = (
+        "[req]\n"
+        "default_bits = 2048\n"
+        "prompt = no\n"
+        "default_md = sha256\n"
+        "x509_extensions = v3_req\n"
+        "distinguished_name = dn\n"
+        "\n"
+        "[dn]\n"
+        "CN = localhost\n"
+        "\n"
+        "[v3_req]\n"
+        "subjectAltName = " + ", ".join(san_entries) + "\n"
+        "basicConstraints = CA:true\n"
+        "keyUsage = critical, digitalSignature, keyEncipherment, keyCertSign\n"
+        "extendedKeyUsage = serverAuth\n"
+    )
+
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".cnf") as tmp:
+        tmp.write(config_text)
+        config_path = tmp.name
+
+    try:
+        cmd = [
+            "openssl",
+            "req",
+            "-x509",
+            "-nodes",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            str(key_path),
+            "-out",
+            str(cert_path),
+            "-days",
+            "825",
+            "-config",
+            config_path,
+            "-extensions",
+            "v3_req",
+        ]
+        rc, out = run_capture(cmd, timeout=60)
+        if rc != 0:
+            raise RuntimeError((out or "openssl failed").strip())
+    finally:
+        try:
+            os.unlink(config_path)
+        except OSError:
+            pass
+
+
 def resolve_https_config():
-    use_https = DASHBOARD_HTTPS
-    if not use_https:
-        return False, "", ""
-    program_data = Path(os.environ.get("ProgramData", "C:/ProgramData"))
-    cert_dir = program_data / "Server-Installer" / "certs"
+    use_https = True
+    cert_dir = cache_root() / "certs"
     cert_path = (Path(DASHBOARD_CERT) if DASHBOARD_CERT else (cert_dir / "dashboard.crt")).resolve()
     key_path = (Path(DASHBOARD_KEY) if DASHBOARD_KEY else (cert_dir / "dashboard.key")).resolve()
+    if (not cert_path.exists()) or (not key_path.exists()):
+        if os.name == "nt":
+            raise RuntimeError(
+                f"HTTPS certificate files are missing: {cert_path} and {key_path}. "
+                "Start the dashboard through start-dashboard.ps1 so the Windows CA/self-signed certificate is generated."
+            )
+        if not shutil.which("openssl"):
+            raise RuntimeError(
+                "HTTPS is required, but OpenSSL is not installed. Install openssl and rerun start-dashboard.sh."
+            )
+        ensure_unix_https_material(cert_path, key_path)
     return True, str(cert_path), str(key_path)
 
 
@@ -746,13 +835,12 @@ def main() -> int:
     parser.add_argument("--host", default="auto")
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument("--run-server", action="store_true", help="Internal mode: run dashboard process in foreground.")
-    parser.add_argument("--https", action="store_true", help="Enable HTTPS for dashboard startup.")
+    parser.add_argument("--https", action="store_true", help="Ignored for compatibility; dashboard startup is HTTPS-only.")
     parser.add_argument("--cert", default="", help="Path to PEM certificate file.")
     parser.add_argument("--key", default="", help="Path to PEM private key file.")
     args = parser.parse_args()
 
-    if args.https:
-        os.environ["DASHBOARD_HTTPS"] = "1"
+    os.environ["DASHBOARD_HTTPS"] = "1"
     if args.cert:
         os.environ["DASHBOARD_CERT"] = args.cert
     if args.key:

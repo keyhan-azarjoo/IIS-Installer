@@ -128,6 +128,56 @@ function Wait-ForMongoHttp([int]$webPort, [int]$httpsPort) {
   }
 }
 
+function Get-DockerOsType {
+  param([string]$dockerCtx)
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $osType = (& docker --context $dockerCtx info --format "{{.OSType}}" 2>$null | Out-String).Trim().ToLowerInvariant()
+  $ErrorActionPreference = $prev
+  return $osType
+}
+
+function Switch-DockerToLinuxContainers {
+  $dockerCli = "C:\Program Files\Docker\Docker\DockerCli.exe"
+  if (-not (Test-Path $dockerCli)) {
+    return $false
+  }
+  Info "Docker is running Windows containers. Switching Docker Desktop to Linux containers..."
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  & $dockerCli -SwitchLinuxEngine 2>$null | Out-Null
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $prev
+  if ($exitCode -ne 0) {
+    return $false
+  }
+  Start-Sleep -Seconds 8
+  Wait-DockerEngine
+  return $true
+}
+
+function Ensure-DockerLinuxEngine([string]$dockerCtx) {
+  $osType = Get-DockerOsType -dockerCtx $dockerCtx
+  if ($osType -eq "linux") {
+    Info "Docker engine mode: linux"
+    return
+  }
+  if ($osType -eq "windows") {
+    $switched = Switch-DockerToLinuxContainers
+    if ($switched) {
+      $osType = Get-DockerOsType -dockerCtx $dockerCtx
+      if ($osType -eq "linux") {
+        Info "Docker engine mode: linux"
+        return
+      }
+    }
+    Err "Docker Desktop is running Windows containers. MongoDB installer requires Linux containers."
+    Warn "Open Docker Desktop and switch to Linux containers, then rerun MongoDB install."
+    exit 1
+  }
+  Warn "Could not determine Docker engine mode reliably (reported '$osType'). Continuing."
+}
+
 function Main {
   Relaunch-Elevated
   Info "===== Local MongoDB Installer (Windows / Docker) ====="
@@ -160,6 +210,7 @@ function Main {
   Sanitize-DockerEnv
   $dockerCtx = Get-ActiveDockerContext
   Info "Using Docker context: $dockerCtx"
+  Ensure-DockerLinuxEngine -dockerCtx $dockerCtx
   Info "Clearing previous LocalMongoDB containers, volume, and config..."
   Remove-ExistingLocalMongo -dockerCtx $dockerCtx
 

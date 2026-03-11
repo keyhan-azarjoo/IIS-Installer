@@ -84,28 +84,23 @@ function MiniMetric({ label, valueText, percent, color }) {
   );
 }
 
-function ActionIcon({ title, onClick, disabled, color = "default", variant = "outlined", IconComp, fallback }) {
+function ActionIcon({ title, onClick, disabled, color = "primary", variant = "outlined", IconComp, fallback }) {
   return (
     <Tooltip title={title}>
       <span>
-        <IconButton
+        <Button
+          type="button"
           color={color}
+          variant={variant}
           disabled={disabled}
           onClick={onClick}
           aria-label={title}
-          sx={{
-            border: 1,
-            borderColor: variant === "contained" ? "transparent" : "divider",
-            borderRadius: 2,
-            bgcolor: variant === "contained" ? "primary.main" : "transparent",
-            color: variant === "contained" ? "primary.contrastText" : "text.primary",
-            "&:hover": {
-              bgcolor: variant === "contained" ? "primary.dark" : "action.hover",
-            },
-          }}
+          startIcon={IconComp ? <IconComp fontSize="small" /> : null}
+          sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
         >
-          {IconComp ? <IconComp fontSize="small" /> : <Typography variant="caption" fontWeight={700}>{fallback}</Typography>}
-        </IconButton>
+          {title}
+          {!IconComp && fallback ? ` ${fallback}` : ""}
+        </Button>
       </span>
     </Tooltip>
   );

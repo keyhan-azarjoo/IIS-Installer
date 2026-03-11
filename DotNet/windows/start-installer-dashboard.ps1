@@ -11,5 +11,6 @@ if (-not (Test-Path -LiteralPath $newLauncher)) {
     throw "Launcher not found: $newLauncher"
 }
 
-Write-Host "Starting Server Installer dashboard (compat mode) on http://$BindHost`:$Port"
+Write-Host "Starting Server Installer dashboard (compat mode) in HTTPS-only mode for $BindHost`:$Port"
+Write-Host "Compatibility launcher delegates to HTTPS-only startup."
 & $newLauncher -BindHost $BindHost -Port $Port

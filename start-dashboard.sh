@@ -18,8 +18,9 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 export SERVER_INSTALLER_LOCAL_ROOT="${SCRIPT_DIR}"
+export DASHBOARD_HTTPS=1
 
 echo "Using local repo: ${SCRIPT_DIR}"
-echo "Starting dashboard launcher..."
+echo "Starting dashboard launcher in HTTPS-only mode..."
 
-exec python3 "${LAUNCHER}" --host "${HOST}" --port "${PORT}"
+exec python3 "${LAUNCHER}" --host "${HOST}" --port "${PORT}" --https
