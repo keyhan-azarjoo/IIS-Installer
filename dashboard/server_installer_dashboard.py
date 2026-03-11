@@ -1147,6 +1147,20 @@ def _is_mongo_name(name):
     return bool(re.search(r"localmongo|mongodb|mongo-express|mongod", str(name or ""), re.IGNORECASE))
 
 
+def filter_service_items(scope):
+    scope = str(scope or "all").strip().lower()
+    items = get_service_items()
+    if scope == "all":
+        return items
+    if scope == "mongo":
+        return [x for x in items if _is_mongo_name(x.get("name", "")) or _is_mongo_name(x.get("display_name", ""))]
+    if scope == "s3":
+        return [x for x in items if _is_locals3_name(x.get("name", "")) or _is_locals3_name(x.get("display_name", ""))]
+    if scope == "dotnet":
+        return [x for x in items if _is_dotnet_name(x.get("name", "")) or _is_dotnet_name(x.get("display_name", ""))]
+    return items
+
+
 def _safe_linux_app_path(path_value, svc_name=""):
     if not path_value:
         return ""
@@ -4169,7 +4183,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
-                payload = {"ok": True, "services": get_service_items()}
+                query = {}
+                if "?" in self.path:
+                    query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+                scope = (query.get("scope", ["all"])[0] or "all").strip().lower()
+                payload = {"ok": True, "services": filter_service_items(scope)}
                 self.write_json(payload, HTTPStatus.OK)
             except Exception as ex:
                 print(f"Service list error: {ex}")

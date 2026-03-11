@@ -167,6 +167,9 @@ function App() {
   const [servicesErr, setServicesErr] = React.useState("");
   const [serviceFilter, setServiceFilter] = React.useState("");
   const [services, setServices] = React.useState([]);
+  const [mongoPageServices, setMongoPageServices] = React.useState([]);
+  const [s3PageServices, setS3PageServices] = React.useState([]);
+  const [dotnetPageServices, setDotnetPageServices] = React.useState([]);
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
@@ -224,21 +227,69 @@ function App() {
     return () => clearInterval(t);
   }, []);
 
-  React.useEffect(() => {
-    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo") {
-      loadServices.current();
+  const loadServices = React.useRef(async () => {});
+  const loadMongoServices = React.useRef(async () => {});
+  const loadS3Services = React.useRef(async () => {});
+  const loadDotnetServices = React.useRef(async () => {});
+
+  const loadServiceScope = React.useCallback(async (scope, setter) => {
+    setServicesLoading(true);
+    setServicesErr("");
+    try {
+      const r = await fetch(`/api/system/services?scope=${encodeURIComponent(scope)}`, { headers: { "X-Requested-With": "fetch" } });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setter(Array.isArray(j.services) ? j.services : []);
+    } catch (err) {
+      setServicesErr(String(err));
+      setter([]);
+    } finally {
+      setServicesLoading(false);
     }
-  }, [page]);
+  }, []);
+
+  loadServices.current = async () => {
+    setServicesLoading(true);
+    setServicesErr("");
+    try {
+      const r = await fetch("/api/system/services?scope=all", { headers: { "X-Requested-With": "fetch" } });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setServices(Array.isArray(j.services) ? j.services : []);
+    } catch (err) {
+      setServicesErr(String(err));
+    } finally {
+      setServicesLoading(false);
+    }
+  };
+
+  loadMongoServices.current = async () => loadServiceScope("mongo", setMongoPageServices);
+  loadS3Services.current = async () => loadServiceScope("s3", setS3PageServices);
+  loadDotnetServices.current = async () => loadServiceScope("dotnet", setDotnetPageServices);
+
+  const refreshPageServices = React.useCallback((targetPage) => {
+    if (targetPage === "services") return loadServices.current();
+    if (targetPage === "mongo") return loadMongoServices.current();
+    if (targetPage === "s3") return loadS3Services.current();
+    if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
+    return Promise.resolve();
+  }, []);
 
   React.useEffect(() => {
-    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo")) {
+    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("dotnet-")) {
+      refreshPageServices(page);
+    }
+  }, [page, refreshPageServices]);
+
+  React.useEffect(() => {
+    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("dotnet-"))) {
       return undefined;
     }
     const t = setInterval(() => {
-      loadServices.current();
+      refreshPageServices(page);
     }, 10000);
     return () => clearInterval(t);
-  }, [page]);
+  }, [page, refreshPageServices]);
 
   React.useEffect(() => {
     const hook = (payload) => {
@@ -267,7 +318,7 @@ function App() {
           setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
         }
         setTermState("Idle");
-        loadServices.current();
+        refreshPageServices(page);
         loadSystem.current();
         return;
       }
@@ -469,22 +520,6 @@ function App() {
     );
   };
 
-  const loadServices = React.useRef(async () => {});
-  loadServices.current = async () => {
-    setServicesLoading(true);
-    setServicesErr("");
-    try {
-      const r = await fetch("/api/system/services", { headers: { "X-Requested-With": "fetch" } });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      setServices(Array.isArray(j.services) ? j.services : []);
-    } catch (err) {
-      setServicesErr(String(err));
-    } finally {
-      setServicesLoading(false);
-    }
-  };
-
   const onServiceAction = async (action, svc) => {
     if (!svc || !svc.name) return;
     if (action === "stop" || action === "delete") {
@@ -506,7 +541,12 @@ function App() {
       const j = await r.json();
       if (!j.ok) throw new Error(j.message || "Service action failed.");
       setInfoMessage(j.message || `${action} completed.`);
-      await loadServices.current();
+      await Promise.all([
+        loadServices.current(),
+        loadMongoServices.current(),
+        loadS3Services.current(),
+        loadDotnetServices.current(),
+      ]);
       loadSystem.current();
     } catch (err) {
       setInfoMessage(`Service ${action} failed: ${err}`);
@@ -553,7 +593,12 @@ function App() {
       } else {
         setInfoMessage(`Stop ${label}: ${okCount} success, ${failCount} failed.`);
       }
-      await loadServices.current();
+      await Promise.all([
+        loadServices.current(),
+        loadMongoServices.current(),
+        loadS3Services.current(),
+        loadDotnetServices.current(),
+      ]);
       loadSystem.current();
     } finally {
       setServiceBusy(false);
@@ -598,7 +643,12 @@ function App() {
       } else {
         setInfoMessage(`${actionLabel(action)} ${label}: ${okCount} success, ${failCount} failed.`);
       }
-      await loadServices.current();
+      await Promise.all([
+        loadServices.current(),
+        loadMongoServices.current(),
+        loadS3Services.current(),
+        loadDotnetServices.current(),
+      ]);
       loadSystem.current();
     } finally {
       setServiceBusy(false);
@@ -657,30 +707,37 @@ function App() {
 
   const dotnetServices = React.useMemo(() => {
     const patt = /(dotnet|aspnet|kestrel|w3svc|iis|api)/i;
-    return (services || []).filter((s) => {
+    return (dotnetPageServices || []).filter((s) => {
       const text = `${s.name || ""} ${s.display_name || ""} ${s.status || ""}`;
       return patt.test(text);
     });
-  }, [services]);
+  }, [dotnetPageServices]);
 
   const s3Services = React.useMemo(() => {
     const patt = /(locals3|minio|nginx|s3)/i;
-    return (services || []).filter((s) => {
+    return (s3PageServices || []).filter((s) => {
       const text = `${s.name || ""} ${s.display_name || ""} ${s.status || ""}`;
       return patt.test(text);
     });
-  }, [services]);
+  }, [s3PageServices]);
 
   const mongoServices = React.useMemo(() => {
     const patt = /(localmongo|mongodb|mongo-express|mongod)/i;
-    return (services || []).filter((s) => {
+    return (mongoPageServices || []).filter((s) => {
       const text = `${s.name || ""} ${s.display_name || ""} ${s.status || ""}`;
       return patt.test(text);
     });
-  }, [services]);
+  }, [mongoPageServices]);
   const mongoDisplayServices = React.useMemo(() => {
     if ((mongoServices || []).length > 0) return mongoServices;
-    if (!mongo.installed) return [];
+    const hasMongoSignal = !!(
+      mongo.installed ||
+      mongo.connection_string ||
+      mongo.server_version ||
+      mongo.web_version ||
+      mongo.https_url
+    );
+    if (!hasMongoSignal) return [];
     let fallbackPort = 27017;
     try {
       const raw = String(mongo.connection_string || "").trim();
@@ -1022,7 +1079,7 @@ function App() {
                     {!!s3LoginText && (
                       <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
                     )}
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadS3Services.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(s3Services) ? "success" : "error"}
@@ -1107,7 +1164,7 @@ function App() {
                     {!!s3LoginText && (
                       <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
                     )}
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadS3Services.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(s3Services) ? "success" : "error"}
@@ -1208,7 +1265,7 @@ function App() {
                     {!!mongoWebsiteUrl && (
                       <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadMongoServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
@@ -1299,7 +1356,7 @@ function App() {
                     {!!mongoWebsiteUrl && (
                       <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadMongoServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
@@ -1363,7 +1420,7 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadDotnetServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(dotnetServices) ? "success" : "error"}
@@ -1422,7 +1479,7 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadDotnetServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(dotnetServices) ? "success" : "error"}
