@@ -177,29 +177,61 @@ function Resolve-DockerContext([string[]]$preferredContexts) {
   return "default"
 }
 
+function Find-DockerDesktopCli {
+  $candidates = @(
+    "C:\Program Files\Docker\Docker\DockerCli.exe",
+    "C:\Program Files\Docker\Docker\resources\DockerCli.exe",
+    "C:\Program Files\Docker\Docker\resources\bin\com.docker.cli.exe"
+  )
+
+  foreach ($path in $candidates) {
+    if (Test-Path $path) {
+      return $path
+    }
+  }
+
+  foreach ($name in @("DockerCli.exe", "com.docker.cli.exe")) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) {
+      return $cmd.Source
+    }
+  }
+
+  return $null
+}
+
 function Switch-DockerToLinuxContainers {
-  $dockerCli = "C:\Program Files\Docker\Docker\DockerCli.exe"
-  if (-not (Test-Path $dockerCli)) {
+  $dockerCli = Find-DockerDesktopCli
+  if (-not $dockerCli) {
+    Warn "Docker Desktop switch CLI not found. Expected one of the standard Docker Desktop CLI paths."
     return $false
   }
-  Info "Docker is running Windows containers. Switching Docker Desktop to Linux containers..."
+  Info "Docker is running Windows containers. Switching Docker Desktop to Linux containers using: $dockerCli"
   foreach ($args in @(
     @("-SwitchLinuxEngine"),
     @("-SwitchDaemon")
   )) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
+    $exitCode = 1
     try {
-      & $dockerCli @args 2>$null | Out-Null
-    } catch {}
-    $exitCode = $LASTEXITCODE
+      $proc = Start-Process -FilePath $dockerCli -ArgumentList $args -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop
+      $exitCode = $proc.ExitCode
+    } catch {
+      try {
+        & $dockerCli @args 2>$null | Out-Null
+        $exitCode = $LASTEXITCODE
+      } catch {
+        $exitCode = 1
+      }
+    }
     $ErrorActionPreference = $prev
     if ($exitCode -eq 0) {
       for ($i = 0; $i -lt 24; $i++) {
         Start-Sleep -Seconds 5
         try {
           if (Test-DockerEngine) {
-            $dockerCtx = Get-ActiveDockerContext
+            $dockerCtx = Resolve-DockerContext @((Get-ActiveDockerContext), "desktop-linux", "default")
             $osType = Get-DockerOsType -dockerCtx $dockerCtx
             if ($osType -eq "linux") {
               return $true
