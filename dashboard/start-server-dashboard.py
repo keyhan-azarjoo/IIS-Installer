@@ -25,6 +25,8 @@ SYNC_FILES = [
     "dashboard/server_installer_dashboard.py",
     "dashboard/ui/components.js",
     "dashboard/ui/app.js",
+    "Mongo/windows/setup-mongodb.ps1",
+    "Mongo/linux-macos/setup-mongodb.sh",
     "DotNet/windows/install-windows-dotnet-host.ps1",
     "DotNet/windows/modules/common.ps1",
     "DotNet/windows/modules/iis-mode.ps1",
@@ -59,6 +61,7 @@ def cache_root() -> Path:
 def clear_managed_cache(root: Path) -> None:
     managed_paths = [
         root / "dashboard",
+        root / "Mongo",
         root / "DotNet",
         root / "S3",
     ]

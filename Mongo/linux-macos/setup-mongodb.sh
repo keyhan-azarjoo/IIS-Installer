@@ -135,22 +135,6 @@ ensure_hosts_entry() {
   esac
 }
 
-trust_caddy_root_linux() {
-  local cert_path="$1"
-  [ -f "$cert_path" ] || return 0
-  mkdir -p /usr/local/share/ca-certificates
-  cp "$cert_path" /usr/local/share/ca-certificates/localmongo.crt
-  if has_cmd update-ca-certificates; then
-    update-ca-certificates >/dev/null 2>&1 || true
-  fi
-}
-
-trust_caddy_root_macos() {
-  local cert_path="$1"
-  [ -f "$cert_path" ] || return 0
-  security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$cert_path" >/dev/null 2>&1 || true
-}
-
 open_linux_firewall_port() {
   local port="$1"
   if has_cmd ufw; then
@@ -174,10 +158,6 @@ clear_existing_localmongo() {
     systemctl disable --now localmongo-stack >/dev/null 2>&1 || true
     rm -f /etc/systemd/system/localmongo-stack.service >/dev/null 2>&1 || true
     systemctl daemon-reload >/dev/null 2>&1 || true
-    rm -f /usr/local/share/ca-certificates/localmongo.crt >/dev/null 2>&1 || true
-    if has_cmd update-ca-certificates; then
-      update-ca-certificates >/dev/null 2>&1 || true
-    fi
   else
     launchctl bootout system /Library/LaunchDaemons/com.localmongo.stack.plist >/dev/null 2>&1 || true
     rm -f /Library/LaunchDaemons/com.localmongo.stack.plist >/dev/null 2>&1 || true
@@ -230,9 +210,35 @@ EOF
   launchctl bootstrap system /Library/LaunchDaemons/com.localmongo.stack.plist >/dev/null 2>&1 || true
 }
 
+generate_tls_cert() {
+  local cert_dir="$1" host_value="$2"
+  local san="IP:127.0.0.1,DNS:localhost"
+  case "$host_value" in
+    ''|localhost|127.0.0.1) ;;
+    *[!0-9.]*)
+      san="${san},DNS:${host_value}"
+      ;;
+    *)
+      san="${san},IP:${host_value}"
+      ;;
+  esac
+  mkdir -p "$cert_dir"
+  if has_cmd openssl; then
+    openssl req -x509 -nodes -newkey rsa:2048 \
+      -keyout "${cert_dir}/localmongo.key" \
+      -out "${cert_dir}/localmongo.crt" \
+      -days 825 \
+      -subj "/CN=${host_value}" \
+      -addext "subjectAltName=${san}" >/dev/null 2>&1
+    return
+  fi
+  docker run --rm -v "${cert_dir}:/out" alpine:3.20 sh -lc \
+    "apk add --no-cache openssl >/dev/null && openssl req -x509 -nodes -newkey rsa:2048 -keyout /out/localmongo.key -out /out/localmongo.crt -days 825 -subj '/CN=${host_value}' -addext 'subjectAltName=${san}'" >/dev/null
+}
+
 main() {
   local os_name host_value https_port mongo_port web_port mongo_user mongo_password ui_user ui_password
-  local root_dir caddyfile data_dir config_dir caddy_root cert_path addresses https_url lan_url mongo_url
+  local root_dir nginx_conf nginx_certs https_url lan_url mongo_url
 
   os_name="$(detect_os)"
   [ "$os_name" != "unknown" ] || { err "Unsupported OS."; exit 1; }
@@ -261,8 +267,8 @@ main() {
 
   root_dir="/opt/localmongo"
   [ "$os_name" = "macos" ] && root_dir="/usr/local/localmongo"
-  data_dir="${root_dir}/caddy-data"
-  config_dir="${root_dir}/caddy-config"
+  nginx_conf="${root_dir}/nginx/conf"
+  nginx_certs="${root_dir}/nginx/certs"
   info "Clearing previous LocalMongoDB containers, volumes, and config..."
   clear_existing_localmongo "$root_dir" "$os_name"
 
@@ -271,25 +277,29 @@ main() {
     exit 1
   fi
 
-  mkdir -p "$root_dir" "$data_dir" "$config_dir"
+  mkdir -p "$root_dir" "$nginx_conf" "$nginx_certs"
 
   docker network create localmongo-net >/dev/null
   docker volume create localmongo-data >/dev/null
 
-  addresses="https://localhost:${https_port}"
-  if [ "$host_value" != "localhost" ] && [ "$host_value" != "127.0.0.1" ]; then
-    addresses="${addresses}, https://${host_value}:${https_port}"
-  fi
-  caddyfile="${root_dir}/Caddyfile"
-  cat > "$caddyfile" <<EOF
-{
-  auto_https disable_redirects
-}
+  generate_tls_cert "$nginx_certs" "$host_value"
+  cat > "${nginx_conf}/default.conf" <<EOF
+server {
+    listen ${https_port} ssl;
+    server_name localhost ${host_value};
 
-${addresses} {
-  tls internal
-  reverse_proxy localmongo-web:8081
-  encode gzip
+    ssl_certificate /etc/nginx/certs/localmongo.crt;
+    ssl_certificate_key /etc/nginx/certs/localmongo.key;
+
+    location / {
+        proxy_pass http://localmongo-web:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
 }
 EOF
 
@@ -329,22 +339,15 @@ EOF
     --restart always \
     --network localmongo-net \
     -p "0.0.0.0:${https_port}:${https_port}" \
-    -v "${caddyfile}:/etc/caddy/Caddyfile:ro" \
-    -v "${data_dir}:/data" \
-    -v "${config_dir}:/config" \
-    caddy:2-alpine >/dev/null
+    -v "${nginx_conf}/default.conf:/etc/nginx/conf.d/default.conf:ro" \
+    -v "${nginx_certs}:/etc/nginx/certs:ro" \
+    nginx:alpine >/dev/null
 
   wait_for_port "$web_port" 45 || { err "Mongo web admin UI did not start."; exit 1; }
   wait_for_port "$https_port" 45 || { err "Mongo HTTPS proxy did not start."; exit 1; }
-
-  cert_path="${data_dir}/caddy/pki/authorities/local/root.crt"
-  [ -f "$cert_path" ] || cert_path="${data_dir}/pki/authorities/local/root.crt"
   if [ "$os_name" = "linux" ]; then
-    trust_caddy_root_linux "$cert_path"
     open_linux_firewall_port "$https_port"
     open_linux_firewall_port "$mongo_port"
-  else
-    trust_caddy_root_macos "$cert_path"
   fi
 
   ensure_hosts_entry "$host_value" "127.0.0.1"
