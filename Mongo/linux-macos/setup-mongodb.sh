@@ -78,10 +78,35 @@ test_https_url() {
   return 0
 }
 
+test_http_url_ready() {
+  local url="$1"
+  if has_cmd curl; then
+    local code
+    code="$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || true)"
+    case "$code" in
+      200|301|302|401|403) return 0 ;;
+    esac
+    return 1
+  fi
+  return 0
+}
+
+wait_for_http_url() {
+  local url="$1" timeout="$2" elapsed=0
+  while [ "$elapsed" -lt "$timeout" ]; do
+    if test_http_url_ready "$url"; then
+      return 0
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+  return 1
+}
+
 dump_mongo_debug() {
   warn "Docker container status:"
   docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
-  warn "Caddy logs:"
+  warn "HTTPS proxy logs:"
   docker logs --tail 120 localmongo-https 2>&1 || true
   warn "Mongo web logs:"
   docker logs --tail 80 localmongo-web 2>&1 || true
@@ -323,6 +348,7 @@ EOF
     --network localmongo-net \
     -p "127.0.0.1:${web_port}:8081" \
     -e "ME_CONFIG_MONGODB_SERVER=localmongo-mongodb" \
+    -e "ME_CONFIG_MONGODB_URL=mongodb://${mongo_user}:${mongo_password}@localmongo-mongodb:27017/" \
     -e "ME_CONFIG_MONGODB_PORT=27017" \
     -e "ME_CONFIG_MONGODB_ENABLE_ADMIN=true" \
     -e "ME_CONFIG_MONGODB_AUTH_DATABASE=admin" \
@@ -343,7 +369,8 @@ EOF
     -v "${nginx_certs}:/etc/nginx/certs:ro" \
     nginx:alpine >/dev/null
 
-  wait_for_port "$web_port" 45 || { err "Mongo web admin UI did not start."; exit 1; }
+  wait_for_port "$web_port" 45 || { err "Mongo web admin UI TCP port did not open."; exit 1; }
+  wait_for_http_url "http://127.0.0.1:${web_port}/" 120 || { err "Mongo web admin UI did not become ready."; dump_mongo_debug; exit 1; }
   wait_for_port "$https_port" 45 || { err "Mongo HTTPS proxy did not start."; exit 1; }
   if [ "$os_name" = "linux" ]; then
     open_linux_firewall_port "$https_port"
@@ -359,7 +386,7 @@ EOF
   fi
   mongo_url="mongodb://localhost:${mongo_port}/"
 
-  if ! test_https_url "$https_url"; then
+  if ! wait_for_http_url "$https_url" 60; then
     err "Local HTTPS endpoint did not respond correctly: $https_url"
     dump_mongo_debug
     exit 1

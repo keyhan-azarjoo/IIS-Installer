@@ -68,20 +68,62 @@ function Trust-LocalMongoCaddyRoot([string]$rootCertPath) {
 }
 
 function Wait-ForMongoHttp([int]$webPort, [int]$httpsPort) {
-  $ready = $false
-  for ($i = 0; $i -lt 45; $i++) {
-    if (Test-TcpPort -targetHost "127.0.0.1" -port $webPort -timeoutMs 1500) {
-      $ready = $true
-      break
+  if (-not (Wait-TcpPort -targetHost "127.0.0.1" -port $webPort -maxSeconds 45)) {
+    Err "Mongo web admin container did not open TCP port $webPort."
+    exit 1
+  }
+
+  $webReady = $false
+  for ($i = 0; $i -lt 60; $i++) {
+    try {
+      $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$webPort/" -Method GET -MaximumRedirection 0 -TimeoutSec 5 -UseBasicParsing
+      if ($resp.StatusCode -in 200, 301, 302, 401, 403) {
+        $webReady = $true
+        break
+      }
+    } catch {
+      $code = $null
+      try { $code = [int]$_.Exception.Response.StatusCode } catch {}
+      if ($code -in 200, 301, 302, 401, 403) {
+        $webReady = $true
+        break
+      }
     }
     Start-Sleep -Seconds 2
   }
-  if (-not $ready) {
-    Err "Mongo web admin container did not open port $webPort."
+  if (-not $webReady) {
+    Err "Mongo web admin UI did not become ready."
     exit 1
   }
+
   if (-not (Wait-TcpPort -targetHost "127.0.0.1" -port $httpsPort -maxSeconds 45)) {
     Err "HTTPS proxy did not open port $httpsPort."
+    exit 1
+  }
+
+  $httpsReady = $false
+  for ($i = 0; $i -lt 30; $i++) {
+    try {
+      [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+      $resp = Invoke-WebRequest -Uri "https://127.0.0.1:$httpsPort/" -Method GET -MaximumRedirection 0 -TimeoutSec 5 -UseBasicParsing
+      if ($resp.StatusCode -in 200, 301, 302, 401, 403) {
+        $httpsReady = $true
+        break
+      }
+    } catch {
+      $code = $null
+      try { $code = [int]$_.Exception.Response.StatusCode } catch {}
+      if ($code -in 200, 301, 302, 401, 403) {
+        $httpsReady = $true
+        break
+      }
+    } finally {
+      [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null
+    }
+    Start-Sleep -Seconds 2
+  }
+  if (-not $httpsReady) {
+    Err "Local HTTPS endpoint did not become ready."
     exit 1
   }
 }
@@ -189,6 +231,7 @@ $($addresses -join ", ") {
     --network localmongo-net `
     -p "127.0.0.1:${webPort}:8081" `
     -e "ME_CONFIG_MONGODB_SERVER=localmongo-mongodb" `
+    -e "ME_CONFIG_MONGODB_URL=mongodb://${mongoUser}:${mongoPassword}@localmongo-mongodb:27017/" `
     -e "ME_CONFIG_MONGODB_PORT=27017" `
     -e "ME_CONFIG_MONGODB_ENABLE_ADMIN=true" `
     -e "ME_CONFIG_MONGODB_AUTH_DATABASE=admin" `

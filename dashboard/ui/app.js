@@ -556,6 +556,33 @@ function App() {
     return buildMongoUri(host);
   }, [mongo.connection_string, systemInfo]);
 
+  const launchCompassProtocol = React.useCallback((uri) => {
+    if (!uri) return;
+
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.src = uri;
+    document.body.appendChild(iframe);
+
+    const link = document.createElement("a");
+    link.href = uri;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+
+    window.setTimeout(() => {
+      try {
+        window.location.assign(uri);
+      } catch (_) {}
+    }, 120);
+
+    window.setTimeout(() => {
+      try { document.body.removeChild(link); } catch (_) {}
+      try { document.body.removeChild(iframe); } catch (_) {}
+    }, 2000);
+  }, []);
+
   const copyText = async (text, label) => {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -576,20 +603,15 @@ function App() {
 
   const tryOpenCompass = () => {
     try {
-      const link = document.createElement("a");
-      link.href = mongoCompassUri;
-      link.style.display = "none";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      launchCompassProtocol(mongoCompassUri);
       if (clientOs === "windows") {
-        setInfoMessage("Tried to open Compass on Windows using the registered mongodb:// handler.");
+        setInfoMessage("Trying to open Compass on Windows using the registered mongodb:// handler.");
       } else if (clientOs === "macos") {
-        setInfoMessage("Tried to open Compass on macOS using the registered mongodb:// handler.");
+        setInfoMessage("Trying to open Compass on macOS using the registered mongodb:// handler.");
       } else if (clientOs === "linux") {
-        setInfoMessage("Tried to open Compass on Linux using the registered mongodb:// handler.");
+        setInfoMessage("Trying to open Compass on Linux using the registered mongodb:// handler.");
       } else {
-        setInfoMessage("Tried to open Compass using the registered mongodb:// handler.");
+        setInfoMessage("Trying to open Compass using the registered mongodb:// handler.");
       }
     } catch (err) {
       setInfoMessage(`Could not launch Compass: ${err}`);
