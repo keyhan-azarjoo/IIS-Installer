@@ -527,11 +527,20 @@ function App() {
 
   const mongoCompassDownloadUrl = "https://www.mongodb.com/try/download/compass";
   const mongoCompassUri = React.useMemo(() => {
+    const buildMongoUri = (baseHost) => {
+      const user = encodeURIComponent("admin");
+      const pass = encodeURIComponent("StrongPassword123");
+      return `mongodb://${user}:${pass}@${baseHost}:27017/admin?authSource=admin`;
+    };
     if (mongo.connection_string) {
-      return mongo.connection_string;
+      try {
+        const raw = String(mongo.connection_string).trim();
+        const hostPart = raw.replace(/^mongodb:\/\//, "").replace(/\/.*$/, "").trim();
+        if (hostPart) return buildMongoUri(hostPart);
+      } catch (_) {}
     }
     const host = (systemInfo?.public_ip || (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "localhost");
-    return `mongodb://${host}:27017/`;
+    return buildMongoUri(host);
   }, [mongo.connection_string, systemInfo]);
 
   const copyText = async (text, label) => {
