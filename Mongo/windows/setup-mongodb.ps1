@@ -555,9 +555,42 @@ function Ensure-MongoshExe {
     )
   }
 
+  function Download-MongoshZip([string[]]$downloadUrls, [string]$destinationPath) {
+    $outDir = Split-Path -Parent $destinationPath
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    foreach ($u in $downloadUrls) {
+      try {
+        if (Has-Cmd "curl.exe") {
+          Info "Downloading with curl (resume supported)..."
+          & curl.exe -L --fail --retry 4 --retry-delay 2 --connect-timeout 20 -C - -o $destinationPath $u
+          if ($LASTEXITCODE -eq 0 -and (Test-Path $destinationPath) -and ((Get-Item $destinationPath).Length -gt 5242880)) {
+            return $true
+          }
+        }
+      } catch {}
+      try {
+        if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
+          Info "Downloading with BITS..."
+          Start-BitsTransfer -Source $u -Destination $destinationPath -DisplayName "MongoDBShellInstaller"
+          if ((Test-Path $destinationPath) -and ((Get-Item $destinationPath).Length -gt 5242880)) {
+            return $true
+          }
+        }
+      } catch {}
+      try {
+        Info "Downloading with Invoke-WebRequest..."
+        Invoke-WebRequest -Uri $u -OutFile $destinationPath
+        if ((Test-Path $destinationPath) -and ((Get-Item $destinationPath).Length -gt 5242880)) {
+          return $true
+        }
+      } catch {}
+    }
+    return $false
+  }
+
   Info "Attempting mongosh ZIP download..."
   New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
-  $ok = Download-FileFast -urls $urls -outFile $zipPath
+  $ok = Download-MongoshZip -downloadUrls $urls -destinationPath $zipPath
   if ($ok) {
     if (Test-Path $extractRoot) {
       Remove-Item -Recurse -Force -Path $extractRoot -ErrorAction SilentlyContinue
