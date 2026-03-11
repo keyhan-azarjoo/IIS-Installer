@@ -19,11 +19,27 @@ DASHBOARD_LOCAL_ROOT = os.environ.get("SERVER_INSTALLER_LOCAL_ROOT", "").strip()
 DASHBOARD_HTTPS = os.environ.get("DASHBOARD_HTTPS", "").strip().lower() in ("1", "true", "yes", "y", "on")
 DASHBOARD_CERT = os.environ.get("DASHBOARD_CERT", "").strip()
 DASHBOARD_KEY = os.environ.get("DASHBOARD_KEY", "").strip()
-DASHBOARD_FILES = [
+SYNC_FILES = [
     "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
     "dashboard/ui/components.js",
     "dashboard/ui/app.js",
+    "DotNet/windows/install-windows-dotnet-host.ps1",
+    "DotNet/windows/modules/common.ps1",
+    "DotNet/windows/modules/iis-mode.ps1",
+    "DotNet/windows/modules/docker-mode.ps1",
+    "DotNet/linux/install-linux-dotnet-runner.sh",
+    "S3/windows/setup-storage.ps1",
+    "S3/windows/modules/common.ps1",
+    "S3/windows/modules/minio.ps1",
+    "S3/windows/modules/cleanup.ps1",
+    "S3/windows/modules/iis.ps1",
+    "S3/windows/modules/docker.ps1",
+    "S3/windows/modules/main.ps1",
+    "S3/linux-macos/setup-storage.sh",
+    "S3/linux-macos/modules/core.sh",
+    "S3/linux-macos/modules/cleanup.sh",
+    "S3/linux-macos/modules/platform.sh",
 ]
 LINUX_SERVICE_NAME = "server-installer-dashboard.service"
 
@@ -43,7 +59,7 @@ def ensure_files(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     local_root = Path(DASHBOARD_LOCAL_ROOT) if DASHBOARD_LOCAL_ROOT else None
     use_local = bool(local_root and is_repo_layout(local_root))
-    for rel in DASHBOARD_FILES:
+    for rel in SYNC_FILES:
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp_target = target.with_suffix(target.suffix + ".download")
