@@ -76,15 +76,57 @@ function Ensure-DockerInstalled {
   Info "Docker Desktop installed successfully."
 }
 
+function Find-DockerDesktopExe {
+  foreach ($candidate in @(
+    "C:\Program Files\Docker\Docker\Docker Desktop.exe",
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\Docker Desktop.exe")
+  )) {
+    if ($candidate -and (Test-Path $candidate)) {
+      return $candidate
+    }
+  }
+
+  foreach ($root in @(
+    "C:\Program Files\Docker\Docker",
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker")
+  )) {
+    if (-not $root -or -not (Test-Path $root)) { continue }
+    try {
+      $match = Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq "Docker Desktop.exe" } |
+        Select-Object -First 1
+      if ($match -and $match.FullName) {
+        return $match.FullName
+      }
+    } catch {}
+  }
+
+  return ""
+}
+
+function Wait-DockerDesktopFiles([int]$maxSeconds = 90) {
+  $elapsed = 0
+  while ($elapsed -lt $maxSeconds) {
+    Try-EnableDockerCliFromDefaultPath
+    $desktopExe = Find-DockerDesktopExe
+    $switchCli = Find-DockerSwitchCli
+    if ($desktopExe -or $switchCli) {
+      return $true
+    }
+    Start-Sleep -Seconds 5
+    $elapsed += 5
+  }
+  return $false
+}
+
 function Start-DockerDesktop {
-  # Start Docker Desktop if possible
-  $exe = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+  $exe = Find-DockerDesktopExe
   if (Test-Path $exe) {
-    Info "Starting Docker Desktop..."
+    Info "Starting Docker Desktop: $exe"
     Start-Process $exe | Out-Null
     return
   }
-  Warn "Docker Desktop exe not found at default path. Start Docker Desktop manually."
+  Warn "Docker Desktop executable not found after searching common install paths."
 }
 
 function Test-DockerEngine {
@@ -166,6 +208,11 @@ function Ensure-DockerLinuxEngine {
     if (-not $ok) {
       Err "Automatic Docker Desktop installation/repair failed."
       Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
+      exit 1
+    }
+    if (-not (Wait-DockerDesktopFiles -maxSeconds 120)) {
+      Err "Docker Desktop files did not appear after install/repair."
+      Warn "The installer completed, but Docker Desktop binaries are still unavailable."
       exit 1
     }
     Try-EnableDockerCliFromDefaultPath
