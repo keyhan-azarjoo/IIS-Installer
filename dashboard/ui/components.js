@@ -27,9 +27,12 @@ function Field({ field }) {
   }
   if (field.type === "select") {
     return (
-      <FormControl fullWidth size="small" sx={{ mb: 1.5 }}>
+      <FormControl fullWidth size="small" required={!!field.required} sx={{ mb: 1.5 }}>
         <InputLabel>{field.label}</InputLabel>
-        <Select name={field.name} defaultValue={field.defaultValue} label={field.label}>
+        <Select name={field.name} defaultValue={field.defaultValue || ""} label={field.label} required={!!field.required}>
+          {field.required && !field.defaultValue && (
+            <MenuItem value="" disabled>{field.placeholder || `Select ${field.label}`}</MenuItem>
+          )}
           {(field.options || []).map((opt) => (
             <MenuItem key={opt} value={opt}>{opt}</MenuItem>
           ))}
@@ -248,10 +251,13 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const formEl = formRef.current || e.currentTarget;
+    if (formEl && typeof formEl.reportValidity === "function" && !formEl.reportValidity()) {
+      return;
+    }
     if (isS3Install && httpsPortField && (httpsPortState.checking || !httpsPortState.usable)) {
       return;
     }
-    const formEl = formRef.current || e.currentTarget;
     let sourcePathValue = "";
     if (sourcePathKey) {
       const sourcePathInput = formEl.querySelector(`[name="${sourcePathKey}"]`);

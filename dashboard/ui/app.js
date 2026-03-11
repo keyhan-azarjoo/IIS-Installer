@@ -41,6 +41,28 @@ function clampPercent(v) {
   return Math.max(0, Math.min(100, n));
 }
 
+function isSelectableHostIp(ip) {
+  const value = String(ip || "").trim();
+  if (!value) return false;
+  if (value.includes(":")) return false;
+  if (value.startsWith("127.")) return false;
+  if (value.startsWith("169.254.")) return false;
+  if (value.startsWith("172.")) return false;
+  if (value === "0.0.0.0") return false;
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(value);
+}
+
+function getSelectableIps(systemInfo) {
+  const values = [];
+  const pushIp = (ip) => {
+    if (!isSelectableHostIp(ip)) return;
+    if (!values.includes(ip)) values.push(ip);
+  };
+  (systemInfo?.ips || []).forEach(pushIp);
+  pushIp(systemInfo?.public_ip);
+  return values;
+}
+
 function MiniMetric({ label, valueText, percent, color }) {
   return (
     <Paper variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
@@ -115,6 +137,7 @@ function App() {
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
+  const selectableIps = React.useMemo(() => getSelectableIps(systemInfo), [systemInfo]);
 
   React.useEffect(() => {
     const onMove = (e) => {
@@ -230,8 +253,7 @@ function App() {
     setRunError("");
     if (isS3Install) {
       const selectedIp = String(body.get("LOCALS3_HOST_IP") || "").trim();
-      const ips = Array.isArray(systemInfo?.ips) ? systemInfo.ips.filter((ip) => ip && !String(ip).startsWith("127.")) : [];
-      const resolvedHost = selectedIp || ips[0] || "localhost";
+      const resolvedHost = selectedIp || selectableIps[0] || "localhost";
       body.set("LOCALS3_HOST", resolvedHost);
       if (selectedIp) {
         body.set("LOCALS3_HOST_IP", selectedIp);
@@ -810,7 +832,7 @@ function App() {
                 action="/run/s3_windows"
                 fields={[
                   { name: "S3_MODE", label: "Mode", type: "select", options: ["iis", "docker"], defaultValue: "iis" },
-                  { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: ((systemInfo?.ips || []).filter((ip) => !String(ip).startsWith("127."))), defaultValue: (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "" },
+                  { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
                   { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
                   { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
                   { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
@@ -874,7 +896,7 @@ function App() {
                 description="Run local S3 installer with selectable host and ports."
                 action="/run/s3_linux"
                 fields={[
-                  { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: ((systemInfo?.ips || []).filter((ip) => !String(ip).startsWith("127."))), defaultValue: (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "" },
+                  { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
                   { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
                   { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
                   { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
@@ -941,7 +963,7 @@ function App() {
                 description="Deploy MongoDB with a Compass-style web admin UI behind HTTPS."
                 action="/run/mongo_windows"
                 fields={[
-                  { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: ((systemInfo?.ips || []).filter((ip) => !String(ip).startsWith("127."))), defaultValue: (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "" },
+                  { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
                   { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "443, 9445..." },
                   { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017" },
                   { name: "LOCALMONGO_WEB_PORT", label: "Local Web UI Port", defaultValue: "8081", placeholder: "8081" },
@@ -1016,7 +1038,7 @@ function App() {
                 description="Deploy MongoDB with a Compass-style web admin UI behind HTTPS."
                 action="/run/mongo_unix"
                 fields={[
-                  { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: ((systemInfo?.ips || []).filter((ip) => !String(ip).startsWith("127."))), defaultValue: (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "" },
+                  { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
                   { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "443, 9445..." },
                   { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017" },
                   { name: "LOCALMONGO_WEB_PORT", label: "Local Web UI Port", defaultValue: "8081", placeholder: "8081" },

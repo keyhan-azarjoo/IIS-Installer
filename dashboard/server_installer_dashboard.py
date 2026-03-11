@@ -3193,6 +3193,39 @@ input::placeholder{{color:#94a3b8}}
 }}
 .submit:hover{{transform:translateY(-1px);box-shadow:0 18px 34px rgba(15,118,110,.28);filter:saturate(1.05)}}
 .footnote{{margin:18px 0 0;color:#64748b;font-size:13px;line-height:1.6}}
+.meta{{
+  margin-top:16px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+}}
+.credit{{
+  margin:0;
+  color:#64748b;
+  font-size:12px;
+  line-height:1.5;
+}}
+.github-link{{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:7px 10px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  background:#fff;
+  color:#334155;
+  font-size:12px;
+  font-weight:700;
+  text-decoration:none;
+  transition:border-color .18s ease, background .18s ease, color .18s ease;
+}}
+.github-link:hover{{
+  border-color:rgba(15,118,110,.35);
+  background:#f8fffe;
+  color:var(--brand-deep);
+}}
 @media (max-width: 900px) {{
   .frame{{grid-template-columns:1fr}}
   .hero{{padding:36px 28px}}
@@ -3232,6 +3265,10 @@ input::placeholder{{color:#94a3b8}}
       <button type="submit" class="submit">Open Dashboard</button>
     </form>
     <p class="footnote">Localhost access does not require this sign-in screen. This login is only for remote dashboard access.</p>
+    <div class="meta">
+      <p class="credit">Created by Keyhan Azarjoo</p>
+      <a class="github-link" href="https://github.com/keyhan-azarjoo/Server-Installer" target="_blank" rel="noopener noreferrer">Project GitHub</a>
+    </div>
   </div>
 </section>
 </div></div>
