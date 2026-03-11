@@ -4538,6 +4538,58 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.write_html(page_mongo_native_ui())
             return
+        if self.path.startswith("/api/mongo/native/overview"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            ok, payload = mongo_native_overview()
+            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
+            if ok and isinstance(payload, dict):
+                payload = {"ok": True, **payload}
+            elif not ok and isinstance(payload, dict):
+                payload = {"ok": False, **payload}
+            else:
+                payload = {"ok": ok, "result": payload}
+            self.write_json(payload, status)
+            return
+        if self.path.startswith("/api/mongo/native/collections"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            query = {}
+            if "?" in self.path:
+                query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+            db_name = (query.get("db", [""])[0] or "").strip()
+            ok, payload = mongo_native_collections(db_name)
+            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
+            if ok and isinstance(payload, dict):
+                payload = {"ok": True, **payload}
+            elif not ok and isinstance(payload, dict):
+                payload = {"ok": False, **payload}
+            else:
+                payload = {"ok": ok, "result": payload}
+            self.write_json(payload, status)
+            return
+        if self.path.startswith("/api/mongo/native/documents"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            query = {}
+            if "?" in self.path:
+                query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+            db_name = (query.get("db", [""])[0] or "").strip()
+            collection_name = (query.get("collection", [""])[0] or "").strip()
+            limit = (query.get("limit", ["50"])[0] or "50").strip()
+            ok, payload = mongo_native_documents(db_name, collection_name, limit)
+            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
+            if ok and isinstance(payload, dict):
+                payload = {"ok": True, **payload}
+            elif not ok and isinstance(payload, dict):
+                payload = {"ok": False, **payload}
+            else:
+                payload = {"ok": ok, "result": payload}
+            self.write_json(payload, status)
+            return
         if self.path == "/":
             if self.is_local_client() or self.is_auth():
                 self.write_html(page_dashboard())
@@ -4638,6 +4690,19 @@ class Handler(BaseHTTPRequestHandler):
             ok, message = manage_service(action, name, kind)
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             self.write_json({"ok": ok, "message": message}, status)
+            return
+        if self.path == "/api/mongo/native/command":
+            form = self.parse_request_form()
+            db_name = (form.get("db", ["admin"])[0] or "admin").strip()
+            script_text = (form.get("script", [""])[0] or "").strip()
+            ok, payload = mongo_native_run_script(db_name, script_text)
+            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
+            if ok:
+                self.write_json({"ok": True, "result": payload}, status)
+            else:
+                if not isinstance(payload, dict):
+                    payload = {"error": str(payload)}
+                self.write_json({"ok": False, **payload}, status)
             return
 
         try:
