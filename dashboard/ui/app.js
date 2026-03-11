@@ -127,6 +127,10 @@ function ActionIcon({ title, onClick, disabled, color = "primary", variant = "ou
   );
 }
 
+function isServiceRunningStatus(status) {
+  return /running|active|up/i.test(String(status || ""));
+}
+
 function App() {
   const isMobile = MaterialUI.useMediaQuery("(max-width:1100px)");
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -630,6 +634,11 @@ function App() {
     const host = (systemInfo?.public_ip || (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "localhost");
     return buildMongoUri(host);
   }, [mongo.connection_string, systemInfo]);
+  const mongoServiceUrls = React.useMemo(() => uniqUrls((mongoServices || []).flatMap((svc) => svc?.urls || [])), [mongoServices]);
+  const mongoWebsiteUrl = React.useMemo(() => {
+    if (mongo.https_url) return String(mongo.https_url).trim();
+    return mongoServiceUrls.find((url) => /^https?:\/\//i.test(String(url || ""))) || "";
+  }, [mongo.https_url, mongoServiceUrls]);
 
   const s3ServiceUrls = React.useMemo(() => uniqUrls((s3Services || []).flatMap((svc) => svc?.urls || [])), [s3Services]);
   const s3ConsoleUrl = React.useMemo(() => {
@@ -925,9 +934,18 @@ function App() {
                             {renderServiceUrls(svc)}
                             {renderServicePorts(svc)}
                           </Box>
-                          <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
+                          <Chip size="small" color={isServiceRunningStatus(svc.status) ? "success" : "default"} label={svc.status || "-"} />
                           <Box sx={{ flexGrow: 1 }} />
-                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={isServiceRunningStatus(svc.status) ? "error" : "primary"}
+                            disabled={serviceBusy}
+                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status) ? "stop" : "start", svc)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            {isServiceRunningStatus(svc.status) ? "Stop" : "Start"}
+                          </Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
                       </Paper>
@@ -957,16 +975,6 @@ function App() {
                 ]}
                 onRun={run}
                 color="#1e40af"
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <ActionCard
-                title="Stop S3 APIs (Linux/macOS)"
-                description="Stop LocalS3 MinIO and disable LocalS3 nginx endpoint."
-                action="/run/s3_linux_stop"
-                fields={[]}
-                onRun={run}
-                color="#7f1d1d"
               />
             </Grid>
             <Grid item xs={12}>
@@ -1003,9 +1011,18 @@ function App() {
                             {renderServiceUrls(svc)}
                             {renderServicePorts(svc)}
                           </Box>
-                          <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
+                          <Chip size="small" color={isServiceRunningStatus(svc.status) ? "success" : "default"} label={svc.status || "-"} />
                           <Box sx={{ flexGrow: 1 }} />
-                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={isServiceRunningStatus(svc.status) ? "error" : "primary"}
+                            disabled={serviceBusy}
+                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status) ? "stop" : "start", svc)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            {isServiceRunningStatus(svc.status) ? "Stop" : "Start"}
+                          </Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
                       </Paper>
@@ -1051,7 +1068,7 @@ function App() {
                   <Typography variant="body2">Docker: optional, not required</Typography>
                   <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "native"})` : "Not installed yet"}</Typography>
                   {!!mongo.web_version && <Typography variant="body2">Web Version: {mongo.web_version}</Typography>}
-                  {!!mongo.https_url && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongo.https_url}</Typography>}
+                  {!!mongoWebsiteUrl && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongoWebsiteUrl}</Typography>}
                   {!!mongo.connection_string && <Typography variant="body2">Connection: {mongo.connection_string}</Typography>}
                 </CardContent>
               </Card>
@@ -1065,8 +1082,8 @@ function App() {
                     <ActionIcon title="Download Compass" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} IconComp={DownloadCompassIcon} fallback="DL" />
                     <ActionIcon title="Copy Compass URI" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} IconComp={CopyCompassIcon} fallback="CP" />
                     <ActionIcon title="Try Open Compass" onClick={tryOpenCompass} IconComp={TryOpenCompassIcon} fallback="OP" />
-                    {!!mongo.https_url && (
-                      <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongo.https_url, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
+                    {!!mongoWebsiteUrl && (
+                      <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button variant="outlined" color="error" disabled={serviceBusy || mongoServices.length === 0} onClick={() => stopServicesBatch(mongoServices, "MongoDB")} sx={{ textTransform: "none" }}>Stop All MongoDB</Button>
@@ -1126,7 +1143,7 @@ function App() {
                   <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "unknown"})` : (cfg.os === "linux" ? "Will be installed if missing" : "Docker Desktop must be running")}</Typography>
                   <Typography variant="body2">HTTPS Proxy: Built into Mongo setup</Typography>
                   <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "docker"})` : "Not installed yet"}</Typography>
-                  {!!mongo.https_url && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongo.https_url}</Typography>}
+                  {!!mongoWebsiteUrl && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongoWebsiteUrl}</Typography>}
                   {!!mongo.connection_string && <Typography variant="body2">Connection: {mongo.connection_string}</Typography>}
                 </CardContent>
               </Card>
@@ -1140,8 +1157,8 @@ function App() {
                     <ActionIcon title="Download Compass" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} IconComp={DownloadCompassIcon} fallback="DL" />
                     <ActionIcon title="Copy Compass URI" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} IconComp={CopyCompassIcon} fallback="CP" />
                     <ActionIcon title="Try Open Compass" onClick={tryOpenCompass} IconComp={TryOpenCompassIcon} fallback="OP" />
-                    {!!mongo.https_url && (
-                      <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongo.https_url, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
+                    {!!mongoWebsiteUrl && (
+                      <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button variant="outlined" color="error" disabled={serviceBusy || mongoServices.length === 0} onClick={() => stopServicesBatch(mongoServices, "MongoDB")} sx={{ textTransform: "none" }}>Stop All MongoDB</Button>
