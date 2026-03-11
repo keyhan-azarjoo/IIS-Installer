@@ -2496,9 +2496,44 @@ EOF
   launchctl kickstart -k system/com.locals3.minio
 }
 
+open_public_tcp_ports_linux() {
+  local ports=("$@")
+  local port
+
+  [ "${#ports[@]}" -eq 0 ] && return 0
+
+  if has_cmd ufw; then
+    for port in "${ports[@]}"; do
+      ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+    done
+  fi
+
+  if has_cmd firewall-cmd; then
+    for port in "${ports[@]}"; do
+      firewall-cmd --quiet --add-port="${port}/tcp" >/dev/null 2>&1 || true
+      firewall-cmd --quiet --permanent --add-port="${port}/tcp" >/dev/null 2>&1 || true
+    done
+    firewall-cmd --quiet --reload >/dev/null 2>&1 || true
+  fi
+
+  if has_cmd iptables; then
+    for port in "${ports[@]}"; do
+      iptables -C INPUT -p tcp --dport "${port}" -j ACCEPT >/dev/null 2>&1 || \
+        iptables -I INPUT -p tcp --dport "${port}" -j ACCEPT >/dev/null 2>&1 || true
+    done
+  fi
+
+  if has_cmd ip6tables; then
+    for port in "${ports[@]}"; do
+      ip6tables -C INPUT -p tcp --dport "${port}" -j ACCEPT >/dev/null 2>&1 || \
+        ip6tables -I INPUT -p tcp --dport "${port}" -j ACCEPT >/dev/null 2>&1 || true
+    done
+  fi
+}
+
 main() {
   relaunch_elevated "$@"
-  local os root cert_dir https_port console_https_port api_port ui_port domain lan_ans enable_lan lan_ip public_ip use_public_ip proxy_host api_url console_url
+  local os root cert_dir https_port console_https_port api_port ui_port domain lan_ans enable_lan expose_remote lan_ip public_ip use_public_ip proxy_host api_url console_url
   os="$(detect_os)"
   [ "$os" = "unknown" ] && { err "Unsupported OS."; exit 1; }
   info "===== Local S3 Storage Installer (${os}) - Native Mode ====="
@@ -2518,9 +2553,11 @@ main() {
   read -r -p "Allow LAN access from other computers? (y/N): " lan_ans
   lan_ans="$(echo "${lan_ans:-n}" | tr '[:upper:]' '[:lower:]')"
   enable_lan=false
+  expose_remote=false
   lan_ip=""
   if [ "$lan_ans" = "y" ] || [ "$lan_ans" = "yes" ]; then
     enable_lan=true
+    expose_remote=true
     lan_ip="$(get_lan_ipv4)"
   fi
 
@@ -2538,6 +2575,9 @@ main() {
   proxy_host="$domain"
   if [ "$proxy_host" = "localhost" ] && [ -n "$lan_ip" ]; then
     proxy_host="$lan_ip"
+  fi
+  if [ "$domain" != "localhost" ]; then
+    expose_remote=true
   fi
   if [ "$https_port" -eq 443 ]; then
     api_url="https://${proxy_host}"
@@ -2569,9 +2609,8 @@ main() {
 
   if [ "$os" = "linux" ]; then
     configure_nginx_linux "$domain" "$https_port" "$api_port" "$console_https_port" "$ui_port" "$cert_dir"
-    if [ "$enable_lan" = true ] && has_cmd ufw; then
-      ufw allow "${https_port}/tcp" >/dev/null 2>&1 || true
-      ufw allow "${console_https_port}/tcp" >/dev/null 2>&1 || true
+    if [ "$expose_remote" = true ]; then
+      open_public_tcp_ports_linux "$https_port" "$console_https_port"
     fi
   else
     configure_nginx_macos "$domain" "$https_port" "$api_port" "$console_https_port" "$ui_port" "$cert_dir"
