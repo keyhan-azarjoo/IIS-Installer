@@ -163,13 +163,16 @@ function App() {
   const [portProtocol, setPortProtocol] = React.useState("tcp");
   const [portBusy, setPortBusy] = React.useState(false);
   const [serviceBusy, setServiceBusy] = React.useState(false);
-  const [servicesLoading, setServicesLoading] = React.useState(false);
-  const [servicesErr, setServicesErr] = React.useState("");
+  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false });
+  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "" });
   const [serviceFilter, setServiceFilter] = React.useState("");
   const [services, setServices] = React.useState([]);
   const [mongoPageServices, setMongoPageServices] = React.useState([]);
   const [s3PageServices, setS3PageServices] = React.useState([]);
   const [dotnetPageServices, setDotnetPageServices] = React.useState([]);
+  const [mongoInfoState, setMongoInfoState] = React.useState(null);
+  const [s3InfoState, setS3InfoState] = React.useState(null);
+  const [dotnetInfoState, setDotnetInfoState] = React.useState(null);
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
@@ -193,12 +196,21 @@ function App() {
   }, []);
 
   const append = (line) => setTermText((prev) => `${prev}\n${line}`);
+  const setScopeLoadingFlag = React.useCallback((scope, value) => {
+    setScopeLoading((prev) => ({ ...prev, [scope]: value }));
+  }, []);
+  const setScopeErrorText = React.useCallback((scope, value) => {
+    setScopeErrors((prev) => ({ ...prev, [scope]: value }));
+  }, []);
+  const isScopeLoading = React.useCallback((scope) => !!scopeLoading?.[scope], [scopeLoading]);
 
   const loadSystem = React.useRef(async () => {});
   loadSystem.current = async () => {
     try {
+      setScopeLoadingFlag("all", true);
       setSystemErr("");
-      const r = await fetch("/api/system/status", { headers: { "X-Requested-With": "fetch" } });
+      setScopeErrorText("all", "");
+      const r = await fetch("/api/system/status?scope=all", { headers: { "X-Requested-With": "fetch" } });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       const st = j.status || null;
@@ -215,57 +227,85 @@ function App() {
       }
       setSystemInfo(st);
     } catch (err) {
-      setSystemErr(String(err));
+      const msg = String(err);
+      setSystemErr(msg);
+      setScopeErrorText("all", msg);
     } finally {
+      setScopeLoadingFlag("all", false);
       setLoadingSystem(false);
     }
   };
 
+  const loadScopedStatus = React.useCallback(async (scope, setter) => {
+    setScopeLoadingFlag(scope, true);
+    setScopeErrorText(scope, "");
+    try {
+      const r = await fetch(`/api/system/status?scope=${encodeURIComponent(scope)}`, { headers: { "X-Requested-With": "fetch" } });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setter(j.status || null);
+    } catch (err) {
+      setScopeErrorText(scope, String(err));
+      setter(null);
+    } finally {
+      setScopeLoadingFlag(scope, false);
+    }
+  }, [setScopeErrorText, setScopeLoadingFlag]);
+
   React.useEffect(() => {
+    const generalPage = page === "home" || page === "sysinfo" || page === "ports" || page === "services";
+    if (!generalPage) return undefined;
     loadSystem.current();
     const t = setInterval(() => loadSystem.current(), 10000);
     return () => clearInterval(t);
-  }, []);
+  }, [page, setScopeErrorText, setScopeLoadingFlag]);
 
   const loadServices = React.useRef(async () => {});
   const loadMongoServices = React.useRef(async () => {});
   const loadS3Services = React.useRef(async () => {});
   const loadDotnetServices = React.useRef(async () => {});
+  const loadMongoInfo = React.useRef(async () => {});
+  const loadS3Info = React.useRef(async () => {});
+  const loadDotnetInfo = React.useRef(async () => {});
 
   const loadServiceScope = React.useCallback(async (scope, setter) => {
-    setServicesLoading(true);
-    setServicesErr("");
+    setScopeLoadingFlag(scope, true);
+    setScopeErrorText(scope, "");
     try {
       const r = await fetch(`/api/system/services?scope=${encodeURIComponent(scope)}`, { headers: { "X-Requested-With": "fetch" } });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setter(Array.isArray(j.services) ? j.services : []);
     } catch (err) {
-      setServicesErr(String(err));
+      setScopeErrorText(scope, String(err));
       setter([]);
     } finally {
-      setServicesLoading(false);
+      setScopeLoadingFlag(scope, false);
     }
-  }, []);
+  }, [setScopeErrorText, setScopeLoadingFlag]);
 
   loadServices.current = async () => {
-    setServicesLoading(true);
-    setServicesErr("");
+    setScopeLoadingFlag("all", true);
+    setScopeErrorText("all", "");
     try {
       const r = await fetch("/api/system/services?scope=all", { headers: { "X-Requested-With": "fetch" } });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setServices(Array.isArray(j.services) ? j.services : []);
     } catch (err) {
-      setServicesErr(String(err));
+      setScopeErrorText("all", String(err));
+      setServices([]);
     } finally {
-      setServicesLoading(false);
+      setScopeLoadingFlag("all", false);
     }
   };
 
   loadMongoServices.current = async () => loadServiceScope("mongo", setMongoPageServices);
   loadS3Services.current = async () => loadServiceScope("s3", setS3PageServices);
   loadDotnetServices.current = async () => loadServiceScope("dotnet", setDotnetPageServices);
+  loadMongoInfo.current = async () => loadScopedStatus("mongo", setMongoInfoState);
+  loadS3Info.current = async () => loadScopedStatus("s3", setS3InfoState);
+  loadDotnetInfo.current = async () => loadScopedStatus("dotnet", setDotnetInfoState);
 
   const refreshPageServices = React.useCallback((targetPage) => {
     if (targetPage === "services") return loadServices.current();
@@ -275,21 +315,33 @@ function App() {
     return Promise.resolve();
   }, []);
 
+  const refreshPageStatus = React.useCallback((targetPage) => {
+    if (targetPage === "mongo") return loadMongoInfo.current();
+    if (targetPage === "s3") return loadS3Info.current();
+    if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetInfo.current();
+    if (targetPage === "home" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
+    return Promise.resolve();
+  }, []);
+
+  const refreshPageContext = React.useCallback((targetPage) => {
+    return Promise.all([refreshPageStatus(targetPage), refreshPageServices(targetPage)]);
+  }, [refreshPageServices, refreshPageStatus]);
+
   React.useEffect(() => {
     if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("dotnet-")) {
-      refreshPageServices(page);
+      refreshPageContext(page);
     }
-  }, [page, refreshPageServices]);
+  }, [page, refreshPageContext]);
 
   React.useEffect(() => {
     if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("dotnet-"))) {
       return undefined;
     }
     const t = setInterval(() => {
-      refreshPageServices(page);
+      refreshPageContext(page);
     }, 10000);
     return () => clearInterval(t);
-  }, [page, refreshPageServices]);
+  }, [page, refreshPageContext]);
 
   React.useEffect(() => {
     const hook = (payload) => {
@@ -318,7 +370,7 @@ function App() {
           setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
         }
         setTermState("Idle");
-        refreshPageServices(page);
+        refreshPageContext(page);
         loadSystem.current();
         return;
       }
@@ -387,6 +439,7 @@ function App() {
           setRunError(`${title} failed (exit ${j.exit_code ?? 1}). ${String(j.output || "").slice(0, 200)}`);
         }
         setTermState("Idle");
+        refreshPageStatus(page);
         loadSystem.current();
         return;
       }
@@ -543,8 +596,11 @@ function App() {
       setInfoMessage(j.message || `${action} completed.`);
       await Promise.all([
         loadServices.current(),
+        loadMongoInfo.current(),
         loadMongoServices.current(),
+        loadS3Info.current(),
         loadS3Services.current(),
+        loadDotnetInfo.current(),
         loadDotnetServices.current(),
       ]);
       loadSystem.current();
@@ -595,8 +651,11 @@ function App() {
       }
       await Promise.all([
         loadServices.current(),
+        loadMongoInfo.current(),
         loadMongoServices.current(),
+        loadS3Info.current(),
         loadS3Services.current(),
+        loadDotnetInfo.current(),
         loadDotnetServices.current(),
       ]);
       loadSystem.current();
@@ -645,8 +704,11 @@ function App() {
       }
       await Promise.all([
         loadServices.current(),
+        loadMongoInfo.current(),
         loadMongoServices.current(),
+        loadS3Info.current(),
         loadS3Services.current(),
+        loadDotnetInfo.current(),
         loadDotnetServices.current(),
       ]);
       loadSystem.current();
@@ -666,10 +728,15 @@ function App() {
   };
 
   const software = systemInfo?.software || {};
-  const dotnet = software.dotnet || {};
+  const mongoStatusInfo = mongoInfoState || systemInfo || {};
+  const dotnetStatusInfo = dotnetInfoState || systemInfo || {};
+  const mongoSoftware = mongoStatusInfo?.software || {};
+  const dotnetSoftware = dotnetStatusInfo?.software || {};
+  const dotnet = dotnetSoftware.dotnet || software.dotnet || {};
   const docker = software.docker || {};
+  const mongoDocker = mongoSoftware.docker || software.docker || {};
   const iis = software.iis || {};
-  const mongo = software.mongo || {};
+  const mongo = mongoSoftware.mongo || software.mongo || {};
   const listeningPorts = systemInfo?.listening_ports || [];
   const cpuPercent = clampPercent(systemInfo?.cpu_usage_percent ?? ((systemInfo?.load?.["1m"] && systemInfo?.cpu_count) ? (systemInfo.load["1m"] / systemInfo.cpu_count) * 100 : 0));
   const memoryPercent = clampPercent(systemInfo?.memory?.used_percent);
@@ -795,9 +862,15 @@ function App() {
         if (hostPart) return buildMongoUri(hostPart);
       } catch (_) {}
     }
-    const host = (systemInfo?.public_ip || (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "localhost");
+    const host = (
+      mongoStatusInfo?.public_ip ||
+      (mongoStatusInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) ||
+      systemInfo?.public_ip ||
+      (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) ||
+      "localhost"
+    );
     return buildMongoUri(host);
-  }, [mongo.auth_enabled, mongo.connection_string, systemInfo]);
+  }, [mongo.auth_enabled, mongo.connection_string, mongoStatusInfo, systemInfo]);
   const mongoServiceUrls = React.useMemo(() => uniqUrls((mongoDisplayServices || []).flatMap((svc) => svc?.urls || [])), [mongoDisplayServices]);
   const mongoWebsiteUrl = React.useMemo(() => {
     if (mongo.https_url) return String(mongo.https_url).trim();
@@ -981,11 +1054,11 @@ function App() {
                   <Typography variant="h6" fontWeight={800}>Managed Services</Typography>
                   <Box sx={{ flexGrow: 1 }} />
                   <TextField size="small" label="Filter" value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)} sx={{ minWidth: 260 }} />
-                  <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>
-                    {servicesLoading ? "Refreshing..." : "Refresh"}
+                  <Button variant="outlined" disabled={isScopeLoading("all")} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>
+                    {isScopeLoading("all") ? "Refreshing..." : "Refresh"}
                   </Button>
                 </Stack>
-                {servicesErr && <Alert severity="error" sx={{ mt: 1 }}>{servicesErr}</Alert>}
+                {scopeErrors.all && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.all}</Alert>}
                 <Box sx={{ mt: 1.5, maxHeight: 520, overflow: "auto" }}>
                   {filteredServices.length === 0 && <Typography variant="body2">No services found.</Typography>}
                   {filteredServices.map((svc) => {
@@ -1079,7 +1152,7 @@ function App() {
                     {!!s3LoginText && (
                       <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
                     )}
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadS3Services.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={isScopeLoading("s3")} onClick={() => Promise.all([loadS3Info.current(), loadS3Services.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(s3Services) ? "success" : "error"}
@@ -1164,7 +1237,7 @@ function App() {
                     {!!s3LoginText && (
                       <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
                     )}
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadS3Services.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={isScopeLoading("s3")} onClick={() => Promise.all([loadS3Info.current(), loadS3Services.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(s3Services) ? "success" : "error"}
@@ -1265,7 +1338,7 @@ function App() {
                     {!!mongoWebsiteUrl && (
                       <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadMongoServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={isScopeLoading("mongo")} onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
@@ -1336,7 +1409,7 @@ function App() {
               <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
                 <CardContent>
                   <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Requirements</Typography>
-                  <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "unknown"})` : (cfg.os === "linux" ? "Will be installed if missing" : "Docker Desktop must be running")}</Typography>
+                  <Typography variant="body2">Docker: {mongoDocker.installed ? `Installed (${mongoDocker.version || "unknown"})` : (cfg.os === "linux" ? "Will be installed if missing" : "Docker Desktop must be running")}</Typography>
                   <Typography variant="body2">HTTPS Proxy: Built into Mongo setup</Typography>
                   <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "docker"})` : "Not installed yet"}</Typography>
                   {!!mongoWebsiteUrl && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongoWebsiteUrl}</Typography>}
@@ -1356,7 +1429,7 @@ function App() {
                     {!!mongoWebsiteUrl && (
                       <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadMongoServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={isScopeLoading("mongo")} onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
@@ -1420,7 +1493,7 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadDotnetServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={isScopeLoading("dotnet")} onClick={() => Promise.all([loadDotnetInfo.current(), loadDotnetServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(dotnetServices) ? "success" : "error"}
@@ -1479,7 +1552,7 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
-                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadDotnetServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" disabled={isScopeLoading("dotnet")} onClick={() => Promise.all([loadDotnetInfo.current(), loadDotnetServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button
                       variant="outlined"
                       color={hasStoppedServices(dotnetServices) ? "success" : "error"}

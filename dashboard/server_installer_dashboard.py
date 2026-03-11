@@ -1512,7 +1512,8 @@ def manage_service(action, name, kind):
     return False, "No supported service manager found."
 
 
-def get_system_status():
+def get_system_status(scope="all"):
+    scope = str(scope or "all").strip().lower()
     load = None
     try:
         if hasattr(os, "getloadavg"):
@@ -1520,6 +1521,19 @@ def get_system_status():
             load = {"1m": la[0], "5m": la[1], "15m": la[2]}
     except Exception:
         load = None
+
+    software = {}
+    if scope in ("all", "dotnet"):
+        software["dotnet"] = get_dotnet_info()
+    if scope in ("all", "mongo"):
+        software["docker"] = get_docker_info()
+        software["mongo"] = get_mongo_info()
+        if os.name == "nt":
+            software["iis"] = get_iis_info()
+    elif scope in ("all", "s3"):
+        software["docker"] = get_docker_info()
+        if os.name == "nt":
+            software["iis"] = get_iis_info()
 
     status = {
         "hostname": socket.gethostname(),
@@ -1539,12 +1553,7 @@ def get_system_status():
         "ips": get_ip_addresses(),
         "public_ip": get_public_ipv4(),
         "listening_ports": get_listening_ports(),
-        "software": {
-            "dotnet": get_dotnet_info(),
-            "docker": get_docker_info(),
-            "iis": get_iis_info(),
-            "mongo": get_mongo_info(),
-        },
+        "software": software,
     }
     return status
 
@@ -4171,7 +4180,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
-                payload = {"ok": True, "status": get_system_status()}
+                query = {}
+                if "?" in self.path:
+                    query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+                scope = (query.get("scope", ["all"])[0] or "all").strip().lower()
+                payload = {"ok": True, "status": get_system_status(scope)}
                 self.write_json(payload, HTTPStatus.OK)
             except Exception as ex:
                 print(f"System status error: {ex}")
