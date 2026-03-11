@@ -1043,6 +1043,10 @@ if(Get-Command docker -ErrorAction SilentlyContinue){
 }
 $root = Join-Path $env:ProgramData 'LocalMongoDB'
 if(Test-Path $root){ Remove-Item -Recurse -Force -Path $root -ErrorAction SilentlyContinue }
+try {
+  $cert = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match 'CN=Caddy Local Authority' -or $_.FriendlyName -match 'Caddy' }
+  foreach($item in $cert){ Remove-Item -Path $item.PSPath -Force -ErrorAction SilentlyContinue }
+} catch {}
 """
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=150)
     return rc == 0, (out or "LocalMongoDB managed files cleaned.")
@@ -1055,6 +1059,8 @@ def _linux_cleanup_localmongo(prefix):
         run_capture(prefix + ["docker", "volume", "rm", "-f", "localmongo-data"], timeout=30)
     run_capture(prefix + ["rm", "-rf", "/opt/localmongo"], timeout=30)
     run_capture(prefix + ["rm", "-rf", "/usr/local/localmongo"], timeout=30)
+    run_capture(prefix + ["rm", "-f", "/usr/local/share/ca-certificates/localmongo.crt"], timeout=30)
+    run_capture(prefix + ["update-ca-certificates"], timeout=60)
     return True, "LocalMongoDB service and managed files removed."
 
 

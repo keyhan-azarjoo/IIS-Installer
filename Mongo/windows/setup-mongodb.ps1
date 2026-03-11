@@ -30,6 +30,10 @@ function Remove-ExistingLocalMongo([string]$dockerCtx) {
   $ErrorActionPreference = "Continue"
   docker --context $dockerCtx rm -f localmongo-https localmongo-web localmongo-mongodb 2>$null | Out-Null
   docker --context $dockerCtx network rm localmongo-net 2>$null | Out-Null
+  docker --context $dockerCtx volume rm -f localmongo-data 2>$null | Out-Null
+  if (Test-Path $Script:MongoRoot) {
+    Remove-Item -Recurse -Force -Path $Script:MongoRoot -ErrorAction SilentlyContinue
+  }
   $ErrorActionPreference = $prev
 }
 
@@ -101,13 +105,21 @@ function Main {
   $uiUser = Get-EnvOrDefault "LOCALMONGO_UI_USER" $mongoUser
   $uiPassword = Get-EnvOrDefault "LOCALMONGO_UI_PASSWORD" $mongoPassword
 
+  Ensure-DockerInstalled
+  Wait-DockerEngine
+  Sanitize-DockerEnv
+  $dockerCtx = Get-ActiveDockerContext
+  Info "Using Docker context: $dockerCtx"
+  Info "Clearing previous LocalMongoDB containers, volume, and config..."
+  Remove-ExistingLocalMongo -dockerCtx $dockerCtx
+
   foreach ($pair in @(
     @{ Name = "HTTPS"; Port = $httpsPort },
     @{ Name = "MongoDB"; Port = $mongoPort },
     @{ Name = "Web UI"; Port = $webPort }
   )) {
     if (-not (Port-Free $pair.Port)) {
-      Warn "$($pair.Name) port $($pair.Port) is already in use."
+      Warn "$($pair.Name) port $($pair.Port) is still in use after cleanup."
       $listeners = Get-PortListeners $pair.Port
       if ($listeners.Count -gt 0) {
         $listeners | Format-Table -AutoSize | Out-String | Write-Host
@@ -116,18 +128,10 @@ function Main {
     }
   }
 
-  Ensure-DockerInstalled
-  Wait-DockerEngine
-  Sanitize-DockerEnv
-  $dockerCtx = Get-ActiveDockerContext
-  Info "Using Docker context: $dockerCtx"
-
   $siteDir = Join-Path $Script:MongoRoot "caddy-site"
   $dataDir = Join-Path $Script:MongoRoot "caddy-data"
   $configDir = Join-Path $Script:MongoRoot "caddy-config"
   New-Item -ItemType Directory -Force -Path $Script:MongoRoot, $siteDir, $dataDir, $configDir | Out-Null
-
-  Remove-ExistingLocalMongo -dockerCtx $dockerCtx
 
   $addresses = @("https://localhost:$httpsPort")
   if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") {

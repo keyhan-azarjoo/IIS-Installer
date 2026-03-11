@@ -164,6 +164,20 @@ open_linux_firewall_port() {
   fi
 }
 
+clear_existing_localmongo() {
+  local root_dir="$1" os_name="$2"
+  docker rm -f localmongo-https localmongo-web localmongo-mongodb >/dev/null 2>&1 || true
+  docker network rm localmongo-net >/dev/null 2>&1 || true
+  docker volume rm -f localmongo-data >/dev/null 2>&1 || true
+  rm -rf "$root_dir" >/dev/null 2>&1 || true
+  if [ "$os_name" = "linux" ]; then
+    rm -f /usr/local/share/ca-certificates/localmongo.crt >/dev/null 2>&1 || true
+    if has_cmd update-ca-certificates; then
+      update-ca-certificates >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 main() {
   local os_name host_value https_port mongo_port web_port mongo_user mongo_password ui_user ui_password
   local root_dir caddyfile data_dir config_dir caddy_root cert_path addresses https_url lan_url mongo_url
@@ -191,21 +205,22 @@ main() {
     exit 1
   fi
 
-  if ! port_free "$https_port" || ! port_free "$mongo_port" || ! port_free "$web_port"; then
-    err "One or more requested ports are already in use."
-    exit 1
-  fi
-
   ensure_docker "$os_name"
 
   root_dir="/opt/localmongo"
   [ "$os_name" = "macos" ] && root_dir="/usr/local/localmongo"
   data_dir="${root_dir}/caddy-data"
   config_dir="${root_dir}/caddy-config"
+  info "Clearing previous LocalMongoDB containers, volumes, and config..."
+  clear_existing_localmongo "$root_dir" "$os_name"
+
+  if ! port_free "$https_port" || ! port_free "$mongo_port" || ! port_free "$web_port"; then
+    err "One or more requested ports are still in use after cleanup."
+    exit 1
+  fi
+
   mkdir -p "$root_dir" "$data_dir" "$config_dir"
 
-  docker rm -f localmongo-https localmongo-web localmongo-mongodb >/dev/null 2>&1 || true
-  docker network rm localmongo-net >/dev/null 2>&1 || true
   docker network create localmongo-net >/dev/null
   docker volume create localmongo-data >/dev/null
 
