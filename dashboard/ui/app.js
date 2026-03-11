@@ -858,6 +858,9 @@ function App() {
         if (hostPart) return buildMongoUri(hostPart);
       } catch (_) {}
     }
+    if (mongo.host) {
+      return buildMongoUri(String(mongo.host).trim());
+    }
     const host = (
       mongoStatusInfo?.public_ip ||
       (mongoStatusInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) ||
@@ -866,7 +869,7 @@ function App() {
       "localhost"
     );
     return buildMongoUri(host);
-  }, [mongo.connection_string, mongoStatusInfo, systemInfo]);
+  }, [mongo.connection_string, mongo.host, mongoStatusInfo, systemInfo]);
   const mongoServiceUrls = React.useMemo(() => uniqUrls((mongoDisplayServices || []).flatMap((svc) => svc?.urls || [])), [mongoDisplayServices]);
   const mongoWebsiteUrl = React.useMemo(() => {
     if (mongo.https_url) return String(mongo.https_url).trim();

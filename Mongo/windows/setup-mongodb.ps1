@@ -763,10 +763,16 @@ function Restart-NativeMongoService([string]$serviceName, [string]$connectHost, 
     Start-Sleep -Seconds 1
   }
 
+  Start-Sleep -Seconds 5
+
   $lastError = $null
-  for ($attempt = 1; $attempt -le 3; $attempt++) {
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
     try {
-      Start-Service -Name $serviceName -ErrorAction Stop
+      if ($attempt -eq 1) {
+        Start-Service -Name $serviceName -ErrorAction Stop
+      } else {
+        sc.exe start $serviceName | Out-Null
+      }
       Start-Sleep -Seconds 2
       if (Wait-TcpPort -targetHost $connectHost -port $mongoPort -maxSeconds 45) {
         return
@@ -848,6 +854,7 @@ function Install-NativeLocalMongo([string]$hostValue, [int]$mongoPort, [string]$
   }
 
   $primaryConnection = if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") { "mongodb://${hostValue}:$mongoPort/" } else { "mongodb://127.0.0.1:$mongoPort/" }
+  Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version -connectionString $primaryConnection -webVersion "native-service" -authEnabled $false
   Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version -connectionString $primaryConnection -webVersion "native-service" -authEnabled $authEnabled
 
   Write-Host ""

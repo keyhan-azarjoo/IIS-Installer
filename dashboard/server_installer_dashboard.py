@@ -532,10 +532,11 @@ def get_mongo_info():
             info["server_version"] = str(native.get("version") or "")
         connection = str(native.get("connection") or "").strip()
         port = str(native.get("port") or "").strip()
+        host = str(native.get("host") or "").strip()
         if connection:
             info["connection_string"] = connection
         elif port.isdigit():
-            info["connection_string"] = f"mongodb://{preferred_host}:{int(port)}/"
+            info["connection_string"] = f"mongodb://{host or preferred_host}:{int(port)}/"
         if native.get("mode") == "native":
             info["web_version"] = str(native.get("web_version") or "native")
         info["auth_enabled"] = bool(native.get("auth_enabled"))
@@ -745,7 +746,7 @@ def get_windows_native_mongo_info():
         "$meta=Join-Path $root 'install-info.json'; "
         "$cfg=Join-Path $root 'config\\mongod.cfg'; "
         "$svc=Get-Service -Name 'LocalMongoDB' -ErrorAction SilentlyContinue; "
-        "$obj=[ordered]@{installed=$false;version='';connection='';port='';mode='';web_version='';auth_enabled=$false;status=''}; "
+        "$obj=[ordered]@{installed=$false;version='';connection='';port='';host='';mode='';web_version='';auth_enabled=$false;status=''}; "
         "if($svc){$obj.installed=$true; $obj.status=[string]$svc.Status}; "
         "if(Test-Path $meta){ "
         "  try { "
@@ -753,6 +754,7 @@ def get_windows_native_mongo_info():
         "    if($m.version){$obj.version=[string]$m.version}; "
         "    if($m.connection_string){$obj.connection=[string]$m.connection_string}; "
         "    if($m.mongo_port){$obj.port=[string]$m.mongo_port}; "
+        "    if($m.host){$obj.host=[string]$m.host}; "
         "    if($m.mode){$obj.mode=[string]$m.mode}; "
         "    if($m.web_version){$obj.web_version=[string]$m.web_version}; "
         "    if($null -ne $m.auth_enabled){$obj.auth_enabled=[bool]$m.auth_enabled}; "
@@ -813,7 +815,8 @@ def find_windows_mongosh_exe():
 def get_windows_native_mongo_uri(loopback=True):
     info = get_windows_native_mongo_info() if os.name == "nt" else {}
     port = str(info.get("port") or "27017").strip()
-    host = "127.0.0.1" if loopback else choose_service_host()
+    configured_host = str(info.get("host") or "").strip()
+    host = "127.0.0.1" if loopback else (configured_host or choose_service_host())
     if str(info.get("auth_enabled") or "").lower() in ("true", "1") or bool(info.get("auth_enabled")):
         return f"mongodb://admin:StrongPassword123@{host}:{port}/admin?authSource=admin"
     return f"mongodb://{host}:{port}/admin"
