@@ -518,13 +518,14 @@ function Remove-ExistingNativeLocalMongo {
 }
 
 function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$hostValue, [int]$mongoPort, [string]$version) {
+  $primaryHost = if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") { $hostValue } else { "localhost" }
   $metadata = [ordered]@{
     mode = $mode
     service_name = $Script:NativeMongoServiceName
     mongod_path = $mongodExe
-    host = $hostValue
+    host = $primaryHost
     mongo_port = $mongoPort
-    connection_string = "mongodb://${hostValue}:$mongoPort/"
+    connection_string = "mongodb://${primaryHost}:$mongoPort/"
     version = $version
   }
   $json = $metadata | ConvertTo-Json -Depth 4
@@ -590,9 +591,11 @@ net:
   Write-Host ""
   Write-Host "===== INSTALLATION COMPLETE ====="
   Write-Host "MongoDB service:               $($Script:NativeMongoServiceName)"
-  Write-Host "MongoDB connection:            mongodb://localhost:$mongoPort/"
   if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") {
-    Write-Host "MongoDB connection (Host):     mongodb://${hostValue}:$mongoPort/"
+    Write-Host "MongoDB connection:            mongodb://${hostValue}:$mongoPort/"
+    Write-Host "MongoDB connection (Local):    mongodb://localhost:$mongoPort/"
+  } else {
+    Write-Host "MongoDB connection:            mongodb://localhost:$mongoPort/"
   }
   if ($version) {
     Write-Host "MongoDB version:               $version"
