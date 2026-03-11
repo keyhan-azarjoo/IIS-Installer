@@ -38,6 +38,10 @@ LINUX_INSTALLER = ROOT / "DotNet" / "linux" / "install-linux-dotnet-runner.sh"
 S3_WINDOWS_INSTALLER = ROOT / "S3" / "windows" / "setup-storage.ps1"
 S3_LINUX_INSTALLER = ROOT / "S3" / "linux-macos" / "setup-storage.sh"
 MONGO_WINDOWS_INSTALLER = ROOT / "Mongo" / "windows" / "setup-mongodb.ps1"
+PROXY_LINUX_INSTALLER = ROOT / "Proxy" / "linux-macos" / "setup-proxy.sh"
+PROXY_WINDOWS_INSTALLER = ROOT / "Proxy" / "windows" / "setup-proxy.ps1"
+PROXY_SOURCE_ROOT = ROOT / "Proxy" / "source"
+PROXY_WINDOWS_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "proxy" / "proxy-wsl.json"
 REPO_RAW_BASE = os.environ.get(
     "SERVER_INSTALLER_REPO_BASE",
     "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main",
@@ -74,6 +78,11 @@ MONGO_WINDOWS_FILES = [
 
 MONGO_UNIX_FILES = [
     "Mongo/linux-macos/setup-mongodb.sh",
+]
+
+PROXY_FILES = [
+    "Proxy/linux-macos/setup-proxy.sh",
+    "Proxy/windows/setup-proxy.ps1",
 ]
 
 SESSIONS = set()
@@ -1312,6 +1321,111 @@ def _is_mongo_name(name):
     return bool(re.search(r"localmongo|mongodb|mongo-express|mongod", str(name or ""), re.IGNORECASE))
 
 
+def _is_proxy_name(name):
+    return bool(re.search(r"proxy-panel|serverinstaller-proxywsl|xray|stunnel4|stunnel|nginx|ssh", str(name or ""), re.IGNORECASE))
+
+
+def _read_json_file(path_value):
+    try:
+        path = Path(path_value)
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _proxy_service_probe(units, prefix=None):
+    prefix = prefix or []
+    results = []
+    for unit in units:
+        display = unit
+        actual = unit if unit.endswith(".service") else f"{unit}.service"
+        rc, out = run_capture(prefix + ["systemctl", "show", actual, "--property=Id,ActiveState,SubState,UnitFileState", "--no-pager"], timeout=15)
+        if rc != 0:
+            continue
+        row = {}
+        for line in (out or "").splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                row[k.strip()] = v.strip()
+        active = row.get("ActiveState", "")
+        sub = row.get("SubState", "")
+        results.append({
+            "kind": "service",
+            "name": row.get("Id", actual),
+            "display_name": display,
+            "status": active,
+            "sub_status": sub,
+            "autostart": row.get("UnitFileState", "") == "enabled",
+        })
+    return results
+
+
+def get_proxy_info():
+    info = {
+        "available": PROXY_SOURCE_ROOT.exists(),
+        "installed": False,
+        "layer": "",
+        "panel_url": "",
+        "services": [],
+        "mode": "native" if os.name != "nt" else "wsl",
+        "distro": "",
+    }
+    if not info["available"]:
+        return info
+
+    if os.name == "nt":
+        state = _read_json_file(PROXY_WINDOWS_STATE)
+        distro = str(state.get("distro") or os.environ.get("PROXY_WSL_DISTRO", "Ubuntu")).strip()
+        info["distro"] = distro
+        info["layer"] = str(state.get("layer") or "").strip()
+        info["panel_url"] = str(state.get("url") or "https://127.0.0.1:8443").strip()
+        rc, out = run_capture(["wsl.exe", "-d", distro, "--user", "root", "--", "bash", "-lc", "if [ -f /opt/proxy-panel/panel.conf ]; then cat /opt/proxy-panel/panel.conf; fi"], timeout=20)
+        if rc == 0 and out.strip():
+            try:
+                conf = json.loads(out)
+                info["installed"] = True
+                info["layer"] = str(conf.get("layer") or info["layer"]).strip()
+                port = str(conf.get("port") or "8443").strip()
+                info["panel_url"] = f"https://127.0.0.1:{port}"
+            except Exception:
+                pass
+        info["services"] = [
+            {
+                "kind": "task",
+                "name": "ServerInstaller-ProxyWSL",
+                "display_name": f"Proxy WSL Autostart ({distro})",
+                "status": "ready" if info["installed"] else "stopped",
+                "sub_status": "",
+                "autostart": info["installed"],
+            }
+        ]
+        probe_script = "systemctl is-active proxy-panel xray stunnel4 nginx 2>/dev/null || true"
+        rc, out = run_capture(["wsl.exe", "-d", distro, "--user", "root", "--", "bash", "-lc", probe_script], timeout=20)
+        if rc == 0 and info["installed"]:
+            info["services"].append({
+                "kind": "service",
+                "name": "proxy-panel",
+                "display_name": f"WSL proxy services ({distro})",
+                "status": "active" if "active" in (out or "") else "unknown",
+                "sub_status": "",
+                "autostart": True,
+            })
+        return info
+
+    conf = _read_json_file("/opt/proxy-panel/panel.conf")
+    if conf:
+        info["installed"] = True
+        info["layer"] = str(conf.get("layer") or "").strip()
+        port = str(conf.get("port") or "8443").strip()
+        host = choose_service_host()
+        info["panel_url"] = f"https://{host}:{port}"
+    units = ["proxy-panel", "xray", "stunnel4", "nginx", "ssh"]
+    info["services"] = _proxy_service_probe(units, prefix=_sudo_prefix()) if command_exists("systemctl") else []
+    return info
+
+
 def filter_service_items(scope):
     scope = str(scope or "all").strip().lower()
     items = get_service_items()
@@ -1323,6 +1437,12 @@ def filter_service_items(scope):
         return [x for x in items if _is_locals3_name(x.get("name", "")) or _is_locals3_name(x.get("display_name", ""))]
     if scope == "dotnet":
         return [x for x in items if _is_dotnet_name(x.get("name", "")) or _is_dotnet_name(x.get("display_name", ""))]
+    if scope == "proxy":
+        proxy_info = get_proxy_info()
+        proxy_items = proxy_info.get("services") or []
+        if proxy_items:
+            return proxy_items
+        return [x for x in items if _is_proxy_name(x.get("name", "")) or _is_proxy_name(x.get("display_name", ""))]
     return items
 
 
@@ -1699,6 +1819,8 @@ def get_system_status(scope="all"):
         software["docker"] = get_docker_info()
         if os.name == "nt":
             software["iis"] = get_iis_info()
+    if scope in ("all", "proxy"):
+        software["proxy"] = get_proxy_info()
 
     status = {
         "hostname": socket.gethostname(),
@@ -2565,6 +2687,75 @@ def run_unix_mongo_installer(form=None, live_cb=None):
         cmd += ["bash", str(ROOT / "Mongo" / "linux-macos" / "setup-mongodb.sh")]
 
     return run_process(cmd, env=env, live_cb=live_cb)
+
+
+def run_linux_proxy_installer(form=None, live_cb=None):
+    if os.name == "nt":
+        return 1, "Linux proxy installer can only run on Linux/macOS hosts."
+    form = form or {}
+    env = os.environ.copy()
+    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN"):
+        value = (form.get(key, [""])[0] or "").strip()
+        if value:
+            env[key] = value
+    env["PROXY_REPO_ROOT"] = str(PROXY_SOURCE_ROOT)
+    cmd = ["bash", str(PROXY_LINUX_INSTALLER)]
+    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        cmd = ["sudo", "env"]
+        for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_REPO_ROOT"):
+            value = env.get(key, "").strip()
+            if value:
+                cmd.append(f"{key}={value}")
+        cmd += ["bash", str(PROXY_LINUX_INSTALLER)]
+    return run_process(cmd, env=env, live_cb=live_cb)
+
+
+def run_windows_proxy_installer(form=None, live_cb=None):
+    if os.name != "nt":
+        return 1, "Windows proxy installer can only run on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    form = form or {}
+    env = os.environ.copy()
+    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_WSL_DISTRO"):
+        value = (form.get(key, [""])[0] or "").strip()
+        if value:
+            env[key] = value
+    return run_process(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(PROXY_WINDOWS_INSTALLER)],
+        env=env,
+        live_cb=live_cb,
+    )
+
+
+def manage_proxy_service(action, name):
+    action = (action or "").strip().lower()
+    svc_name = _safe_service_name(name)
+    if action not in ("start", "stop", "restart"):
+        return False, "Supported actions: start, stop, restart."
+    if not svc_name:
+        return False, "Invalid proxy service name."
+    if os.name == "nt":
+        state = _read_json_file(PROXY_WINDOWS_STATE)
+        distro = str(state.get("distro") or os.environ.get("PROXY_WSL_DISTRO", "Ubuntu")).strip()
+        if svc_name.lower() == "serverinstaller-proxywsl":
+            task_action = {"start": "/Run", "stop": "/End", "restart": "/Run"}[action]
+            if action == "restart":
+                run_capture(["schtasks", "/End", "/TN", "ServerInstaller-ProxyWSL"], timeout=15)
+            rc, out = run_capture(["schtasks", task_action, "/TN", "ServerInstaller-ProxyWSL"], timeout=30)
+            return rc == 0, (out or f"Action '{action}' requested for ServerInstaller-ProxyWSL.")
+        linux_action = f"systemctl {action} {shlex.quote(svc_name)}"
+        rc, out = run_capture(["wsl.exe", "-d", distro, "--user", "root", "--", "bash", "-lc", linux_action], timeout=60)
+        return rc == 0, (out or f"Action '{action}' requested for WSL service '{svc_name}'.")
+    prefix = _sudo_prefix()
+    rc, out = run_capture(prefix + ["systemctl", action, svc_name], timeout=60)
+    if rc == 0:
+        return True, (out or f"Action '{action}' requested for {svc_name}.")
+    if not svc_name.endswith(".service"):
+        rc, out = run_capture(prefix + ["systemctl", action, f"{svc_name}.service"], timeout=60)
+        if rc == 0:
+            return True, (out or f"Action '{action}' requested for {svc_name}.service.")
+    return False, (out or f"Failed to {action} {svc_name}.")
 
 
 def run_linux_s3_installer(form=None, live_cb=None):
@@ -4856,6 +5047,14 @@ class Handler(BaseHTTPRequestHandler):
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             self.write_json({"ok": ok, "message": message}, status)
             return
+        if self.path == "/api/proxy/service":
+            form = self.parse_request_form()
+            action = (form.get("action", [""])[0] or "").strip()
+            name = (form.get("name", [""])[0] or "").strip()
+            ok, message = manage_proxy_service(action, name)
+            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
+            self.write_json({"ok": ok, "message": message}, status)
+            return
         if self.path == "/api/mongo/native/command":
             form = self.parse_request_form()
             db_name = (form.get("db", ["admin"])[0] or "admin").strip()
@@ -4907,6 +5106,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_unix_mongo_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/proxy_windows":
+            title = "Proxy Installer (Windows)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_proxy_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_proxy_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/proxy_linux":
+            title = "Proxy Installer (Linux/macOS)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_linux_proxy_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_linux_proxy_installer(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/s3_windows_stop":

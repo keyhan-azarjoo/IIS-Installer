@@ -200,16 +200,18 @@ function App() {
   const [portProtocol, setPortProtocol] = React.useState("tcp");
   const [portBusy, setPortBusy] = React.useState(false);
   const [serviceBusy, setServiceBusy] = React.useState(false);
-  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false });
-  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "" });
+  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, proxy: false });
+  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", proxy: "" });
   const [serviceFilter, setServiceFilter] = React.useState("");
   const [services, setServices] = React.useState([]);
   const [mongoPageServices, setMongoPageServices] = React.useState([]);
   const [s3PageServices, setS3PageServices] = React.useState([]);
   const [dotnetPageServices, setDotnetPageServices] = React.useState([]);
+  const [proxyPageServices, setProxyPageServices] = React.useState([]);
   const [mongoInfoState, setMongoInfoState] = React.useState(null);
   const [s3InfoState, setS3InfoState] = React.useState(null);
   const [dotnetInfoState, setDotnetInfoState] = React.useState(null);
+  const [proxyInfoState, setProxyInfoState] = React.useState(null);
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
@@ -301,9 +303,11 @@ function App() {
   const loadMongoServices = React.useRef(async () => {});
   const loadS3Services = React.useRef(async () => {});
   const loadDotnetServices = React.useRef(async () => {});
+  const loadProxyServices = React.useRef(async () => {});
   const loadMongoInfo = React.useRef(async () => {});
   const loadS3Info = React.useRef(async () => {});
   const loadDotnetInfo = React.useRef(async () => {});
+  const loadProxyInfo = React.useRef(async () => {});
 
   const loadServiceScope = React.useCallback(async (scope, setter) => {
     setScopeLoadingFlag(scope, true);
@@ -340,14 +344,17 @@ function App() {
   loadMongoServices.current = async () => loadServiceScope("mongo", setMongoPageServices);
   loadS3Services.current = async () => loadServiceScope("s3", setS3PageServices);
   loadDotnetServices.current = async () => loadServiceScope("dotnet", setDotnetPageServices);
+  loadProxyServices.current = async () => loadServiceScope("proxy", setProxyPageServices);
   loadMongoInfo.current = async () => loadScopedStatus("mongo", setMongoInfoState);
   loadS3Info.current = async () => loadScopedStatus("s3", setS3InfoState);
   loadDotnetInfo.current = async () => loadScopedStatus("dotnet", setDotnetInfoState);
+  loadProxyInfo.current = async () => loadScopedStatus("proxy", setProxyInfoState);
 
   const refreshPageServices = React.useCallback((targetPage) => {
     if (targetPage === "services") return loadServices.current();
     if (targetPage === "mongo") return loadMongoServices.current();
     if (targetPage === "s3") return loadS3Services.current();
+    if (targetPage === "proxy") return loadProxyServices.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
     return Promise.resolve();
   }, []);
@@ -355,6 +362,7 @@ function App() {
   const refreshPageStatus = React.useCallback((targetPage) => {
     if (targetPage === "mongo") return loadMongoInfo.current();
     if (targetPage === "s3") return loadS3Info.current();
+    if (targetPage === "proxy") return loadProxyInfo.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetInfo.current();
     if (targetPage === "home" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
     return Promise.resolve();
@@ -365,13 +373,13 @@ function App() {
   }, [refreshPageServices, refreshPageStatus]);
 
   React.useEffect(() => {
-    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("dotnet-")) {
+    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "proxy" || String(page).startsWith("dotnet-")) {
       refreshPageContext(page);
     }
   }, [page, refreshPageContext]);
 
   React.useEffect(() => {
-    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("dotnet-"))) {
+    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "proxy" || String(page).startsWith("dotnet-"))) {
       return undefined;
     }
     const t = setInterval(() => {
@@ -476,7 +484,7 @@ function App() {
           setRunError(`${title} failed (exit ${j.exit_code ?? 1}). ${String(j.output || "").slice(0, 200)}`);
         }
         setTermState("Idle");
-        refreshPageStatus(page);
+        refreshPageContext(page);
         loadSystem.current();
         return;
       }
@@ -521,7 +529,7 @@ function App() {
 
   const goBack = () => {
     if (page === "home") return;
-    if (page === "dotnet" || page === "s3" || page === "mongo" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
+    if (page === "dotnet" || page === "s3" || page === "mongo" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
     else if (page.startsWith("dotnet-")) setPage("dotnet");
     else setPage("home");
   };
@@ -531,6 +539,7 @@ function App() {
     if (page === "dotnet") return "DotNet";
     if (page === "s3") return "S3";
     if (page === "mongo") return "MongoDB";
+    if (page === "proxy") return "Proxy";
     if (page === "sysinfo") return "SysInfo";
     if (page === "ports") return "Port Management";
     if (page === "services") return "Service Manager";
@@ -637,6 +646,8 @@ function App() {
         loadMongoServices.current(),
         loadS3Info.current(),
         loadS3Services.current(),
+        loadProxyInfo.current(),
+        loadProxyServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
       ]);
@@ -692,6 +703,8 @@ function App() {
         loadMongoServices.current(),
         loadS3Info.current(),
         loadS3Services.current(),
+        loadProxyInfo.current(),
+        loadProxyServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
       ]);
@@ -745,6 +758,8 @@ function App() {
         loadMongoServices.current(),
         loadS3Info.current(),
         loadS3Services.current(),
+        loadProxyInfo.current(),
+        loadProxyServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
       ]);
@@ -758,6 +773,33 @@ function App() {
     return (items || []).some((svc) => !isServiceRunningStatus(svc?.status, svc?.sub_status));
   }, []);
 
+  const onProxyServiceAction = async (action, svc) => {
+    if (!svc?.name) return;
+    if (action === "stop") {
+      const ok = window.confirm(`Do you want to stop '${svc.name}'?`);
+      if (!ok) return;
+    }
+    setServiceBusy(true);
+    try {
+      const body = new URLSearchParams();
+      body.set("action", action);
+      body.set("name", svc.name);
+      const r = await fetch("/api/proxy/service", {
+        method: "POST",
+        headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.message || "Proxy service action failed.");
+      setInfoMessage(j.message || `${action} completed.`);
+      await Promise.all([loadProxyInfo.current(), loadProxyServices.current()]);
+    } catch (err) {
+      setInfoMessage(`Proxy ${action} failed: ${err}`);
+    } finally {
+      setServiceBusy(false);
+    }
+  };
+
   const actionLabel = (action) => {
     if (action === "autostart_on") return "Auto-start ON";
     if (action === "autostart_off") return "Auto-start OFF";
@@ -767,13 +809,16 @@ function App() {
   const software = systemInfo?.software || {};
   const mongoStatusInfo = mongoInfoState || systemInfo || {};
   const dotnetStatusInfo = dotnetInfoState || systemInfo || {};
+  const proxyStatusInfo = proxyInfoState || systemInfo || {};
   const mongoSoftware = mongoStatusInfo?.software || {};
   const dotnetSoftware = dotnetStatusInfo?.software || {};
+  const proxySoftware = proxyStatusInfo?.software || {};
   const dotnet = dotnetSoftware.dotnet || software.dotnet || {};
   const docker = software.docker || {};
   const mongoDocker = mongoSoftware.docker || software.docker || {};
   const iis = software.iis || {};
   const mongo = mongoSoftware.mongo || software.mongo || {};
+  const proxy = proxySoftware.proxy || software.proxy || {};
   const listeningPorts = systemInfo?.listening_ports || [];
   const cpuPercent = clampPercent(systemInfo?.cpu_usage_percent ?? ((systemInfo?.load?.["1m"] && systemInfo?.cpu_count) ? (systemInfo.load["1m"] / systemInfo.cpu_count) * 100 : 0));
   const memoryPercent = clampPercent(systemInfo?.memory?.used_percent);
@@ -832,6 +877,9 @@ function App() {
       return patt.test(text);
     });
   }, [mongoPageServices]);
+  const proxyServices = React.useMemo(() => {
+    return Array.isArray(proxyPageServices) ? proxyPageServices : [];
+  }, [proxyPageServices]);
   const mongoDisplayServices = React.useMemo(() => {
     if ((mongoServices || []).length > 0) return mongoServices;
     const hasMongoSignal = !!(
@@ -1010,6 +1058,9 @@ function App() {
           <Grid item xs={12} md={6}>
             <NavCard title="MongoDB" text="Install MongoDB with a Compass-style web admin UI." onClick={() => setPage("mongo")} outlined />
           </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Proxy" text="Install and manage the multi-layer proxy stack." onClick={() => setPage("proxy")} outlined />
+          </Grid>
         </Grid>
       );
     }
@@ -1044,6 +1095,8 @@ function App() {
                 <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "docker"})` : "Not installed"}</Typography>
                 {!!mongo.web_version && <Typography variant="body2">Mongo Web UI: {mongo.web_version}</Typography>}
                 {!!mongo.https_url && <Typography variant="body2">Mongo HTTPS: {mongo.https_url}</Typography>}
+                <Typography variant="body2">Proxy: {proxy.installed ? `Installed (${proxy.layer || proxy.mode || "proxy"})` : "Not installed"}</Typography>
+                {!!proxy.panel_url && <Typography variant="body2">Proxy Panel: {proxy.panel_url}</Typography>}
               </CardContent>
             </Card>
           </Grid>
@@ -1346,6 +1399,93 @@ function App() {
         );
       }
       return <Alert severity="info">S3 installer is not configured for this OS.</Alert>;
+    }
+
+    if (page === "proxy") {
+      if (cfg.os === "windows" || cfg.os === "linux") {
+        const panelUrl = String(proxy.panel_url || "").trim();
+        const layerOptions = [
+          "layer3-basic",
+          "layer4-nginx",
+          "layer6-stunnel",
+          "layer7-v2ray-vless",
+          "layer7-v2ray-vmess",
+          "layer7-real-domain",
+          "layer7-iran-optimized",
+        ];
+        return (
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={8}>
+              <ActionCard
+                title={`Install Proxy (${cfg.os === "windows" ? "Windows" : "Linux"})`}
+                description={cfg.os === "windows" ? "Run the Linux proxy stack inside WSL with persistent keepalive + autostart." : "Install the proxy stack locally from the vendored project copy."}
+                action={cfg.os === "windows" ? "/run/proxy_windows" : "/run/proxy_linux"}
+                fields={[
+                  { name: "PROXY_LAYER", label: "Layer", type: "select", options: layerOptions, defaultValue: proxy.layer || "layer3-basic", required: true },
+                  { name: "PROXY_DOMAIN", label: "Domain", placeholder: "Required for real-domain / iran-optimized layers" },
+                  { name: "PROXY_EMAIL", label: "Email", placeholder: "Required for real-domain / iran-optimized layers" },
+                  { name: "PROXY_DUCKDNS_TOKEN", label: "DuckDNS Token", placeholder: "Optional unless using DuckDNS" },
+                  ...(cfg.os === "windows" ? [{ name: "PROXY_WSL_DISTRO", label: "WSL Distro", defaultValue: proxy.distro || "Ubuntu" }] : []),
+                ]}
+                onRun={run}
+                color="#1d4ed8"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+                <CardContent>
+                  <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Current State</Typography>
+                  <Typography variant="body2">Mode: {proxy.mode || (cfg.os === "windows" ? "wsl" : "native")}</Typography>
+                  {!!proxy.layer && <Typography variant="body2">Layer: {proxy.layer}</Typography>}
+                  {!!proxy.distro && <Typography variant="body2">WSL Distro: {proxy.distro}</Typography>}
+                  {!!panelUrl && <Typography variant="body2" sx={{ mt: 1 }}>Panel URL: {panelUrl}</Typography>}
+                  <Typography variant="body2">Source: vendored local copy of the proxy project</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                    <Typography variant="h6" fontWeight={800}>Proxy Services</Typography>
+                    <Box sx={{ flexGrow: 1 }} />
+                    {!!panelUrl && (
+                      <Button variant="contained" disabled={serviceBusy} onClick={() => window.open(panelUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}>
+                        Open Proxy Panel
+                      </Button>
+                    )}
+                    <Button variant="outlined" disabled={isScopeLoading("proxy")} onClick={() => Promise.all([loadProxyInfo.current(), loadProxyServices.current()])} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}>
+                      Refresh
+                    </Button>
+                  </Stack>
+                  <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
+                    {proxyServices.length === 0 && <Typography variant="body2">No proxy services detected yet.</Typography>}
+                    {proxyServices.map((svc) => (
+                      <Paper key={`proxy-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                          <Box sx={{ minWidth: 260 }}>
+                            <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "service"})</Typography>
+                            <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
+                          </Box>
+                          <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                          <Box sx={{ flexGrow: 1 }} />
+                          <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onProxyServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
+                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                          </Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onProxyServiceAction("restart", svc)} sx={{ textTransform: "none" }}>
+                            Restart
+                          </Button>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        );
+      }
+      return <Alert severity="info">Proxy installer is currently configured for Linux hosts and Windows via WSL.</Alert>;
     }
 
     if (page === "mongo") {
