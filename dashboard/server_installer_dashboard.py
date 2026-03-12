@@ -623,6 +623,13 @@ def run_unix_python_installer(form=None, live_cb=None):
     state["jupyter_https_enabled"] = True
     state["service_mode"] = True
     _write_json_file(PYTHON_STATE_FILE, state)
+    if jupyter_port and jupyter_port not in ("80", "443"):
+        output = (
+            (output.rstrip() + "\n") if output else ""
+        ) + (
+            f"NOTE: Public access on TCP {jupyter_port} depends on the VPS/cloud firewall too.\n"
+            f"If the browser times out, allow inbound TCP {jupyter_port} in the provider security group/firewall, or use 443 if it is available."
+        )
     return 0, output
 
 

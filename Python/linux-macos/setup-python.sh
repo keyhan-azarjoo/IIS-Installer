@@ -135,6 +135,41 @@ port_is_listening() {
   return 1
 }
 
+local_https_ready() {
+  local port="$1"
+  local path="${2:-/lab}"
+  python3 - "$port" "$path" <<'PY'
+import ssl
+import sys
+import urllib.error
+import urllib.request
+
+port = sys.argv[1]
+path = sys.argv[2]
+url = f"https://127.0.0.1:{port}{path}"
+ctx = ssl._create_unverified_context()
+
+try:
+    with urllib.request.urlopen(url, context=ctx, timeout=10) as response:
+        status = getattr(response, "status", 200)
+        raise SystemExit(0 if status in (200, 301, 302, 401, 403) else 1)
+except urllib.error.HTTPError as exc:
+    raise SystemExit(0 if exc.code in (200, 301, 302, 401, 403) else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+public_access_note() {
+  local port="$1"
+  if [[ "$port" != "80" && "$port" != "443" ]]; then
+    cat <<EOF
+NOTE: Public access on TCP ${port} depends on your VPS/cloud firewall too.
+If the browser times out, allow inbound TCP ${port} in the provider security group/firewall, or use 443 if it is available.
+EOF
+  fi
+}
+
 ensure_tls_material() {
   mkdir -p "${JUPYTER_CERT_DIR}"
   if [[ ! -f "${JUPYTER_CERT_FILE}" || ! -f "${JUPYTER_KEY_FILE}" ]]; then
@@ -354,6 +389,11 @@ if ! port_is_listening "${JUPYTER_PORT}"; then
   exit 1
 fi
 
+if ! local_https_ready "${JUPYTER_PORT}" "/lab"; then
+  echo "Local HTTPS probe to https://127.0.0.1:${JUPYTER_PORT}/lab failed after startup." >&2
+  exit 1
+fi
+
 write_state_files
 
 echo "Python ready: ${VENV_PYTHON}"
@@ -361,3 +401,4 @@ echo "Base Python: ${PYTHON_EXE}"
 echo "Jupyter packages installed."
 echo "Jupyter service enabled: ${JUPYTER_SERVICE_NAME}.service"
 echo "Jupyter Lab started at https://${HOST_IP}:${JUPYTER_PORT}/lab."
+public_access_note "${JUPYTER_PORT}"
