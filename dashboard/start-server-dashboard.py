@@ -17,7 +17,6 @@ from pathlib import Path
 
 
 REPO = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
-DASHBOARD_LOCAL_ROOT = os.environ.get("SERVER_INSTALLER_LOCAL_ROOT", "").strip()
 DASHBOARD_HTTPS = os.environ.get("DASHBOARD_HTTPS", "").strip().lower() in ("1", "true", "yes", "y", "on")
 DASHBOARD_CERT = os.environ.get("DASHBOARD_CERT", "").strip()
 DASHBOARD_KEY = os.environ.get("DASHBOARD_KEY", "").strip()
@@ -52,10 +51,6 @@ SYNC_UNIX_FILES = [
 LINUX_SERVICE_NAME = "server-installer-dashboard.service"
 
 
-def is_repo_layout(root: Path) -> bool:
-    return (root / "dashboard" / "server_installer_dashboard.py").exists()
-
-
 def sync_files_for_current_os():
     files = list(SYNC_DASHBOARD_FILES)
     if os.name == "nt":
@@ -86,29 +81,16 @@ def clear_managed_cache(root: Path) -> None:
 
 def ensure_files(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    local_root = Path(DASHBOARD_LOCAL_ROOT) if DASHBOARD_LOCAL_ROOT else None
-    use_local = bool(local_root and is_repo_layout(local_root))
-    if not use_local:
-        clear_managed_cache(root)
+    clear_managed_cache(root)
     for rel in sync_files_for_current_os():
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp_target = target.with_suffix(target.suffix + ".download")
         try:
             print(f"Syncing required file: {rel}")
-            if use_local:
-                src = local_root / rel
-                if not src.exists():
-                    raise RuntimeError(f"Missing local file: {src}")
-                tmp_target.parent.mkdir(parents=True, exist_ok=True)
-                if tmp_target.exists():
-                    tmp_target.unlink(missing_ok=True)
-                tmp_target.write_bytes(src.read_bytes())
-                os.replace(tmp_target, target)
-            else:
-                url = f"{REPO}/{rel}"
-                urllib.request.urlretrieve(url, tmp_target)
-                os.replace(tmp_target, target)
+            url = f"{REPO}/{rel}"
+            urllib.request.urlretrieve(url, tmp_target)
+            os.replace(tmp_target, target)
         except Exception as ex:
             if tmp_target.exists():
                 tmp_target.unlink(missing_ok=True)
@@ -383,16 +365,6 @@ def try_open_append_log(*paths):
 
 
 def resolve_root() -> Path:
-    if DASHBOARD_LOCAL_ROOT:
-        local_root = Path(DASHBOARD_LOCAL_ROOT)
-        if is_repo_layout(local_root):
-            return local_root
-    cwd_root = Path.cwd()
-    script_root = Path(__file__).resolve().parents[1]
-    if is_repo_layout(script_root):
-        return script_root
-    if is_repo_layout(cwd_root):
-        return cwd_root
     root = cache_root()
     ensure_files(root)
     return root

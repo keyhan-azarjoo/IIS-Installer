@@ -14,17 +14,6 @@ function Get-CommandPath([string]$name) {
   return $null
 }
 
-function Test-RepoLayout([string]$Path) {
-  if (-not $Path) { return $false }
-  $requiredFiles = Get-RequiredServerInstallerFiles
-  foreach ($relativePath in $requiredFiles) {
-    if (-not (Test-Path (Join-Path $Path $relativePath))) {
-      return $false
-    }
-  }
-  return $true
-}
-
 function Get-RequiredServerInstallerFiles {
   $files = @(
     "dashboard/start-server-dashboard.py",
@@ -69,11 +58,7 @@ function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot
     $targetPath = Join-Path $DestinationRoot ($relativePath -replace '/', '\')
     $targetDirectory = Split-Path -Path $targetPath -Parent
     New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
-    if (Test-RepoLayout $SourceRoot) {
-      Copy-Item -Path (Join-Path $SourceRoot ($relativePath -replace '/', '\')) -Destination $targetPath -Force
-    } else {
-      Invoke-WebRequest -Uri "$RepoBase/$relativePath" -OutFile $targetPath
-    }
+    Invoke-WebRequest -Uri "$RepoBase/$relativePath" -OutFile $targetPath
   }
 }
 
@@ -315,14 +300,9 @@ New-Item -ItemType Directory -Force -Path $root | Out-Null
 
 $repo = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 $dashboard = Join-Path $root "start-server-dashboard.py"
-$localRoot = $env:SERVER_INSTALLER_LOCAL_ROOT
 
 Write-Host "[INFO] Downloading dashboard launcher..."
-if (Test-RepoLayout $localRoot) {
-  Sync-ServerInstallerFiles -SourceRoot $localRoot -DestinationRoot $root -RepoBase $repo
-} else {
-  Sync-ServerInstallerFiles -SourceRoot "" -DestinationRoot $root -RepoBase $repo
-}
+Sync-ServerInstallerFiles -SourceRoot "" -DestinationRoot $root -RepoBase $repo
 Repair-DashboardLauncher -Path $dashboard
 
 $python = Get-CommandPath "python"
