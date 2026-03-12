@@ -13,8 +13,8 @@ STATE_DIR="${BASE_STATE_DIR}/python"
 STATE_FILE="${STATE_DIR}/python-state.json"
 JUPYTER_STATE_FILE="${STATE_DIR}/jupyter-state.json"
 VENV_DIR="${STATE_DIR}/venv"
-KERNEL_NAME="serverinstaller-python"
-KERNEL_DISPLAY_NAME="Python 3 (Server Installer)"
+KERNEL_NAME="python3"
+KERNEL_DISPLAY_NAME="Python 3"
 JUPYTER_SERVICE_NAME="serverinstaller-jupyter"
 JUPYTER_SERVICE_FILE="/etc/systemd/system/${JUPYTER_SERVICE_NAME}.service"
 JUPYTER_NGINX_CONF="/etc/nginx/conf.d/${JUPYTER_SERVICE_NAME}.conf"
@@ -250,6 +250,8 @@ Type=simple
 User=root
 WorkingDirectory=${NOTEBOOK_DIR}
 Environment=PATH=${VENV_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=JUPYTER_PREFER_ENV_PATH=1
+Environment=JUPYTER_PATH=${VENV_DIR}/share/jupyter:/root/.local/share/jupyter:/usr/local/share/jupyter:/usr/share/jupyter
 ExecStart=${VENV_PYTHON} -m jupyter lab --allow-root --no-browser --ServerApp.ip=127.0.0.1 --ServerApp.port=${JUPYTER_INTERNAL_PORT} --ServerApp.token= --ServerApp.password= --ServerApp.allow_remote_access=True --ServerApp.trust_xheaders=True --ServerApp.root_dir=${NOTEBOOK_DIR}
 Restart=always
 RestartSec=5
@@ -263,8 +265,9 @@ EOF
 
 ensure_jupyter_kernel() {
   "${VENV_PYTHON}" -m pip install --upgrade ipykernel
+  rm -rf "${VENV_DIR}/share/jupyter/kernels/serverinstaller-python"
   "${VENV_PYTHON}" -m ipykernel install \
-    --prefix "${VENV_DIR}" \
+    --sys-prefix \
     --name "${KERNEL_NAME}" \
     --display-name "${KERNEL_DISPLAY_NAME}" >/dev/null
 }
