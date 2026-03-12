@@ -26,9 +26,11 @@ function Get-EnvOrDefault([string]$name, [string]$defaultValue) {
 function Invoke-Wsl([string[]]$Arguments) {
   $output = & wsl.exe @Arguments 2>&1
   $exitCode = $LASTEXITCODE
+  $text = (($output | ForEach-Object { "$_" }) -join "`n")
+  $text = $text.Replace([string][char]0, '').Replace([string][char]0xFEFF, '').Trim()
   return [pscustomobject]@{
     ExitCode = $exitCode
-    Output = (($output | ForEach-Object { "$_" }) -join "`n").Trim()
+    Output = $text
   }
 }
 
