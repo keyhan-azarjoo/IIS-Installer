@@ -21,18 +21,18 @@ DASHBOARD_LOCAL_ROOT = os.environ.get("SERVER_INSTALLER_LOCAL_ROOT", "").strip()
 DASHBOARD_HTTPS = os.environ.get("DASHBOARD_HTTPS", "").strip().lower() in ("1", "true", "yes", "y", "on")
 DASHBOARD_CERT = os.environ.get("DASHBOARD_CERT", "").strip()
 DASHBOARD_KEY = os.environ.get("DASHBOARD_KEY", "").strip()
-SYNC_FILES = [
+SYNC_DASHBOARD_FILES = [
     "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
     "dashboard/ui/components.js",
     "dashboard/ui/app.js",
+]
+SYNC_WINDOWS_FILES = [
     "Mongo/windows/setup-mongodb.ps1",
-    "Mongo/linux-macos/setup-mongodb.sh",
     "DotNet/windows/install-windows-dotnet-host.ps1",
     "DotNet/windows/modules/common.ps1",
     "DotNet/windows/modules/iis-mode.ps1",
     "DotNet/windows/modules/docker-mode.ps1",
-    "DotNet/linux/install-linux-dotnet-runner.sh",
     "S3/windows/setup-storage.ps1",
     "S3/windows/modules/common.ps1",
     "S3/windows/modules/minio.ps1",
@@ -40,6 +40,10 @@ SYNC_FILES = [
     "S3/windows/modules/iis.ps1",
     "S3/windows/modules/docker.ps1",
     "S3/windows/modules/main.ps1",
+]
+SYNC_UNIX_FILES = [
+    "Mongo/linux-macos/setup-mongodb.sh",
+    "DotNet/linux/install-linux-dotnet-runner.sh",
     "S3/linux-macos/setup-storage.sh",
     "S3/linux-macos/modules/core.sh",
     "S3/linux-macos/modules/cleanup.sh",
@@ -50,6 +54,15 @@ LINUX_SERVICE_NAME = "server-installer-dashboard.service"
 
 def is_repo_layout(root: Path) -> bool:
     return (root / "dashboard" / "server_installer_dashboard.py").exists()
+
+
+def sync_files_for_current_os():
+    files = list(SYNC_DASHBOARD_FILES)
+    if os.name == "nt":
+        files.extend(SYNC_WINDOWS_FILES)
+    else:
+        files.extend(SYNC_UNIX_FILES)
+    return files
 
 
 def cache_root() -> Path:
@@ -77,7 +90,7 @@ def ensure_files(root: Path) -> None:
     use_local = bool(local_root and is_repo_layout(local_root))
     if not use_local:
         clear_managed_cache(root)
-    for rel in SYNC_FILES:
+    for rel in sync_files_for_current_os():
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp_target = target.with_suffix(target.suffix + ".download")

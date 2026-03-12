@@ -16,30 +16,7 @@ function Get-CommandPath([string]$name) {
 
 function Test-RepoLayout([string]$Path) {
   if (-not $Path) { return $false }
-  $requiredFiles = @(
-    "dashboard\start-server-dashboard.py",
-    "dashboard\server_installer_dashboard.py",
-    "dashboard\ui\components.js",
-    "dashboard\ui\app.js",
-    "Mongo\windows\setup-mongodb.ps1",
-    "Mongo\linux-macos\setup-mongodb.sh",
-    "DotNet\windows\install-windows-dotnet-host.ps1",
-    "DotNet\windows\modules\common.ps1",
-    "DotNet\windows\modules\iis-mode.ps1",
-    "DotNet\windows\modules\docker-mode.ps1",
-    "DotNet\linux\install-linux-dotnet-runner.sh",
-    "S3\windows\setup-storage.ps1",
-    "S3\windows\modules\common.ps1",
-    "S3\windows\modules\minio.ps1",
-    "S3\windows\modules\cleanup.ps1",
-    "S3\windows\modules\iis.ps1",
-    "S3\windows\modules\docker.ps1",
-    "S3\windows\modules\main.ps1",
-    "S3\linux-macos\setup-storage.sh",
-    "S3\linux-macos\modules\core.sh",
-    "S3\linux-macos\modules\cleanup.sh",
-    "S3\linux-macos\modules\platform.sh"
-  )
+  $requiredFiles = Get-RequiredServerInstallerFiles
   foreach ($relativePath in $requiredFiles) {
     if (-not (Test-Path (Join-Path $Path $relativePath))) {
       return $false
@@ -48,31 +25,45 @@ function Test-RepoLayout([string]$Path) {
   return $true
 }
 
-function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot, [string]$RepoBase) {
-  $requiredFiles = @(
+function Get-RequiredServerInstallerFiles {
+  $files = @(
     "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
     "dashboard/ui/components.js",
-    "dashboard/ui/app.js",
-    "Mongo/windows/setup-mongodb.ps1",
-    "Mongo/linux-macos/setup-mongodb.sh",
-    "DotNet/windows/install-windows-dotnet-host.ps1",
-    "DotNet/windows/modules/common.ps1",
-    "DotNet/windows/modules/iis-mode.ps1",
-    "DotNet/windows/modules/docker-mode.ps1",
-    "DotNet/linux/install-linux-dotnet-runner.sh",
-    "S3/windows/setup-storage.ps1",
-    "S3/windows/modules/common.ps1",
-    "S3/windows/modules/minio.ps1",
-    "S3/windows/modules/cleanup.ps1",
-    "S3/windows/modules/iis.ps1",
-    "S3/windows/modules/docker.ps1",
-    "S3/windows/modules/main.ps1",
-    "S3/linux-macos/setup-storage.sh",
-    "S3/linux-macos/modules/core.sh",
-    "S3/linux-macos/modules/cleanup.sh",
-    "S3/linux-macos/modules/platform.sh"
+    "dashboard/ui/app.js"
   )
+
+  if ($IsWindows) {
+    $files += @(
+      "Mongo/windows/setup-mongodb.ps1",
+      "DotNet/windows/install-windows-dotnet-host.ps1",
+      "DotNet/windows/modules/common.ps1",
+      "DotNet/windows/modules/iis-mode.ps1",
+      "DotNet/windows/modules/docker-mode.ps1",
+      "S3/windows/setup-storage.ps1",
+      "S3/windows/modules/common.ps1",
+      "S3/windows/modules/minio.ps1",
+      "S3/windows/modules/cleanup.ps1",
+      "S3/windows/modules/iis.ps1",
+      "S3/windows/modules/docker.ps1",
+      "S3/windows/modules/main.ps1"
+    )
+  } else {
+    $files += @(
+      "Mongo/linux-macos/setup-mongodb.sh",
+      "DotNet/linux/install-linux-dotnet-runner.sh",
+      "S3/linux-macos/setup-storage.sh",
+      "S3/linux-macos/modules/core.sh",
+      "S3/linux-macos/modules/cleanup.sh",
+      "S3/linux-macos/modules/platform.sh"
+    )
+  }
+
+  return $files
+}
+
+function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot, [string]$RepoBase) {
+  $requiredFiles = Get-RequiredServerInstallerFiles
 
   foreach ($relativePath in $requiredFiles) {
     $targetPath = Join-Path $DestinationRoot ($relativePath -replace '/', '\')
