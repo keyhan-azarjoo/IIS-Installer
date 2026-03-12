@@ -48,11 +48,14 @@ function isSelectableHostIp(ip) {
   const value = String(ip || "").trim();
   if (!value) return false;
   if (value.includes(":")) return false;
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return false;
+  const octets = value.split(".").map((part) => Number(part));
+  if (octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
   if (value.startsWith("127.")) return false;
   if (value.startsWith("169.254.")) return false;
-  if (value.startsWith("172.")) return false;
   if (value === "0.0.0.0") return false;
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(value);
+  if (octets[0] === 172 && (octets[1] < 16 || octets[1] > 31)) return false;
+  return true;
 }
 
 function getSelectableIps(systemInfo) {
