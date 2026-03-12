@@ -26,7 +26,7 @@ import getpass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlparse
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -665,6 +665,44 @@ def parse_port_from_addr(addr):
     return None
 
 
+def _urls_from_windows_locals3_log(preferred_host=""):
+    log_path = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "minio" / "minio.log"
+    if not log_path.exists():
+        return [], []
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return [], []
+
+    urls = []
+    ports = []
+    for match in re.finditer(r"(?im)^\s*(API|WebUI):\s+(https?://\S+)\s*$", text):
+        url = str(match.group(2) or "").strip()
+        if not url:
+            continue
+        try:
+            parsed = urlparse(url)
+            host = preferred_host or parsed.hostname or choose_service_host()
+            scheme = parsed.scheme or "https"
+            port = parsed.port or (443 if scheme == "https" else 80)
+            normalized = f"{scheme}://{host}" if port in (80, 443) else f"{scheme}://{host}:{port}"
+            urls.append(normalized)
+            ports.append({"port": int(port), "protocol": "tcp"})
+        except Exception:
+            continue
+
+    dedup_urls = sorted(set(urls))
+    dedup_ports = []
+    seen_ports = set()
+    for item in ports:
+        key = (item.get("port"), item.get("protocol"))
+        if key in seen_ports:
+            continue
+        seen_ports.add(key)
+        dedup_ports.append(item)
+    return dedup_urls, dedup_ports
+
+
 def get_listening_ports(limit=200):
     ports = []
     if os.name == "nt":
@@ -1129,6 +1167,8 @@ def get_service_items():
                                         task_urls.append(f"{scheme}://{host}:{port}")
                         except Exception:
                             pass
+                    if not task_urls:
+                        task_urls, task_ports = _urls_from_windows_locals3_log(preferred_host=preferred_host)
                 items.append(
                     {
                         "kind": "task",
