@@ -110,7 +110,7 @@ function Field({ field, value, onChange, error, helperText, formHelperTextProps 
   );
 }
 
-function ActionCard({ title, description, action, fields, onRun, color }) {
+function ActionCard({ title, description, action, fields, onRun, color, runDisabled, runDisabledReason }) {
   const [uploading, setUploading] = React.useState(false);
   const [uploadInfo, setUploadInfo] = React.useState("");
   const [uploadedPath, setUploadedPath] = React.useState("");
@@ -438,7 +438,7 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
             type="submit"
             variant="contained"
             fullWidth
-            disabled={uploading || (isS3Install && s3PortFields.some((field) => {
+            disabled={!!runDisabled || uploading || (isS3Install && s3PortFields.some((field) => {
               const fieldName = field.name;
               const state = s3PortStates[fieldName];
               return state && (state.checking || !state.usable);
@@ -447,6 +447,11 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
           >
             Start
           </Button>
+          {!!runDisabledReason && (
+            <Typography variant="caption" color="error" sx={{ display: "block", mt: 1 }}>
+              {runDisabledReason}
+            </Typography>
+          )}
         </Box>
       </CardContent>
     </Card>

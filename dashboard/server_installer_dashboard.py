@@ -2540,6 +2540,7 @@ def manage_service(action, name, kind, detail=""):
     action = (action or "").strip().lower()
     kind = (kind or "service").strip().lower()
     svc_name = _safe_service_name(name)
+    is_managed_jupyter_service = svc_name in (JUPYTER_SYSTEMD_SERVICE, "serverinstaller-jupyter")
     if action not in ("start", "stop", "restart", "delete", "autostart_on", "autostart_off"):
         return False, "Supported actions: start, stop, restart, delete, autostart_on, autostart_off."
     if not svc_name:
@@ -2656,6 +2657,28 @@ def manage_service(action, name, kind, detail=""):
             return _hide_detected_python(detail)
         return False, "Detected Python entries only support delete."
 
+    if is_managed_jupyter_service:
+        if action == "start":
+            info = get_python_info()
+            code, output = start_python_jupyter(
+                host=str(info.get("host") or choose_service_host()),
+                port=str(info.get("jupyter_port") or "8888"),
+            )
+            return code == 0, output
+        if action == "stop":
+            code, output = stop_python_jupyter()
+            return code == 0, output
+        if action == "restart":
+            stop_python_jupyter()
+            info = get_python_info()
+            code, output = start_python_jupyter(
+                host=str(info.get("host") or choose_service_host()),
+                port=str(info.get("jupyter_port") or "8888"),
+            )
+            return code == 0, output
+        if action == "delete":
+            return _cleanup_managed_jupyter()
+
     if os.name == "nt":
         if not is_windows_admin():
             return False, "Stopping services on Windows requires Administrator."
@@ -2760,6 +2783,8 @@ def get_system_status(scope="all"):
     status = {
         "hostname": socket.gethostname(),
         "user": getpass.getuser(),
+        "is_admin": is_windows_admin() if os.name == "nt" else (os.geteuid() == 0 if hasattr(os, "geteuid") else True),
+        "is_local_system": is_windows_local_system() if os.name == "nt" else False,
         "os": platform.system(),
         "os_release": platform.release(),
         "platform": platform.platform(),

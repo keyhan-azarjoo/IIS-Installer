@@ -1050,6 +1050,10 @@ function App() {
   const s3WindowsModeOptions = React.useMemo(() => (
     s3WindowsDockerSupported ? ["iis", "docker"] : ["iis"]
   ), [s3WindowsDockerSupported]);
+  const windowsAdminRequired = cfg.os === "windows" && !systemInfo?.is_admin;
+  const windowsAdminReason = windowsAdminRequired
+    ? "Run the dashboard as Administrator before installing or managing the Windows proxy stack."
+    : "";
 
   const s3ServiceUrls = React.useMemo(() => uniqUrls((s3Services || []).flatMap((svc) => svc?.urls || [])), [s3Services]);
   const s3ConsoleUrl = React.useMemo(() => {
@@ -1719,13 +1723,18 @@ function App() {
                 ]}
                 onRun={run}
                 color="#1d4ed8"
+                runDisabled={windowsAdminRequired}
+                runDisabledReason={windowsAdminReason}
               />
             </Grid>
             <Grid item xs={12} md={4}>
-              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-                <CardContent>
-                  <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Current State</Typography>
-                  <Typography variant="body2">Mode: {proxy.mode || (cfg.os === "windows" ? "wsl" : "native")}</Typography>
+                <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+                  <CardContent>
+                    <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Current State</Typography>
+                    {cfg.os === "windows" && (
+                      <Typography variant="body2">Dashboard Admin: {systemInfo?.is_admin ? "Yes" : "No"}</Typography>
+                    )}
+                    <Typography variant="body2">Mode: {proxy.mode || (cfg.os === "windows" ? "wsl" : "native")}</Typography>
                   {!!proxy.layer && <Typography variant="body2">Layer: {proxy.layer}</Typography>}
                   {!!proxy.distro && <Typography variant="body2">WSL Distro: {proxy.distro}</Typography>}
                   {!!panelUrl && <Typography variant="body2" sx={{ mt: 1 }}>Panel URL: {panelUrl}</Typography>}
