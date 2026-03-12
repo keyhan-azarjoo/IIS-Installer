@@ -13,6 +13,8 @@ DOMAIN_VALUE="${PROXY_DOMAIN:-}"
 EMAIL_VALUE="${PROXY_EMAIL:-}"
 DUCKDNS_TOKEN_VALUE="${PROXY_DUCKDNS_TOKEN:-}"
 PANEL_PORT_VALUE="${PROXY_PANEL_PORT:-8443}"
+HOST_IP_VALUE="${PROXY_HOST_IP:-}"
+SERVER_INSTALLER_DATA_DIR="${SERVER_INSTALLER_DATA_DIR:-$HOME/.server-installer}"
 
 require_root() {
   if [ "$(id -u)" -ne 0 ]; then
@@ -47,6 +49,21 @@ validate_layout() {
     err "PROXY_PANEL_PORT must be a valid TCP port."
     exit 1
   fi
+}
+
+write_state() {
+  local host="$1"
+  local state_dir="$SERVER_INSTALLER_DATA_DIR/proxy"
+  local state_file="$state_dir/proxy-state.json"
+  mkdir -p "$state_dir"
+  cat >"$state_file" <<EOF
+{
+  "host": "$(printf '%s' "$host")",
+  "port": "$(printf '%s' "$PANEL_PORT_VALUE")",
+  "layer": "$(printf '%s' "$TARGET_LAYER")",
+  "url": "https://$(printf '%s' "$host"):$(printf '%s' "$PANEL_PORT_VALUE")"
+}
+EOF
 }
 
 sync_repo() {
@@ -129,10 +146,14 @@ main() {
     exit 1
   fi
 
-  local_ip="$(get_host_ip)"
+  local_ip="$HOST_IP_VALUE"
+  if [ -z "$local_ip" ]; then
+    local_ip="$(get_host_ip)"
+  fi
   if [ -z "$local_ip" ]; then
     local_ip="127.0.0.1"
   fi
+  write_state "$local_ip"
 
   info "Proxy installation completed."
   info "Layer: $TARGET_LAYER"

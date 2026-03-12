@@ -71,6 +71,7 @@ function Invoke-AsInteractiveUser {
     "PROXY_EMAIL",
     "PROXY_DUCKDNS_TOKEN",
     "PROXY_PANEL_PORT",
+    "PROXY_HOST_IP",
     "SERVER_INSTALLER_DASHBOARD_PORT"
   ) | ForEach-Object {
     '$env:{0} = {1}' -f $_, (ConvertTo-SingleQuotedPs ([Environment]::GetEnvironmentVariable($_)))
@@ -219,6 +220,7 @@ $domain = Get-EnvOrDefault "PROXY_DOMAIN" ""
 $email = Get-EnvOrDefault "PROXY_EMAIL" ""
 $duckdns = Get-EnvOrDefault "PROXY_DUCKDNS_TOKEN" ""
 $panelPort = Get-EnvOrDefault "PROXY_PANEL_PORT" "8443"
+$panelHost = Get-EnvOrDefault "PROXY_HOST_IP" "127.0.0.1"
 
 if ($panelPort -notmatch '^\d+$') {
   Fail "PROXY_PANEL_PORT must be numeric."
@@ -288,6 +290,7 @@ export PROXY_DOMAIN='$domain'
 export PROXY_EMAIL='$email'
 export PROXY_DUCKDNS_TOKEN='$duckdns'
 export PROXY_PANEL_PORT='$panelPort'
+export PROXY_HOST_IP='$panelHost'
 bash '$linuxInstallerWsl'
 "@
 Invoke-WslOrFail @("-d", $distro, "--user", "root", "--", "bash", "-lc", $installCommand) "Linux proxy installer failed inside WSL."
@@ -324,10 +327,11 @@ New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 @{
   distro = $distro
   layer = $layer
-  url = "https://127.0.0.1:$panelPort"
+  host = $panelHost
+  url = "https://${panelHost}:$panelPort"
   port = $panelPort
   installed_at = (Get-Date).ToString("s")
 } | ConvertTo-Json | Set-Content -Path $stateFile -Encoding UTF8
 
 Info "Proxy installation completed."
-Info "Proxy dashboard: https://127.0.0.1:$panelPort"
+Info "Proxy dashboard: https://${panelHost}:$panelPort"

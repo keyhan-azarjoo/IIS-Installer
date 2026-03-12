@@ -19,7 +19,8 @@ JUPYTER_NGINX_CONF="/etc/nginx/conf.d/${JUPYTER_SERVICE_NAME}.conf"
 JUPYTER_CERT_DIR="/etc/nginx/ssl/${JUPYTER_SERVICE_NAME}"
 JUPYTER_CERT_FILE="${JUPYTER_CERT_DIR}/jupyter.crt"
 JUPYTER_KEY_FILE="${JUPYTER_CERT_DIR}/jupyter.key"
-JUPYTER_AUTH_FILE="${STATE_DIR}/jupyter.htpasswd"
+JUPYTER_AUTH_DIR="/etc/nginx/auth"
+JUPYTER_AUTH_FILE="${JUPYTER_AUTH_DIR}/${JUPYTER_SERVICE_NAME}.htpasswd"
 JUPYTER_LOG_FILE="${STATE_DIR}/jupyter.log"
 JUPYTER_INTERNAL_PORT=""
 
@@ -184,6 +185,7 @@ ensure_tls_material() {
 }
 
 ensure_auth_file() {
+  mkdir -p "${JUPYTER_AUTH_DIR}"
   if [[ -z "${JUPYTER_USER}" ]]; then
     if [[ -f "${STATE_FILE}" ]]; then
       JUPYTER_USER="$(python3 -c 'import json,sys; from pathlib import Path; path = Path(sys.argv[1]); data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}; print(str(data.get("jupyter_username") or "").strip())' "${STATE_FILE}")"
@@ -195,7 +197,7 @@ ensure_auth_file() {
   fi
   if [[ -n "${JUPYTER_PASSWORD}" ]]; then
     printf '%s:%s\n' "${JUPYTER_USER}" "$(openssl passwd -apr1 "${JUPYTER_PASSWORD}")" > "${JUPYTER_AUTH_FILE}"
-    chmod 600 "${JUPYTER_AUTH_FILE}"
+    chmod 640 "${JUPYTER_AUTH_FILE}"
     return 0
   fi
   if [[ ! -f "${JUPYTER_AUTH_FILE}" ]]; then

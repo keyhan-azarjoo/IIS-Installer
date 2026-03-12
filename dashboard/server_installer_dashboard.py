@@ -57,6 +57,7 @@ PROXY_LINUX_INSTALLER = ROOT / "Proxy" / "linux-macos" / "setup-proxy.sh"
 PROXY_WINDOWS_INSTALLER = ROOT / "Proxy" / "windows" / "setup-proxy.ps1"
 PROXY_ROOT = ROOT / "Proxy"
 PROXY_WINDOWS_STATE = SERVER_INSTALLER_DATA / "proxy" / "proxy-wsl.json"
+PROXY_NATIVE_STATE = SERVER_INSTALLER_DATA / "proxy" / "proxy-state.json"
 PYTHON_STATE_DIR = SERVER_INSTALLER_DATA / "python"
 PYTHON_STATE_FILE = PYTHON_STATE_DIR / "python-state.json"
 PYTHON_JUPYTER_STATE_FILE = PYTHON_STATE_DIR / "jupyter-state.json"
@@ -465,7 +466,7 @@ def _cleanup_managed_jupyter():
             run_capture(["systemctl", "reload", "nginx"], timeout=30)
     for path in (
         PYTHON_JUPYTER_STATE_FILE,
-        PYTHON_STATE_DIR / "jupyter.htpasswd",
+        Path("/etc/nginx/auth/serverinstaller-jupyter.htpasswd"),
         PYTHON_STATE_DIR / "jupyter.log",
     ):
         try:
@@ -2224,9 +2225,10 @@ def get_proxy_info():
         state = _read_json_file(PROXY_WINDOWS_STATE)
         distro = str(state.get("distro") or os.environ.get("PROXY_WSL_DISTRO", "Ubuntu")).strip()
         state_port = str(state.get("port") or "8443").strip()
+        state_host = str(state.get("host") or choose_service_host() or "127.0.0.1").strip()
         info["distro"] = distro
         info["layer"] = str(state.get("layer") or "").strip()
-        info["panel_url"] = str(state.get("url") or f"https://127.0.0.1:{state_port}").strip()
+        info["panel_url"] = str(state.get("url") or f"https://{state_host}:{state_port}").strip()
         rc, out = run_capture(["wsl.exe", "-d", distro, "--user", "root", "--", "bash", "-lc", "if [ -f /opt/proxy-panel/panel.conf ]; then cat /opt/proxy-panel/panel.conf; fi"], timeout=20)
         if rc == 0 and out.strip():
             try:
@@ -2234,7 +2236,7 @@ def get_proxy_info():
                 info["installed"] = True
                 info["layer"] = str(conf.get("layer") or info["layer"]).strip()
                 port = str(conf.get("port") or "8443").strip()
-                info["panel_url"] = f"https://127.0.0.1:{port}"
+                info["panel_url"] = f"https://{state_host}:{port}"
             except Exception:
                 pass
         info["services"] = [
@@ -2260,12 +2262,13 @@ def get_proxy_info():
             })
         return info
 
+    native_state = _read_json_file(PROXY_NATIVE_STATE)
     conf = _read_json_file("/opt/proxy-panel/panel.conf")
     if conf:
         info["installed"] = True
         info["layer"] = str(conf.get("layer") or "").strip()
         port = str(conf.get("port") or "8443").strip()
-        host = choose_service_host()
+        host = str(native_state.get("host") or choose_service_host()).strip() or choose_service_host()
         info["panel_url"] = f"https://{host}:{port}"
     units = ["proxy-panel", "xray", "stunnel4", "nginx", "ssh"]
     info["services"] = _proxy_service_probe(units, prefix=_sudo_prefix()) if command_exists("systemctl") else []
@@ -3868,10 +3871,11 @@ def run_linux_proxy_installer(form=None, live_cb=None):
     ensure_repo_files(PROXY_SYNC_FILES, live_cb=live_cb, refresh=True)
     form = form or {}
     env = os.environ.copy()
-    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT", "SERVER_INSTALLER_DASHBOARD_PORT"):
+    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT", "PROXY_HOST_IP", "SERVER_INSTALLER_DASHBOARD_PORT"):
         value = (form.get(key, [""])[0] or "").strip()
         if value:
             env[key] = value
+    env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
     panel_port = env.get("PROXY_PANEL_PORT", "").strip()
     if panel_port:
         if not panel_port.isdigit():
@@ -3886,7 +3890,7 @@ def run_linux_proxy_installer(form=None, live_cb=None):
     cmd = ["bash", str(PROXY_LINUX_INSTALLER)]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         cmd = ["sudo", "env"]
-        for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT", "PROXY_REPO_ROOT", "SERVER_INSTALLER_DASHBOARD_PORT"):
+        for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT", "PROXY_HOST_IP", "PROXY_REPO_ROOT", "SERVER_INSTALLER_DATA_DIR", "SERVER_INSTALLER_DASHBOARD_PORT"):
             value = env.get(key, "").strip()
             if value:
                 cmd.append(f"{key}={value}")
@@ -3904,10 +3908,11 @@ def run_windows_proxy_installer(form=None, live_cb=None):
     ensure_repo_files(PROXY_SYNC_FILES, live_cb=live_cb, refresh=True)
     form = form or {}
     env = os.environ.copy()
-    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_WSL_DISTRO", "PROXY_PANEL_PORT", "SERVER_INSTALLER_DASHBOARD_PORT"):
+    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_WSL_DISTRO", "PROXY_PANEL_PORT", "PROXY_HOST_IP", "SERVER_INSTALLER_DASHBOARD_PORT"):
         value = (form.get(key, [""])[0] or "").strip()
         if value:
             env[key] = value
+    env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
     panel_port = env.get("PROXY_PANEL_PORT", "").strip()
     if panel_port:
         if not panel_port.isdigit():
