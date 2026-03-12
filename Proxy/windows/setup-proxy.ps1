@@ -23,6 +23,44 @@ function Get-EnvOrDefault([string]$name, [string]$defaultValue) {
   return $value.Trim()
 }
 
+function Invoke-Wsl([string[]]$Arguments) {
+  $output = & wsl.exe @Arguments 2>&1
+  $exitCode = $LASTEXITCODE
+  return [pscustomobject]@{
+    ExitCode = $exitCode
+    Output = (($output | ForEach-Object { "$_" }) -join "`n").Trim()
+  }
+}
+
+function Invoke-WslOrFail([string[]]$Arguments, [string]$failureMessage) {
+  $result = Invoke-Wsl $Arguments
+  if ($result.ExitCode -ne 0) {
+    $detail = if ($result.Output) { "`n$result.Output" } else { "" }
+    Fail "$failureMessage$detail"
+  }
+  return $result.Output
+}
+
+function Get-WslHelpText() {
+  return (Invoke-Wsl @("--help")).Output
+}
+
+function Test-WslSupportsOption([string]$option, [string]$helpText) {
+  return $helpText -match [Regex]::Escape($option)
+}
+
+function Test-WslDistroAvailable([string]$name, [string]$helpText) {
+  if (Test-WslSupportsOption "--list" $helpText -or Test-WslSupportsOption "-l," $helpText) {
+    $result = Invoke-Wsl @("-l", "-q")
+    if ($result.ExitCode -eq 0) {
+      return ($result.Output -split "`r?`n" | Where-Object { $_.Trim() -eq $name }).Count -gt 0
+    }
+  }
+
+  $probe = Invoke-Wsl @("-d", $name, "-e", "/bin/true")
+  return $probe.ExitCode -eq 0
+}
+
 if (-not (Test-IsAdmin)) {
   Fail "This installer must run as Administrator."
 }
@@ -54,11 +92,16 @@ if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
   Fail "WSL is not available on this machine."
 }
 
+$wslHelp = Get-WslHelpText
+
 Info "Checking WSL distro '$distro'..."
-$distros = & wsl.exe -l -q 2>$null
-if (-not ($distros | Where-Object { $_.Trim() -eq $distro })) {
+if (-not (Test-WslDistroAvailable $distro $wslHelp)) {
+  if (-not (Test-WslSupportsOption "--install" $wslHelp)) {
+    Fail "WSL distro '$distro' is not installed, and this Windows build does not support 'wsl --install'. Install Ubuntu manually or upgrade WSL/Windows, then rerun the Proxy installer."
+  }
+
   Info "Installing WSL distro '$distro'..."
-  & wsl.exe --install -d $distro
+  Invoke-WslOrFail @("--install", "-d", $distro) "Failed to start WSL distro installation."
   throw "WSL distro installation started. Reboot if Windows requests it, then rerun the Proxy installer."
 }
 
@@ -81,9 +124,19 @@ elif 'systemd=true' not in lines:
 path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 PY
 "@
-& wsl.exe -d $distro --user root -- bash -lc $enableSystemd
-& wsl.exe --shutdown
-Start-Sleep -Seconds 3
+Invoke-WslOrFail @("-d", $distro, "--user", "root", "--", "bash", "-lc", $enableSystemd) "Failed to update /etc/wsl.conf inside WSL."
+
+if (Test-WslSupportsOption "--shutdown" $wslHelp) {
+  Invoke-WslOrFail @("--shutdown") "Failed to restart WSL after enabling systemd."
+  Start-Sleep -Seconds 3
+} else {
+  Warn "This WSL build does not support 'wsl --shutdown'. A Windows reboot may be required before systemd becomes active."
+}
+
+$initProcess = Invoke-WslOrFail @("-d", $distro, "--user", "root", "--", "bash", "-lc", "ps -p 1 -o comm= 2>/dev/null || true") "Failed to verify WSL init system."
+if (($initProcess | Out-String).Trim() -ne "systemd") {
+  Fail "systemd is not active in WSL distro '$distro'. The Proxy installer requires a newer WSL release with systemd support. Update WSL/Windows, reboot, and rerun the installer."
+}
 
 Info "Running Linux proxy installer inside WSL..."
 $installCommand = @"
@@ -96,7 +149,7 @@ export PROXY_DUCKDNS_TOKEN='$duckdns'
 export PROXY_PANEL_PORT='$panelPort'
 bash '$linuxInstallerWsl'
 "@
-& wsl.exe -d $distro --user root -- bash -lc $installCommand
+Invoke-WslOrFail @("-d", $distro, "--user", "root", "--", "bash", "-lc", $installCommand) "Linux proxy installer failed inside WSL."
 
 Info "Configuring WSL keepalive + autostart task..."
 $keepAliveInstall = @"
@@ -119,7 +172,7 @@ EOF
 chmod +x /usr/local/bin/server-installer-proxy-keepalive.sh
 /usr/local/bin/server-installer-proxy-keepalive.sh
 "@
-& wsl.exe -d $distro --user root -- bash -lc $keepAliveInstall
+Invoke-WslOrFail @("-d", $distro, "--user", "root", "--", "bash", "-lc", $keepAliveInstall) "Failed to configure Proxy keepalive inside WSL."
 
 $taskName = "ServerInstaller-ProxyWSL"
 $taskCommand = "wsl.exe -d $distro --user root -- bash -lc '/usr/local/bin/server-installer-proxy-keepalive.sh'"
