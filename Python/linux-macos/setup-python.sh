@@ -275,9 +275,11 @@ c = get_config()
 
 c.ServerApp.allow_root = True
 c.ServerApp.allow_remote_access = True
+c.ServerApp.allow_origin = $(json_escape "https://${HOST_IP}:${JUPYTER_PORT}")
 c.ServerApp.base_url = "/"
 c.ServerApp.default_url = "/lab"
 c.ServerApp.ip = "127.0.0.1"
+c.ServerApp.local_hostnames = ["${HOST_IP}", "127.0.0.1", "localhost"]
 c.ServerApp.open_browser = False
 c.ServerApp.password = ""
 c.ServerApp.port = ${JUPYTER_INTERNAL_PORT}
@@ -325,7 +327,9 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
-        proxy_set_header Host \$host;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-Host \$http_host;
+        proxy_set_header X-Forwarded-Port \$server_port;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;

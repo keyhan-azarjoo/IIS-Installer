@@ -323,10 +323,25 @@ function Start-DockerDesktop {
   }
 }
 
+function Get-DockerContextNames {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $contexts = @(& docker context ls --format "{{.Name}}" 2>$null)
+  $ErrorActionPreference = $previous
+  return @($contexts | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+}
+
+function Get-DockerArgs([string[]]$Arguments) {
+  if ($Script:DockerContext) {
+    return @("--context", $Script:DockerContext) + $Arguments
+  }
+  return $Arguments
+}
+
 function Test-DockerEngine {
   $previous = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  docker info 2>&1 | Out-Null
+  & docker @(Get-DockerArgs @("info")) 2>&1 | Out-Null
   $ok = ($LASTEXITCODE -eq 0)
   $ErrorActionPreference = $previous
   return $ok
@@ -335,7 +350,7 @@ function Test-DockerEngine {
 function Get-DockerOsType {
   $previous = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  $out = docker info --format "{{.OSType}}" 2>$null
+  $out = & docker @(Get-DockerArgs @("info", "--format", "{{.OSType}}")) 2>$null
   $exitCode = $LASTEXITCODE
   $ErrorActionPreference = $previous
   if ($exitCode -ne 0) {
@@ -420,6 +435,17 @@ function Wait-DockerEngine {
 }
 
 function Ensure-DockerLinuxEngine {
+  $contexts = Get-DockerContextNames
+  if ($contexts -contains "desktop-linux") {
+    $Script:DockerContext = "desktop-linux"
+    $linuxOsType = Get-DockerOsType
+    if ($linuxOsType -eq "linux") {
+      Info "Using existing Docker context 'desktop-linux'."
+      return
+    }
+  }
+
+  $Script:DockerContext = $null
   $osType = Get-DockerOsType
   if ($osType -eq "linux") {
     return
@@ -441,6 +467,9 @@ function Ensure-DockerLinuxEngine {
     Start-Sleep -Seconds 5
     $elapsed += 5
     if ((Get-DockerOsType) -eq "linux") {
+      if ((Get-DockerContextNames) -contains "desktop-linux") {
+        $Script:DockerContext = "desktop-linux"
+      }
       return
     }
   }
@@ -455,7 +484,7 @@ function ConvertTo-SingleQuotedBash([string]$value) {
 }
 
 function Invoke-Docker([string[]]$Arguments) {
-  $output = & docker @Arguments 2>&1
+  $output = & docker @(Get-DockerArgs $Arguments) 2>&1
   $exitCode = $LASTEXITCODE
   $text = (($output | ForEach-Object { "$_" }) -join "`n")
   $text = $text.Replace([string][char]0, '').Replace([string][char]0xFEFF, '').Trim()
