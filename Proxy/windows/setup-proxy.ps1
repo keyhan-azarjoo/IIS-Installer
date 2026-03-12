@@ -119,7 +119,7 @@ function Invoke-AsInteractiveUser {
   Set-Content -Path $runnerScript -Value ($runnerContent -join "`r`n") -Encoding UTF8
 
   $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$runnerScript`""
-  $principal = New-ScheduledTaskPrincipal -UserId $activeUser -LogonType InteractiveToken -RunLevel Highest
+  $principal = New-ScheduledTaskPrincipal -UserId $activeUser -LogonType Interactive -RunLevel Highest
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
   try {
