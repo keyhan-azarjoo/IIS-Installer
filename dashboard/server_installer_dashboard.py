@@ -2640,6 +2640,33 @@ def run_windows_setup_only(form, target, live_cb=None):
     return 1, "Unknown Windows setup target."
 
 
+def run_windows_docker_setup_only(live_cb=None):
+    if os.name != "nt":
+        return 1, "Windows Docker setup can only run on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    ensure_repo_files([
+        "DotNet/windows/modules/common.ps1",
+        "DotNet/windows/modules/docker-mode.ps1",
+    ], live_cb=live_cb)
+
+    cmd = [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        (
+            f". '{ROOT / 'DotNet' / 'windows' / 'modules' / 'common.ps1'}';"
+            f". '{ROOT / 'DotNet' / 'windows' / 'modules' / 'docker-mode.ps1'}';"
+            f"Ensure-DockerInstalled"
+        ),
+    ]
+    env = os.environ.copy()
+    env["SERVER_INSTALLER_NONINTERACTIVE"] = "1"
+    return run_process(cmd, env=env, live_cb=live_cb)
+
+
 def run_linux_installer(form, live_cb=None, require_source=True):
     if os.name == "nt":
         return 1, "Linux installer can only run on Linux hosts."
@@ -5455,6 +5482,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_windows_setup_only(form, "docker")
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/windows_docker_engine":
+            title = "Windows Docker Engine Setup"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_docker_setup_only(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_docker_setup_only()
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/windows_docker":

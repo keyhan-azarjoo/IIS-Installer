@@ -1526,9 +1526,9 @@ function App() {
             {cfg.os === "windows" ? (
               <ActionCard
                 title="Install Docker (Windows)"
-                description="Install Docker Desktop prerequisites on Windows. Reuses the existing Windows Docker setup flow."
-                action="/run/windows_setup_docker"
-                fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]}
+                description="Install Docker only on Windows."
+                action="/run/windows_docker_engine"
+                fields={[]}
                 onRun={run}
                 color="#1f2937"
               />
