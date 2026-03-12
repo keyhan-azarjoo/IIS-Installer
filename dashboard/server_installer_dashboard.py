@@ -231,6 +231,27 @@ def _python_scripts_dir(python_exe):
     return ""
 
 
+def _default_python_notebook_dir():
+    preferred = PYTHON_STATE_DIR / "notebooks"
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        return str(preferred)
+    except Exception:
+        return str(ROOT)
+
+
+def _resolve_python_notebook_dir(value=""):
+    raw = str(value or "").strip()
+    if not raw:
+        raw = _default_python_notebook_dir()
+    path = Path(raw).expanduser()
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return str(path)
+
+
 def _resolve_python_from_launcher(version_hint=""):
     version_key = _python_version_key(version_hint)
     if os.name == "nt" and command_exists("py"):
@@ -336,6 +357,9 @@ def get_python_info():
     resolved = _resolve_any_python()
     python_executable = str(resolved.get("python_executable") or state.get("python_executable") or "").strip()
     python_version = str(resolved.get("python_version") or state.get("python_version") or "").strip()
+    default_notebook_dir = _resolve_python_notebook_dir(
+        state.get("default_notebook_dir") or state.get("notebook_dir") or ""
+    )
     info = {
         "installed": bool(python_executable and Path(python_executable).exists()),
         "python_executable": python_executable,
@@ -347,6 +371,8 @@ def get_python_info():
         "jupyter_port": str(state.get("jupyter_port") or "").strip(),
         "host": str(state.get("host") or "").strip(),
         "scripts_dir": _python_scripts_dir(python_executable),
+        "default_notebook_dir": default_notebook_dir,
+        "notebook_dir": default_notebook_dir,
         "services": [],
     }
     if info["installed"]:
@@ -365,6 +391,9 @@ def get_python_info():
             info["jupyter_port"] = str(jupyter_state.get("port") or info["jupyter_port"] or "").strip()
             info["host"] = str(jupyter_state.get("host") or info["host"] or "").strip()
             info["jupyter_url"] = str(jupyter_state.get("url") or "").strip()
+            info["notebook_dir"] = _resolve_python_notebook_dir(
+                jupyter_state.get("notebook_dir") or info["default_notebook_dir"]
+            )
             info["jupyter_pid"] = pid
         else:
             if jupyter_state:
@@ -376,6 +405,9 @@ def get_python_info():
                 port = info["jupyter_port"] or "8888"
                 if port.isdigit():
                     info["jupyter_url"] = f"http://{host}:{port}/lab"
+            info["notebook_dir"] = _resolve_python_notebook_dir(
+                jupyter_state.get("notebook_dir") if jupyter_state else info["default_notebook_dir"]
+            )
     info["services"] = _python_state_service_item(info)
     return info
 
@@ -393,6 +425,7 @@ def run_windows_python_installer(form=None, live_cb=None):
     host_ip = (form.get("PYTHON_HOST_IP", [""])[0] or "").strip()
     jupyter_port = (form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip()
     start_jupyter = (form.get("PYTHON_START_JUPYTER", ["no"])[0] or "no").strip().lower()
+    notebook_dir = _resolve_python_notebook_dir((form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip())
     env["PYTHON_VERSION"] = version
     env["PYTHON_INSTALL_JUPYTER"] = "1" if install_jupyter in ("1", "true", "yes", "y", "on") else "0"
     env["PYTHON_JUPYTER_PORT"] = jupyter_port
@@ -411,12 +444,14 @@ def run_windows_python_installer(form=None, live_cb=None):
         state["host"] = host_ip
     if jupyter_port:
         state["jupyter_port"] = jupyter_port
+    state["default_notebook_dir"] = notebook_dir
+    state["notebook_dir"] = notebook_dir
     _write_json_file(PYTHON_STATE_FILE, state)
     if start_jupyter in ("1", "true", "yes", "y", "on"):
         start_code, start_output = start_python_jupyter(
             host=host_ip or str(state.get("host") or choose_service_host()),
             port=jupyter_port,
-            notebook_dir=(form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip(),
+            notebook_dir=notebook_dir,
             live_cb=live_cb,
         )
         if start_output:
@@ -437,7 +472,7 @@ def run_unix_python_installer(form=None, live_cb=None):
     host_ip = (form.get("PYTHON_HOST_IP", [""])[0] or "").strip()
     jupyter_port = (form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip()
     start_jupyter = (form.get("PYTHON_START_JUPYTER", ["no"])[0] or "no").strip().lower()
-    notebook_dir = (form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip()
+    notebook_dir = _resolve_python_notebook_dir((form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip())
     env["PYTHON_VERSION"] = version
     env["PYTHON_INSTALL_JUPYTER"] = "1" if install_jupyter in ("1", "true", "yes", "y", "on") else "0"
     env["PYTHON_JUPYTER_PORT"] = jupyter_port
@@ -460,6 +495,8 @@ def run_unix_python_installer(form=None, live_cb=None):
         state["host"] = host_ip
     if jupyter_port:
         state["jupyter_port"] = jupyter_port
+    state["default_notebook_dir"] = notebook_dir
+    state["notebook_dir"] = notebook_dir
     _write_json_file(PYTHON_STATE_FILE, state)
     if start_jupyter in ("1", "true", "yes", "y", "on"):
         start_code, start_output = start_python_jupyter(
@@ -508,7 +545,7 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
         usage = get_port_usage(port, "tcp")
         if not usage.get("managed_owner"):
             return 1, f"Requested Jupyter port {port} is already in use. Choose another port."
-    notebook_dir = notebook_dir.strip() or str(ROOT)
+    notebook_dir = _resolve_python_notebook_dir(notebook_dir)
     PYTHON_JUPYTER_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     log_path = PYTHON_STATE_DIR / "jupyter.log"
     args = [
@@ -541,6 +578,8 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
         state = _read_json_file(PYTHON_STATE_FILE)
         state["host"] = host
         state["jupyter_port"] = port
+        state["default_notebook_dir"] = notebook_dir
+        state["notebook_dir"] = notebook_dir
         _write_json_file(PYTHON_STATE_FILE, state)
         _write_json_file(PYTHON_JUPYTER_STATE_FILE, {
             "pid": proc.pid,

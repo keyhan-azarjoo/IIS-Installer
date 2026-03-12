@@ -223,6 +223,7 @@ function App() {
   const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
   const selectableIps = React.useMemo(() => getSelectableIps(systemInfo), [systemInfo]);
+  const pendingOpenRef = React.useRef(null);
 
   React.useEffect(() => {
     const onMove = (e) => {
@@ -432,10 +433,27 @@ function App() {
         append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code})`);
         if (Number(j.exit_code) !== 0) {
           setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
+          pendingOpenRef.current = null;
         }
         setTermState("Idle");
         refreshPageContext(page);
         loadSystem.current();
+        if (Number(j.exit_code) === 0 && pendingOpenRef.current) {
+          const openRequest = pendingOpenRef.current;
+          pendingOpenRef.current = null;
+          try {
+            const statusResp = await fetch(`/api/system/status?scope=${encodeURIComponent(openRequest.scope)}`, { headers: { "X-Requested-With": "fetch" } });
+            const statusJson = await statusResp.json();
+            const resolvedUrl = String(statusJson?.status?.jupyter_url || openRequest.url || "").trim();
+            if (resolvedUrl) {
+              window.open(resolvedUrl, "_blank", "noopener,noreferrer");
+            }
+          } catch (_) {
+            if (openRequest.url) {
+              window.open(openRequest.url, "_blank", "noopener,noreferrer");
+            }
+          }
+        }
         return;
       }
       setTimeout(() => poll(jobId, title, next), 300);
@@ -462,7 +480,10 @@ function App() {
     setTermMin(false);
     const isS3Install = action === "/run/s3_linux" || action === "/run/s3_windows" || action === "/run/s3_windows_iis" || action === "/run/s3_windows_docker";
     const isMongoInstall = action === "/run/mongo_windows" || action === "/run/mongo_unix";
+    const isPythonInstall = action === "/run/python_install";
+    const isJupyterStart = action === "/run/python_jupyter_start";
     setRunError("");
+    pendingOpenRef.current = null;
     if (isS3Install) {
       const selectedIp = String(body.get("LOCALS3_HOST_IP") || "").trim();
       if (!selectedIp && selectableIps.length > 1) {
@@ -519,6 +540,18 @@ function App() {
         body.set("LOCALMONGO_HOST", selectedIp);
       } else if (selectableIps.length === 1) {
         body.set("LOCALMONGO_HOST", selectableIps[0]);
+      }
+    }
+    if (isPythonInstall || isJupyterStart) {
+      const hostValue = String(body.get("PYTHON_HOST_IP") || "").trim() || pythonService.host || selectableIps[0] || "127.0.0.1";
+      const portValueResolved = String(body.get("PYTHON_JUPYTER_PORT") || pythonService.jupyter_port || "8888").trim() || "8888";
+      const openRequestedRaw = isPythonInstall ? body.get("PYTHON_OPEN_JUPYTER_TAB") : body.get("PYTHON_OPEN_IN_NEW_TAB");
+      const openRequested = /^(1|true|yes|y|on)$/i.test(String(openRequestedRaw || ""));
+      if (openRequested) {
+        pendingOpenRef.current = {
+          scope: "python",
+          url: `http://${hostValue}:${portValueResolved}/lab`,
+        };
       }
     }
     try {
@@ -1791,6 +1824,7 @@ function App() {
       const pythonUrl = String(pythonService.jupyter_url || "").trim();
       const pythonPort = String(pythonService.jupyter_port || "8888").trim() || "8888";
       const pythonHost = String(pythonService.host || (selectableIps[0] || "127.0.0.1")).trim();
+      const pythonNotebookDir = String(pythonService.notebook_dir || pythonService.default_notebook_dir || "").trim();
       const installState = pythonService.installed
         ? `${pythonService.python_version || "installed"}`
         : "Not installed yet";
@@ -1808,8 +1842,9 @@ function App() {
                 ...(selectableIps.length > 0 ? [{ name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" }] : []),
                 { name: "PYTHON_INSTALL_JUPYTER", label: "Install Jupyter", type: "select", options: ["yes", "no"], defaultValue: pythonService.jupyter_installed ? "yes" : "yes", required: true },
                 { name: "PYTHON_START_JUPYTER", label: "Start Jupyter Now", type: "select", options: ["no", "yes"], defaultValue: pythonService.jupyter_running ? "yes" : "no", required: true },
+                { name: "PYTHON_OPEN_JUPYTER_TAB", label: "Open Jupyter In New Tab", type: "select", options: ["no", "yes"], defaultValue: "yes", required: true },
                 { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
-                { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: "", placeholder: "Optional. Defaults to installer workspace." },
+                { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: "Managed default notebook directory." },
               ]}
               onRun={run}
               color="#2563eb"
@@ -1822,6 +1857,7 @@ function App() {
                 <Typography variant="body2">Interpreter: {installState}</Typography>
                 <Typography variant="body2">Executable: {pythonService.python_executable || "-"}</Typography>
                 <Typography variant="body2">Scripts: {pythonService.scripts_dir || "-"}</Typography>
+                <Typography variant="body2">Notebook Directory: {pythonNotebookDir || "-"}</Typography>
                 <Typography variant="body2">Jupyter: {pythonService.jupyter_installed ? "Installed" : "Not installed"}</Typography>
                 <Typography variant="body2">Jupyter Status: {pythonService.jupyter_running ? "Running" : "Stopped"}</Typography>
                 {!!pythonUrl && <Typography variant="body2" sx={{ mt: 1 }}>URL: {pythonUrl}</Typography>}
@@ -1850,7 +1886,8 @@ function App() {
                   fields={[
                     ...(selectableIps.length > 0 ? [{ name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" }] : []),
                     { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
-                    { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: "", placeholder: "Optional. Defaults to installer workspace." },
+                    { name: "PYTHON_OPEN_IN_NEW_TAB", label: "Open In New Tab", type: "select", options: ["yes", "no"], defaultValue: "yes", required: true },
+                    { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: "Managed default notebook directory." },
                   ]}
                   onRun={run}
                   color="#7c3aed"

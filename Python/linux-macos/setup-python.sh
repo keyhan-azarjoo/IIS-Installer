@@ -18,16 +18,22 @@ ensure_python_linux() {
     return 0
   fi
   if command -v apt-get >/dev/null 2>&1; then
-    apt-get update
-    apt-get install -y "python${major_minor}" "python${major_minor}-venv" "python${major_minor}-distutils" python3-pip || apt-get install -y python3 python3-venv python3-pip
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update >&2
+    if apt-cache show "python${major_minor}" >/dev/null 2>&1; then
+      apt-get install -y "python${major_minor}" "python${major_minor}-venv" "python${major_minor}-distutils" python3-pip >&2 || \
+        apt-get install -y python3 python3-venv python3-pip >&2
+    else
+      apt-get install -y python3 python3-venv python3-pip >&2
+    fi
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y "python${major_minor}" python3-pip || dnf install -y python3 python3-pip
+    dnf install -y "python${major_minor}" python3-pip >&2 || dnf install -y python3 python3-pip >&2
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y python3 python3-pip
+    yum install -y python3 python3-pip >&2
   elif command -v zypper >/dev/null 2>&1; then
-    zypper --non-interactive install python3 python3-pip
+    zypper --non-interactive install python3 python3-pip >&2
   elif command -v pacman >/dev/null 2>&1; then
-    pacman -Sy --noconfirm python python-pip
+    pacman -Sy --noconfirm python python-pip >&2
   else
     echo "No supported Linux package manager found." >&2
     return 1
