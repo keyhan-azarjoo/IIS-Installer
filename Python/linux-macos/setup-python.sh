@@ -25,6 +25,10 @@ JUPYTER_INTERNAL_PORT=""
 
 mkdir -p "${STATE_DIR}"
 
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
 json_escape() {
   python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
 }
@@ -94,6 +98,41 @@ ensure_linux_root() {
     echo "Run this script as root or with sudo on Linux." >&2
     exit 1
   fi
+}
+
+open_firewall_port() {
+  local port="$1"
+  if has_cmd ufw; then
+    local ufw_status
+    ufw_status="$(ufw status 2>/dev/null | head -n 1 || true)"
+    if [[ "${ufw_status}" =~ [Aa]ctive ]]; then
+      ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+    fi
+  fi
+  if has_cmd firewall-cmd; then
+    if systemctl is-active --quiet firewalld 2>/dev/null; then
+      firewall-cmd --quiet --add-port="${port}/tcp" >/dev/null 2>&1 || true
+      firewall-cmd --quiet --permanent --add-port="${port}/tcp" >/dev/null 2>&1 || true
+      firewall-cmd --quiet --reload >/dev/null 2>&1 || true
+    fi
+  fi
+  if has_cmd iptables; then
+    iptables -C INPUT -p tcp --dport "${port}" -j ACCEPT >/dev/null 2>&1 || \
+      iptables -I INPUT -p tcp --dport "${port}" -j ACCEPT >/dev/null 2>&1 || true
+  fi
+}
+
+port_is_listening() {
+  local port="$1"
+  if has_cmd ss; then
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"
+    return $?
+  fi
+  if has_cmd netstat; then
+    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"
+    return $?
+  fi
+  return 1
 }
 
 ensure_tls_material() {
@@ -298,6 +337,22 @@ systemctl restart "${JUPYTER_SERVICE_NAME}"
 nginx -t >/dev/null
 systemctl enable nginx >/dev/null 2>&1 || true
 systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx
+open_firewall_port "${JUPYTER_PORT}"
+
+if ! systemctl is-active --quiet "${JUPYTER_SERVICE_NAME}"; then
+  echo "Jupyter service failed to stay active: ${JUPYTER_SERVICE_NAME}.service" >&2
+  exit 1
+fi
+
+if ! systemctl is-active --quiet nginx; then
+  echo "nginx failed to stay active." >&2
+  exit 1
+fi
+
+if ! port_is_listening "${JUPYTER_PORT}"; then
+  echo "Public HTTPS port ${JUPYTER_PORT} is not listening after nginx reload." >&2
+  exit 1
+fi
 
 write_state_files
 
