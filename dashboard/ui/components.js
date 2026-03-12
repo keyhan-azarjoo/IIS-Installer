@@ -110,6 +110,7 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
   const [s3PortStates, setS3PortStates] = React.useState(initialS3PortStates);
   const uploadInputRef = React.useRef(null);
   const formRef = React.useRef(null);
+  const s3ValidationRunRef = React.useRef(0);
   const sourcePathField = (fields || []).find((f) => f.name === "SourceValue" || f.name === "SOURCE_VALUE");
   const sourcePathKey = sourcePathField ? sourcePathField.name : "";
 
@@ -201,15 +202,15 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
     }
   };
 
-  React.useEffect(() => {
-    if (!isS3Install || s3PortFields.length === 0) return undefined;
+  const validateS3Ports = React.useCallback(async (nextValues) => {
+    if (!isS3Install || s3PortFields.length === 0) return;
     const fieldNames = s3PortFields.map((f) => f.name);
     const nextStates = {};
     const numericValues = {};
     const duplicates = new Set();
 
     for (const fieldName of fieldNames) {
-      const rawValue = String(s3PortValues[fieldName] || "").trim();
+      const rawValue = String(nextValues[fieldName] || "").trim();
       if (!rawValue) {
         nextStates[fieldName] = { checking: false, usable: false, error: true, message: "Port is required." };
         continue;
@@ -239,51 +240,50 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
 
     const fieldsToCheck = fieldNames.filter((fieldName) => nextStates[fieldName] && nextStates[fieldName].checking);
     if (fieldsToCheck.length === 0) {
-      return undefined;
+      setS3PortStates(nextStates);
+      return;
     }
 
-    let canceled = false;
-    const timer = setTimeout(async () => {
-      const resolvedStates = { ...nextStates };
-      await Promise.all(fieldsToCheck.map(async (fieldName) => {
-        const port = String(s3PortValues[fieldName] || "").trim();
-        try {
-          const fd = new FormData();
-          fd.append("port", port);
-          fd.append("protocol", "tcp");
-          const resp = await fetch("/api/system/port_check", {
-            method: "POST",
-            headers: { "X-Requested-With": "fetch" },
-            body: fd,
-          });
-          const j = await resp.json();
-          if (!j.ok) {
-            resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: j.error || "Could not validate port availability." };
-            return;
-          }
-          if (j.busy && !j.managed_owner) {
-            resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: `Port ${port} is already in use by another service.` };
-            return;
-          }
-          if (j.busy && j.managed_owner) {
-            resolvedStates[fieldName] = { checking: false, usable: true, error: false, message: `Port ${port} is already used by this S3 install and can be reused.` };
-            return;
-          }
-          resolvedStates[fieldName] = { checking: false, usable: true, error: false, message: `Port ${port} is available.` };
-        } catch (err) {
-          resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: `Port check failed: ${err}` };
+    const validationRun = ++s3ValidationRunRef.current;
+    const resolvedStates = { ...nextStates };
+    await Promise.all(fieldsToCheck.map(async (fieldName) => {
+      const port = String(nextValues[fieldName] || "").trim();
+      try {
+        const fd = new FormData();
+        fd.append("port", port);
+        fd.append("protocol", "tcp");
+        const resp = await fetch("/api/system/port_check", {
+          method: "POST",
+          headers: { "X-Requested-With": "fetch" },
+          body: fd,
+        });
+        const j = await resp.json();
+        if (!j.ok) {
+          resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: j.error || "Could not validate port availability." };
+          return;
         }
-      }));
-      if (!canceled) {
-        setS3PortStates(resolvedStates);
+        if (j.busy && !j.managed_owner) {
+          resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: `Port ${port} is already in use by another service.` };
+          return;
+        }
+        if (j.busy && j.managed_owner) {
+          resolvedStates[fieldName] = { checking: false, usable: true, error: false, message: `Port ${port} is already used by this S3 install and can be reused.` };
+          return;
+        }
+        resolvedStates[fieldName] = { checking: false, usable: true, error: false, message: `Port ${port} is available.` };
+      } catch (err) {
+        resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: `Port check failed: ${err}` };
       }
-    }, 250);
+    }));
+    if (validationRun === s3ValidationRunRef.current) {
+      setS3PortStates(resolvedStates);
+    }
+  }, [isS3Install, s3PortFields]);
 
-    return () => {
-      canceled = true;
-      clearTimeout(timer);
-    };
-  }, [isS3Install, s3PortFields, s3PortValues]);
+  React.useEffect(() => {
+    if (!isS3Install || s3PortFields.length === 0) return;
+    validateS3Ports(initialS3PortValues);
+  }, [initialS3PortValues, isS3Install, s3PortFields.length, validateS3Ports]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -297,7 +297,8 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
       return;
     }
     if (isS3Install) {
-      for (const fieldName of s3PortFieldNames) {
+      const activeS3PortFieldNames = s3PortFields.map((field) => field.name);
+      for (const fieldName of activeS3PortFieldNames) {
         const state = s3PortStates[fieldName];
         if (state && (state.checking || !state.usable)) {
           emitTerminal("Validation", `[${new Date().toLocaleTimeString()}] ${title} blocked: ${state.message || `${fieldName} is not ready.`}`);
@@ -305,7 +306,7 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
         }
       }
       const s3Ports = [];
-      for (const fieldName of s3PortFieldNames) {
+      for (const fieldName of activeS3PortFieldNames) {
         const input = formEl.querySelector(`[name="${fieldName}"]`);
         const value = String(input && input.value ? input.value : "").trim();
         if (!value) {
@@ -364,7 +365,11 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
                   key={f.name}
                   field={f}
                   value={s3PortValues[f.name] ?? ""}
-                  onChange={(ev) => setS3PortValues((prev) => ({ ...prev, [f.name]: ev.target.value }))}
+                  onChange={(ev) => {
+                    const nextValues = { ...s3PortValues, [f.name]: ev.target.value };
+                    setS3PortValues(nextValues);
+                    validateS3Ports(nextValues);
+                  }}
                   error={fieldState.error}
                   helperText={fieldState.message || " "}
                   formHelperTextProps={{
@@ -394,7 +399,8 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
             type="submit"
             variant="contained"
             fullWidth
-            disabled={uploading || (isS3Install && s3PortFieldNames.some((fieldName) => {
+            disabled={uploading || (isS3Install && s3PortFields.some((field) => {
+              const fieldName = field.name;
               const state = s3PortStates[fieldName];
               return state && (state.checking || !state.usable);
             }))}

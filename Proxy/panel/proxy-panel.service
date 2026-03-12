@@ -1,0 +1,18 @@
+[Unit]
+Description=Proxy Management Panel
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/proxy-panel/proxy-panel.py
+WorkingDirectory=/opt/proxy-panel
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxy Panel - Login</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-page">
+    <div class="lang-switch-float">
+        <button id="langToggle" onclick="toggleLang()">فارسی</button>
+    </div>
+
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                </div>
+                <h1 data-i18n="login_title">Proxy Management Panel</h1>
+                <p data-i18n="login_subtitle">Sign in with your server credentials</p>
+            </div>
+
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="username" data-i18n="username">Username</label>
+                    <input type="text" id="username" name="username" required
+                           autocomplete="username" autofocus
+                           placeholder="">
+                </div>
+                <div class="form-group">
+                    <label for="password" data-i18n="password">Password</label>
+                    <input type="password" id="password" name="password" required
+                           autocomplete="current-password"
+                           placeholder="">
+                </div>
+
+                <div id="loginError" class="error-message" style="display:none"></div>
+
+                <button type="submit" class="btn btn-primary btn-full" id="loginBtn">
+                    <span data-i18n="sign_in">Sign In</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const translations = {
+            en: {
+                login_title: "Proxy Management Panel",
+                login_subtitle: "Sign in with your server credentials",
+                username: "Username",
+                password: "Password",
+                sign_in: "Sign In",
+                signing_in: "Signing in...",
+                error_credentials: "Invalid username or password",
+                error_locked: "Too many failed attempts. Try again later.",
+                error_network: "Network error. Please try again.",
+            },
+            fa: {
+                login_title: "پنل مدیریت پروکسی",
+                login_subtitle: "با اطلاعات کاربری سرور وارد شوید",
+                username: "نام کاربری",
+                password: "رمز عبور",
+                sign_in: "ورود",
+                signing_in: "در حال ورود...",
+                error_credentials: "نام کاربری یا رمز عبور اشتباه است",
+                error_locked: "تعداد تلاش‌ها بیش از حد مجاز. لطفاً بعداً تلاش کنید.",
+                error_network: "خطای شبکه. لطفاً دوباره تلاش کنید.",
+            }
+        };
+
+        let currentLang = localStorage.getItem("lang") || "en";
+
+        function applyLang(lang) {
+            currentLang = lang;
+            localStorage.setItem("lang", lang);
+            document.documentElement.lang = lang;
+            document.documentElement.dir = lang === "fa" ? "rtl" : "ltr";
+            document.getElementById("langToggle").textContent = lang === "en" ? "فارسی" : "English";
+
+            document.querySelectorAll("[data-i18n]").forEach(el => {
+                const key = el.getAttribute("data-i18n");
+                if (translations[lang][key]) {
+                    el.textContent = translations[lang][key];
+                }
+            });
+        }
+
+        function toggleLang() {
+            applyLang(currentLang === "en" ? "fa" : "en");
+        }
+
+        function t(key) {
+            return translations[currentLang][key] || key;
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById("loginBtn");
+            const errorDiv = document.getElementById("loginError");
+            const username = document.getElementById("username").value.trim();
+            const password = document.getElementById("password").value;
+
+            btn.disabled = true;
+            btn.querySelector("span").textContent = t("signing_in");
+            errorDiv.style.display = "none";
+
+            try {
+                const resp = await fetch("/api/login", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({username, password})
+                });
+
+                const data = await resp.json();
+
+                if (resp.ok && data.success) {
+                    window.location.href = "/dashboard";
+                } else if (resp.status === 429) {
+                    errorDiv.textContent = t("error_locked");
+                    errorDiv.style.display = "block";
+                } else {
+                    errorDiv.textContent = t("error_credentials");
+                    errorDiv.style.display = "block";
+                }
+            } catch (err) {
+                errorDiv.textContent = t("error_network");
+                errorDiv.style.display = "block";
+            } finally {
+                btn.disabled = false;
+                btn.querySelector("span").textContent = t("sign_in");
+            }
+        }
+
+        // Apply saved language
+        applyLang(currentLang);
+    </script>
+</body>
+</html>

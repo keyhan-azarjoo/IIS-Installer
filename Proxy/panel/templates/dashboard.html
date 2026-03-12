@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxy Panel - Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dashboard-page">
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h2>Proxy Panel</h2>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-section="overview" onclick="showSection('overview', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                <span data-i18n="nav_overview">Overview</span>
+            </a>
+            <a href="#" class="nav-item" data-section="users" onclick="showSection('users', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span data-i18n="nav_users">Users</span>
+            </a>
+            <a href="#" class="nav-item" data-section="bandwidth" onclick="showSection('bandwidth', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                <span data-i18n="nav_bandwidth">Bandwidth</span>
+            </a>
+            <a href="#" class="nav-item" data-section="connections" onclick="showSection('connections', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                <span data-i18n="nav_connections">Connections</span>
+            </a>
+            <a href="#" class="nav-item" data-section="service" onclick="showSection('service', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span data-i18n="nav_service">Service</span>
+            </a>
+            <a href="#" class="nav-item" data-section="settings" onclick="showSection('settings', this)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+                <span data-i18n="nav_settings">Settings</span>
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <button class="nav-item" onclick="toggleLang()" id="langBtn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                <span id="langToggle">فارسی</span>
+            </button>
+            <button class="nav-item logout-btn" onclick="handleLogout()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                <span data-i18n="logout">Logout</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Mobile header -->
+    <header class="mobile-header">
+        <button class="menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <h2>Proxy Panel</h2>
+    </header>
+
+    <!-- Main content -->
+    <main class="main-content">
+
+        <!-- Overview Section -->
+        <section id="section-overview" class="section active">
+            <h1 data-i18n="overview_title">System Overview</h1>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="server_ip">Server IP</div>
+                    <div class="stat-value" id="stat-ip">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="uptime">Uptime</div>
+                    <div class="stat-value" id="stat-uptime">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="layer">Layer</div>
+                    <div class="stat-value" id="stat-layer">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="os_label">OS</div>
+                    <div class="stat-value" id="stat-os">-</div>
+                </div>
+            </div>
+
+            <div class="stats-grid cols-3">
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="cpu_usage">CPU Usage</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="cpu-bar" style="width:0%"></div>
+                    </div>
+                    <div class="stat-value" id="stat-cpu">0%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="memory_usage">Memory</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="mem-bar" style="width:0%"></div>
+                    </div>
+                    <div class="stat-value" id="stat-mem">0%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="disk_usage">Disk</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="disk-bar" style="width:0%"></div>
+                    </div>
+                    <div class="stat-value" id="stat-disk">0%</div>
+                </div>
+            </div>
+
+            <h2 data-i18n="service_status">Service Status</h2>
+            <div id="service-status-list" class="service-list"></div>
+        </section>
+
+        <!-- Users Section -->
+        <section id="section-users" class="section">
+            <div class="section-header">
+                <h1 data-i18n="users_title">User Management</h1>
+                <div class="bandwidth-controls">
+                    <button class="btn btn-secondary btn-sm" onclick="loadUsers()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        <span data-i18n="refresh">Refresh</span>
+                    </button>
+                    <button class="btn btn-primary" onclick="showAddUserModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        <span data-i18n="add_user">Add User</span>
+                    </button>
+                </div>
+            </div>
+            <div class="bandwidth-refresh-note" data-i18n="auto_refresh_note_5s">Auto refresh every 5s</div>
+
+            <div class="user-count">
+                <span data-i18n="total_users">Total users</span>: <strong id="user-count">0</strong>
+            </div>
+
+            <div class="table-container">
+                <table class="data-table" id="users-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="th_username">Username</th>
+                            <th data-i18n="th_type">Type</th>
+                            <th data-i18n="th_status">Status</th>
+                            <th data-i18n="th_created">Created</th>
+                            <th data-i18n="th_password">Password</th>
+                            <th data-i18n="th_usage">Usage</th>
+                            <th data-i18n="th_actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-tbody">
+                    </tbody>
+                </table>
+            </div>
+            <div id="no-users" class="empty-state" style="display:none">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                <p data-i18n="no_users">No users found. Add your first user.</p>
+            </div>
+        </section>
+
+        <!-- Bandwidth Section -->
+        <section id="section-bandwidth" class="section">
+            <h1 data-i18n="bandwidth_title">Bandwidth Usage</h1>
+
+            <h2 data-i18n="system_bandwidth">System Bandwidth</h2>
+            <div class="stats-grid cols-3">
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="today">Today</div>
+                    <div class="stat-value" id="bw-today">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="this_month">This Month</div>
+                    <div class="stat-value" id="bw-month">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label" data-i18n="all_time">All Time</div>
+                    <div class="stat-value" id="bw-total">-</div>
+                </div>
+            </div>
+
+            <div class="section-header">
+                <h2 data-i18n="per_user_bandwidth">Per-User Bandwidth</h2>
+                <div class="bandwidth-controls">
+                    <div class="period-selector" id="periodSelector">
+                        <button class="btn btn-sm period-btn active" onclick="setBandwidthPeriod('today', this)" data-i18n="today">Today</button>
+                        <button class="btn btn-sm period-btn" onclick="setBandwidthPeriod('week', this)" data-i18n="this_week">This Week</button>
+                        <button class="btn btn-sm period-btn" onclick="setBandwidthPeriod('month', this)" data-i18n="this_month">This Month</button>
+                        <button class="btn btn-sm period-btn" onclick="setBandwidthPeriod('all', this)" data-i18n="all_time">All Time</button>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="refreshBandwidth()" id="bandwidthRefreshBtn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        <span data-i18n="refresh">Refresh</span>
+                    </button>
+                </div>
+            </div>
+            <div class="bandwidth-refresh-note" data-i18n="auto_refresh_note">Auto refresh every 10s</div>
+            <div id="user-bandwidth-chart" class="chart-container"></div>
+            <div class="table-container">
+                <table class="data-table" id="bandwidth-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="th_username">Username</th>
+                            <th data-i18n="upload_label">Upload</th>
+                            <th data-i18n="download_label">Download</th>
+                            <th data-i18n="total_label">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bandwidth-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Connections Section -->
+        <section id="section-connections" class="section">
+            <div class="section-header">
+                <h1 data-i18n="connections_title">Active Connections</h1>
+                <button class="btn btn-secondary" onclick="loadConnections()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    <span data-i18n="refresh">Refresh</span>
+                </button>
+            </div>
+            <div class="bandwidth-refresh-note" data-i18n="auto_refresh_note_5s">Auto refresh every 5s</div>
+            <div class="table-container">
+                <table class="data-table" id="connections-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="th_remote">Remote Address</th>
+                            <th data-i18n="th_local">Local Port</th>
+                            <th data-i18n="th_state">State</th>
+                            <th data-i18n="th_process">Process</th>
+                        </tr>
+                    </thead>
+                    <tbody id="connections-tbody">
+                    </tbody>
+                </table>
+            </div>
+            <div id="conn-count" class="user-count"></div>
+        </section>
+
+        <!-- Service Section -->
+        <section id="section-service" class="section">
+            <h1 data-i18n="service_title">Service Control</h1>
+            <div class="service-controls">
+                <button class="btn btn-warning" onclick="restartService()" id="restartBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    <span data-i18n="restart_service">Restart Service</span>
+                </button>
+            </div>
+
+            <h2 data-i18n="service_logs">Service Logs</h2>
+            <div class="log-actions">
+                <button class="btn btn-secondary btn-sm" onclick="loadLogs()">
+                    <span data-i18n="load_logs">Load Logs</span>
+                </button>
+            </div>
+            <pre class="log-viewer" id="log-viewer" data-i18n="click_load_logs">Click "Load Logs" to view service logs...</pre>
+        </section>
+
+        <!-- Settings Section -->
+        <section id="section-settings" class="section">
+            <h1 data-i18n="settings_title">Settings</h1>
+
+            <h2 data-i18n="layer_switching">Layer Switching</h2>
+            <p class="section-description" data-i18n="layer_switching_desc">
+                Switch between proxy layers. This will uninstall the current layer and install the selected one.
+            </p>
+
+            <div class="layer-cards" id="layerCards">
+                <!-- Populated by loadLayers() -->
+            </div>
+
+            <div id="layerSwitchStatus" class="switch-status" style="display:none">
+                <div class="switch-status-header">
+                    <h3 data-i18n="switching_layer">Switching Layer...</h3>
+                    <span id="switchPhaseBadge" class="phase-badge"></span>
+                </div>
+                <div class="progress-bar progress-bar-lg">
+                    <div class="progress-fill" id="switchProgressBar" style="width:0%"></div>
+                </div>
+                <div id="switchProgressText" class="switch-progress-text">0%</div>
+                <pre class="switch-log" id="switchLog"></pre>
+                <div id="switchError" class="error-message" style="display:none"></div>
+                <div id="switchDone" class="switch-done" style="display:none">
+                    <span data-i18n="switch_complete">Layer switch complete!</span>
+                </div>
+                <div id="switchBackBtn" style="display:none;margin-top:16px;text-align:center">
+                    <button class="btn btn-primary" onclick="resetSwitchAndShowLayers()">
+                        <span data-i18n="switch_back_settings">Back to Settings</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Add User Modal -->
+    <div class="modal-overlay" id="addUserModal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 data-i18n="add_new_user">Add New User</h2>
+                <button class="modal-close" onclick="closeModal('addUserModal')">&times;</button>
+            </div>
+            <form id="addUserForm" onsubmit="handleAddUser(event)">
+                <div class="form-group">
+                    <label for="newUsername" data-i18n="username">Username</label>
+                    <input type="text" id="newUsername" required pattern="[a-zA-Z0-9_-]{3,32}"
+                           placeholder="3-32 characters">
+                    <small data-i18n="username_hint">Alphanumeric, dash, underscore. 3-32 characters.</small>
+                </div>
+                <div class="form-group" id="passwordGroup">
+                    <label for="newPassword" data-i18n="password">Password</label>
+                    <div class="input-with-icon">
+                        <input type="password" id="newPassword" minlength="8"
+                               placeholder="Minimum 8 characters">
+                        <button class="icon-btn" type="button" onclick="toggleAddUserPassword()" title="Show password" aria-label="Show password">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.77 21.77 0 0 1 5.17-6.62"></path>
+                                <path d="M1 1l22 22"></path>
+                                <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.86 21.86 0 0 1-3.2 4.83"></path>
+                                <path d="M14.12 14.12a3 3 0 0 1-4.24-4.24"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <small data-i18n="password_hint">Minimum 8 characters.</small>
+                </div>
+                <div id="addUserError" class="error-message" style="display:none"></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('addUserModal')">
+                        <span data-i18n="cancel">Cancel</span>
+                    </button>
+                    <button type="submit" class="btn btn-primary" id="addUserBtn">
+                        <span data-i18n="add_user">Add User</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div class="modal-overlay" id="changePasswordModal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 data-i18n="change_password">Change Password</h2>
+                <button class="modal-close" onclick="closeModal('changePasswordModal')">&times;</button>
+            </div>
+            <form id="changePasswordForm" onsubmit="handleChangePassword(event)">
+                <div class="form-group">
+                    <label for="changePasswordUsername" data-i18n="username">Username</label>
+                    <input type="text" id="changePasswordUsername" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="changePasswordInput" data-i18n="new_password">New Password</label>
+                    <input type="password" id="changePasswordInput" minlength="8"
+                           placeholder="Minimum 8 characters" required>
+                    <small data-i18n="password_hint">Minimum 8 characters.</small>
+                </div>
+                <div id="changePasswordError" class="error-message" style="display:none"></div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('changePasswordModal')">
+                        <span data-i18n="cancel">Cancel</span>
+                    </button>
+                    <button type="submit" class="btn btn-primary" id="changePasswordBtn">
+                        <span data-i18n="update_password">Update Password</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- User Config Modal -->
+    <div class="modal-overlay" id="configModal" style="display:none">
+        <div class="modal modal-wide">
+            <div class="modal-header">
+                <h2 data-i18n="connection_config">Connection Config</h2>
+                <button class="modal-close" onclick="closeModal('configModal')">&times;</button>
+            </div>
+            <div id="configContent">
+                <div class="config-section">
+                    <h3 data-i18n="quick_connect">Quick Connect String</h3>
+                    <div class="copy-box">
+                        <code id="configUri"></code>
+                        <button class="btn btn-sm btn-secondary" onclick="copyText('configUri')" data-i18n="copy">Copy</button>
+                    </div>
+                </div>
+                <div class="config-section">
+                    <h3>iOS (NPV Tunnel)</h3>
+                    <pre id="configIos" class="config-json"></pre>
+                    <button class="btn btn-sm btn-secondary" onclick="copyText('configIos')" data-i18n="copy_config">Copy Config</button>
+                </div>
+                <div class="config-section">
+                    <h3>Android (NetMod) / Local SOCKS</h3>
+                    <pre id="configAndroid" class="config-json"></pre>
+                    <button class="btn btn-sm btn-secondary" onclick="copyText('configAndroid')" data-i18n="copy_config">Copy Config</button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('configModal')">
+                    <span data-i18n="close">Close</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay" id="deleteModal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 data-i18n="confirm_delete">Confirm Delete</h2>
+                <button class="modal-close" onclick="closeModal('deleteModal')">&times;</button>
+            </div>
+            <p><span data-i18n="delete_confirm_text">Are you sure you want to delete user</span> <strong id="deleteUsername"></strong>?</p>
+            <div id="deleteError" class="error-message" style="display:none"></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('deleteModal')">
+                    <span data-i18n="cancel">Cancel</span>
+                </button>
+                <button class="btn btn-danger" onclick="confirmDelete()" id="deleteBtn">
+                    <span data-i18n="delete">Delete</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Layer Switch Confirmation Modal -->
+    <div class="modal-overlay" id="switchModal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 data-i18n="confirm_switch">Confirm Layer Switch</h2>
+                <button class="modal-close" onclick="closeModal('switchModal')">&times;</button>
+            </div>
+            <div class="switch-warning">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <p data-i18n="switch_warning_text">
+                    This will uninstall the current proxy layer and install a new one.
+                    All existing users will be preserved but the service will be interrupted during the switch.
+                </p>
+            </div>
+            <div class="switch-target-info">
+                <div><strong data-i18n="current_layer_label">Current:</strong> <span id="switchCurrentLayer"></span></div>
+                <div><strong data-i18n="new_layer_label">New:</strong> <span id="switchTargetLayer"></span></div>
+            </div>
+            <!-- Domain fields (shown/hidden dynamically) -->
+            <div id="switchDomainFields" style="display:none">
+                <div class="form-group">
+                    <label for="switchDomain" data-i18n="domain_label">Domain (FQDN)</label>
+                    <input type="text" id="switchDomain" placeholder="example.com">
+                    <small data-i18n="domain_hint">Your domain must point to this server's IP</small>
+                </div>
+                <div class="form-group">
+                    <label for="switchEmail" data-i18n="email_label">Email (for Let's Encrypt)</label>
+                    <input type="email" id="switchEmail" placeholder="you@example.com">
+                </div>
+                <div id="switchDuckdnsField" style="display:none" class="form-group">
+                    <label for="switchDuckdns" data-i18n="duckdns_token_label">DuckDNS Token (optional)</label>
+                    <input type="text" id="switchDuckdns" placeholder="Optional">
+                    <small data-i18n="duckdns_hint">Only needed for .duckdns.org domains</small>
+                </div>
+            </div>
+            <div id="switchModalError" class="error-message" style="display:none"></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('switchModal')">
+                    <span data-i18n="cancel">Cancel</span>
+                </button>
+                <button class="btn btn-warning" onclick="confirmLayerSwitch()" id="switchConfirmBtn">
+                    <span data-i18n="activate_layer">Activate Layer</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -6,7 +6,6 @@ warn() { printf '[WARN] %s\n' "$*" >&2; }
 err() { printf '[ERROR] %s\n' "$*" >&2; }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_DIR="${ROOT_DIR}/source"
 PANEL_DIR="/opt/proxy-panel"
 LOCK_FILE="/var/lock/server-installer-proxy.lock"
 TARGET_LAYER="${PROXY_LAYER:-layer3-basic}"
@@ -35,12 +34,12 @@ acquire_lock() {
   fi
 }
 
-validate_source() {
-  if [ ! -d "$SOURCE_DIR/panel" ]; then
-    err "Proxy source is missing at $SOURCE_DIR."
+validate_layout() {
+  if [ ! -d "$ROOT_DIR/panel" ] || [ ! -d "$ROOT_DIR/common" ] || [ ! -d "$ROOT_DIR/layers" ]; then
+    err "Proxy layout is incomplete at $ROOT_DIR."
     exit 1
   fi
-  if [ ! -f "$SOURCE_DIR/$TARGET_LAYER/install.sh" ]; then
+  if [ ! -f "$ROOT_DIR/layers/$TARGET_LAYER/install.sh" ]; then
     err "Unknown proxy layer: $TARGET_LAYER"
     exit 1
   fi
@@ -54,13 +53,18 @@ sync_repo() {
   mkdir -p "$PANEL_DIR"
   rm -rf "$PANEL_DIR/repo"
   mkdir -p "$PANEL_DIR/repo"
-  cp -a "$SOURCE_DIR/." "$PANEL_DIR/repo/"
+  cp -a "$ROOT_DIR/common" "$PANEL_DIR/repo/"
+  cp -a "$ROOT_DIR/layers" "$PANEL_DIR/repo/"
+  cp -a "$ROOT_DIR/panel" "$PANEL_DIR/repo/"
+  if [ -d "$ROOT_DIR/docs" ]; then
+    cp -a "$ROOT_DIR/docs" "$PANEL_DIR/repo/"
+  fi
 }
 
 maybe_uninstall_existing() {
-  if [ -f "$SOURCE_DIR/common/uninstall.sh" ] && { [ -f "$PANEL_DIR/panel.conf" ] || systemctl list-unit-files 2>/dev/null | grep -qE '^(proxy-panel|xray|stunnel4|nginx)\.service'; }; then
+  if [ -f "$ROOT_DIR/common/uninstall.sh" ] && { [ -f "$PANEL_DIR/panel.conf" ] || systemctl list-unit-files 2>/dev/null | grep -qE '^(proxy-panel|xray|stunnel4|nginx)\.service'; }; then
     info "Cleaning existing proxy stack before reinstall..."
-    bash "$SOURCE_DIR/common/uninstall.sh" || warn "Existing proxy cleanup reported an error; continuing."
+    bash "$ROOT_DIR/common/uninstall.sh" || warn "Existing proxy cleanup reported an error; continuing."
   fi
 }
 
@@ -81,16 +85,17 @@ build_install_input() {
 
 run_layer_install() {
   info "Installing proxy layer $TARGET_LAYER..."
+  export PROXY_SKIP_PANEL_INSTALL=1
   if [[ "$TARGET_LAYER" == layer7-real-domain || "$TARGET_LAYER" == layer7-iran-optimized ]]; then
-    build_install_input | bash "$SOURCE_DIR/$TARGET_LAYER/install.sh"
+    build_install_input | bash "$ROOT_DIR/layers/$TARGET_LAYER/install.sh"
   else
-    bash "$SOURCE_DIR/$TARGET_LAYER/install.sh"
+    bash "$ROOT_DIR/layers/$TARGET_LAYER/install.sh"
   fi
 }
 
 run_panel_install() {
   info "Installing proxy management panel..."
-  PROXY_REPO_ROOT="$PANEL_DIR/repo" PROXY_PANEL_PORT="$PANEL_PORT_VALUE" bash "$SOURCE_DIR/panel/install-panel.sh" "--layer=$TARGET_LAYER" "--repo-root=$PANEL_DIR/repo" "--port=$PANEL_PORT_VALUE"
+  PROXY_REPO_ROOT="$PANEL_DIR/repo" PROXY_PANEL_PORT="$PANEL_PORT_VALUE" bash "$ROOT_DIR/panel/install-panel.sh" "--layer=$TARGET_LAYER" "--repo-root=$PANEL_DIR/repo" "--port=$PANEL_PORT_VALUE"
 }
 
 wait_for_service() {
@@ -112,7 +117,7 @@ get_host_ip() {
 main() {
   require_root
   acquire_lock
-  validate_source
+  validate_layout
   sync_repo
   maybe_uninstall_existing
   run_layer_install
