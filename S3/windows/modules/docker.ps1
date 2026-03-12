@@ -574,7 +574,7 @@ function Resolve-RequiredEnvPort([string]$envName, [string]$label) {
     Err "$envName must be between 1 and 65535."
     exit 1
   }
-  if (-not (Port-Free $port)) {
+  if ((-not (Port-Free $port)) -and (-not (Test-LocalS3ManagedPort $port))) {
     Err "Requested $label port $port is already in use."
     exit 1
   }

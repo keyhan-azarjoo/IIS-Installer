@@ -85,6 +85,27 @@ PROXY_FILES = [
     "Proxy/windows/setup-proxy.ps1",
 ]
 
+
+def _iter_proxy_sync_files():
+    base = ROOT / "Proxy"
+    if not base.exists():
+        return list(PROXY_FILES)
+    files = []
+    for path in base.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        if "/.git/" in rel or rel.endswith("/.git") or "/__pycache__/" in rel or rel.endswith(".pyc"):
+            continue
+        files.append(rel)
+    for rel in PROXY_FILES:
+        if rel not in files:
+            files.append(rel)
+    return files
+
+
+PROXY_SYNC_FILES = _iter_proxy_sync_files()
+
 SESSIONS = set()
 JOBS = {}
 JOBS_LOCK = threading.Lock()
@@ -750,7 +771,10 @@ def get_port_usage(port, protocol="tcp"):
     owner_hint = ""
     if proto == "tcp" and len(listeners) > 0:
         try:
-            if os.name == "nt" and _windows_localmongo_owns_port(p):
+            if os.name == "nt" and _windows_locals3_owns_port(p):
+                managed_owner = True
+                owner_hint = "locals3-managed"
+            elif os.name == "nt" and _windows_localmongo_owns_port(p):
                 managed_owner = True
                 owner_hint = "localmongo-managed"
             elif _linux_locals3_owns_port(p):
@@ -1401,9 +1425,10 @@ def get_proxy_info():
     if os.name == "nt":
         state = _read_json_file(PROXY_WINDOWS_STATE)
         distro = str(state.get("distro") or os.environ.get("PROXY_WSL_DISTRO", "Ubuntu")).strip()
+        state_port = str(state.get("port") or "8443").strip()
         info["distro"] = distro
         info["layer"] = str(state.get("layer") or "").strip()
-        info["panel_url"] = str(state.get("url") or "https://127.0.0.1:8443").strip()
+        info["panel_url"] = str(state.get("url") or f"https://127.0.0.1:{state_port}").strip()
         rc, out = run_capture(["wsl.exe", "-d", distro, "--user", "root", "--", "bash", "-lc", "if [ -f /opt/proxy-panel/panel.conf ]; then cat /opt/proxy-panel/panel.conf; fi"], timeout=20)
         if rc == 0 and out.strip():
             try:
@@ -2269,6 +2294,82 @@ def _windows_locals3_iis_owns_port(port):
         return False
 
 
+def _windows_locals3_docker_owns_port(port):
+    if os.name != "nt" or not command_exists("docker"):
+        return False
+    try:
+        target = int(str(port).strip())
+    except Exception:
+        return False
+    for name in ("minio", "nginx", "console"):
+        details = _get_docker_container_details(name)
+        labels = details.get("labels", {}) or {}
+        if labels.get("com.locals3.installer") != "true" and not _is_locals3_name(name):
+            continue
+        for item in details.get("ports", []):
+            if int(item.get("port", 0)) == target:
+                return True
+    return False
+
+
+def _windows_locals3_native_owns_port(port):
+    if os.name != "nt":
+        return False
+    try:
+        target = int(str(port).strip())
+    except Exception:
+        return False
+    ps = rf"""
+$ErrorActionPreference='SilentlyContinue'
+$conns = Get-NetTCPConnection -State Listen -LocalPort {target} -ErrorAction SilentlyContinue
+foreach($conn in $conns) {{
+  $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+  if(-not $proc) {{ continue }}
+  $procName = [string]$proc.ProcessName
+  $procPath = ''
+  try {{ $procPath = [string]$proc.Path }} catch {{}}
+  $cmdLine = ''
+  try {{
+    $cmdLine = [string]((Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)" -ErrorAction SilentlyContinue).CommandLine)
+  }} catch {{}}
+  $isManaged = $false
+  if($procName -ieq 'minio' -and (($procPath -match 'LocalS3') -or ($cmdLine -match 'LocalS3|run-minio\.cmd'))) {{
+    $isManaged = $true
+  }}
+  if($isManaged) {{
+    [PSCustomObject]@{{ managed = $true }} | ConvertTo-Json -Compress
+    exit 0
+  }}
+}}
+"""
+    rc, out = run_capture(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            ps,
+        ],
+        timeout=20,
+    )
+    if rc != 0 or not out:
+        return False
+    try:
+        data = json.loads(out)
+        return bool(data.get("managed"))
+    except Exception:
+        return False
+
+
+def _windows_locals3_owns_port(port):
+    return (
+        _windows_locals3_iis_owns_port(port)
+        or _windows_locals3_docker_owns_port(port)
+        or _windows_locals3_native_owns_port(port)
+    )
+
+
 def _windows_localmongo_owns_port(port):
     if os.name != "nt":
         return False
@@ -2721,17 +2822,30 @@ def run_unix_mongo_installer(form=None, live_cb=None):
 def run_linux_proxy_installer(form=None, live_cb=None):
     if os.name == "nt":
         return 1, "Linux proxy installer can only run on Linux/macOS hosts."
+    if live_cb:
+        live_cb("[INFO] Checking and updating Proxy installer files...\n")
+    ensure_repo_files(PROXY_SYNC_FILES, live_cb=live_cb, refresh=True)
     form = form or {}
     env = os.environ.copy()
-    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN"):
+    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT"):
         value = (form.get(key, [""])[0] or "").strip()
         if value:
             env[key] = value
+    panel_port = env.get("PROXY_PANEL_PORT", "").strip()
+    if panel_port:
+        if not panel_port.isdigit():
+            return 1, "PROXY_PANEL_PORT must be numeric."
+        if is_local_tcp_port_listening(panel_port):
+            usage = get_port_usage(panel_port, "tcp")
+            if not usage.get("managed_owner"):
+                return 1, f"Requested proxy dashboard port {panel_port} is already in use. Choose another port."
     env["PROXY_REPO_ROOT"] = str(PROXY_SOURCE_ROOT)
+    if not PROXY_LINUX_INSTALLER.exists():
+        return 1, f"Proxy installer is missing: {PROXY_LINUX_INSTALLER}"
     cmd = ["bash", str(PROXY_LINUX_INSTALLER)]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         cmd = ["sudo", "env"]
-        for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_REPO_ROOT"):
+        for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT", "PROXY_REPO_ROOT"):
             value = env.get(key, "").strip()
             if value:
                 cmd.append(f"{key}={value}")
@@ -2744,12 +2858,23 @@ def run_windows_proxy_installer(form=None, live_cb=None):
         return 1, "Windows proxy installer can only run on Windows hosts."
     if not is_windows_admin():
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    if live_cb:
+        live_cb("[INFO] Checking and updating Proxy installer files...\n")
+    ensure_repo_files(PROXY_SYNC_FILES, live_cb=live_cb, refresh=True)
     form = form or {}
     env = os.environ.copy()
-    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_WSL_DISTRO"):
+    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_WSL_DISTRO", "PROXY_PANEL_PORT"):
         value = (form.get(key, [""])[0] or "").strip()
         if value:
             env[key] = value
+    panel_port = env.get("PROXY_PANEL_PORT", "").strip()
+    if panel_port:
+        if not panel_port.isdigit():
+            return 1, "PROXY_PANEL_PORT must be numeric."
+        if is_local_tcp_port_listening(panel_port):
+            usage = get_port_usage(panel_port, "tcp")
+            if not usage.get("managed_owner"):
+                return 1, f"Requested proxy dashboard port {panel_port} is already in use. Choose another port."
     return run_process(
         ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(PROXY_WINDOWS_INSTALLER)],
         env=env,

@@ -39,6 +39,16 @@ $layer = Get-EnvOrDefault "PROXY_LAYER" "layer3-basic"
 $domain = Get-EnvOrDefault "PROXY_DOMAIN" ""
 $email = Get-EnvOrDefault "PROXY_EMAIL" ""
 $duckdns = Get-EnvOrDefault "PROXY_DUCKDNS_TOKEN" ""
+$panelPort = Get-EnvOrDefault "PROXY_PANEL_PORT" "8443"
+
+if ($panelPort -notmatch '^\d+$') {
+  Fail "PROXY_PANEL_PORT must be numeric."
+}
+
+$panelPortNumber = [int]$panelPort
+if ($panelPortNumber -lt 1 -or $panelPortNumber -gt 65535) {
+  Fail "PROXY_PANEL_PORT must be between 1 and 65535."
+}
 
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
   Fail "WSL is not available on this machine."
@@ -83,6 +93,7 @@ export PROXY_LAYER='$layer'
 export PROXY_DOMAIN='$domain'
 export PROXY_EMAIL='$email'
 export PROXY_DUCKDNS_TOKEN='$duckdns'
+export PROXY_PANEL_PORT='$panelPort'
 bash '$linuxInstallerWsl'
 "@
 & wsl.exe -d $distro --user root -- bash -lc $installCommand
@@ -119,9 +130,10 @@ New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 @{
   distro = $distro
   layer = $layer
-  url = "https://127.0.0.1:8443"
+  url = "https://127.0.0.1:$panelPort"
+  port = $panelPort
   installed_at = (Get-Date).ToString("s")
 } | ConvertTo-Json | Set-Content -Path $stateFile -Encoding UTF8
 
 Info "Proxy installation completed."
-Info "Proxy dashboard: https://127.0.0.1:8443"
+Info "Proxy dashboard: https://127.0.0.1:$panelPort"

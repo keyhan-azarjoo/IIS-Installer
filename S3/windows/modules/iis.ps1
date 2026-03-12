@@ -464,7 +464,7 @@ function Resolve-HttpsPortForIIS {
       Err "LOCALS3_HTTPS_PORT must be between 1 and 65535."
       exit 1
     }
-    if (-not (Port-Free $port)) {
+    if ((-not (Port-Free $port)) -and (-not (Test-LocalS3ManagedPort $port))) {
       Err "Requested HTTPS port $port is already in use."
       exit 1
     }
@@ -509,7 +509,7 @@ function Resolve-EnvPort {
     Err "$envName must be between 1 and 65535."
     exit 1
   }
-  if (-not (Port-Free $port)) {
+  if ((-not (Port-Free $port)) -and (-not (Test-LocalS3ManagedPort $port))) {
     Err "Requested $label port $port is already in use."
     exit 1
   }
@@ -542,7 +542,7 @@ function Resolve-RequiredConfiguredPort {
     Err "$envName must be between 1 and 65535."
     exit 1
   }
-  if (-not (Port-Free $port)) {
+  if ((-not (Port-Free $port)) -and (-not (Test-LocalS3ManagedPort $port))) {
     Err "Requested $label port $port is already in use."
     exit 1
   }
@@ -572,6 +572,7 @@ function Test-IISBindingPortAvailable([int]$port, [string]$protocol, [string]$ex
     foreach ($binding in $bindings) {
       $siteName = $binding.ItemXPath -replace '^.*/sites/site\[@name=''([^'']+)''\].*$', '$1'
       if ($excludeSite -and $siteName -eq $excludeSite) { continue }
+      if ($siteName -in @("LocalS3", "LocalS3-IIS", "LocalS3-Console")) { continue }
       $parts = $binding.bindingInformation.Split(':')
       if ($parts.Count -lt 2) { continue }
       $bindingPort = 0

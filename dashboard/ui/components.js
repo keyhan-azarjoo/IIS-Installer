@@ -2,9 +2,10 @@ const {
   Box, Button, Card, CardContent, FormControl, InputAdornment, InputLabel, MenuItem, Select, TextField, Typography
 } = MaterialUI;
 
-function Field({ field }) {
+function Field({ field, value, onChange, error, helperText, formHelperTextProps }) {
   const isPassword = field.type === "password";
   const [showPassword, setShowPassword] = React.useState(false);
+  const controlled = typeof value !== "undefined";
   if (field.type === "folder") {
     return (
       <Box sx={{ mb: 1.5 }}>
@@ -29,7 +30,14 @@ function Field({ field }) {
     return (
       <FormControl fullWidth size="small" required={!!field.required} sx={{ mb: 1.5 }}>
         <InputLabel>{field.label}</InputLabel>
-        <Select name={field.name} defaultValue={field.defaultValue || ""} label={field.label} required={!!field.required}>
+        <Select
+          name={field.name}
+          {...(controlled ? { value: value ?? "" } : { defaultValue: field.defaultValue || "" })}
+          label={field.label}
+          required={!!field.required}
+          onChange={onChange}
+          error={!!error}
+        >
           {field.required && !field.defaultValue && (
             <MenuItem value="" disabled>{field.placeholder || `Select ${field.label}`}</MenuItem>
           )}
@@ -47,9 +55,13 @@ function Field({ field }) {
       type={isPassword && showPassword ? "text" : (isPassword ? "password" : "text")}
       name={field.name}
       label={field.label}
-      defaultValue={field.defaultValue || ""}
+      {...(controlled ? { value: value ?? "" } : { defaultValue: field.defaultValue || "" })}
       placeholder={field.placeholder || ""}
       required={!!field.required}
+      onChange={onChange}
+      error={!!error}
+      helperText={helperText}
+      FormHelperTextProps={formHelperTextProps}
       InputProps={isPassword ? {
         endAdornment: (
           <InputAdornment position="end">
@@ -75,19 +87,45 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
   const [uploadedPath, setUploadedPath] = React.useState("");
   const s3Actions = ["/run/s3_linux", "/run/s3_windows", "/run/s3_windows_iis", "/run/s3_windows_docker"];
   const isS3Install = s3Actions.includes(action);
-  const httpsPortField = (fields || []).find((f) => f.name === "LOCALS3_HTTPS_PORT");
   const s3PortFieldNames = ["LOCALS3_HTTPS_PORT", "LOCALS3_API_PORT", "LOCALS3_UI_PORT", "LOCALS3_CONSOLE_PORT"];
-  const [httpsPort, setHttpsPort] = React.useState((httpsPortField && httpsPortField.defaultValue) ? String(httpsPortField.defaultValue) : "");
-  const [httpsPortState, setHttpsPortState] = React.useState({
-    checking: false,
-    usable: true,
-    error: false,
-    message: "",
-  });
+  const s3PortFields = React.useMemo(
+    () => (fields || []).filter((f) => s3PortFieldNames.includes(f.name)),
+    [fields]
+  );
+  const initialS3PortValues = React.useMemo(() => {
+    const next = {};
+    for (const field of s3PortFields) {
+      next[field.name] = field.defaultValue ? String(field.defaultValue) : "";
+    }
+    return next;
+  }, [fields]);
+  const initialS3PortStates = React.useMemo(() => {
+    const next = {};
+    for (const field of s3PortFields) {
+      next[field.name] = { checking: false, usable: true, error: false, message: "" };
+    }
+    return next;
+  }, [fields]);
+  const [s3PortValues, setS3PortValues] = React.useState(initialS3PortValues);
+  const [s3PortStates, setS3PortStates] = React.useState(initialS3PortStates);
   const uploadInputRef = React.useRef(null);
   const formRef = React.useRef(null);
   const sourcePathField = (fields || []).find((f) => f.name === "SourceValue" || f.name === "SOURCE_VALUE");
   const sourcePathKey = sourcePathField ? sourcePathField.name : "";
+
+  React.useEffect(() => {
+    setS3PortValues(initialS3PortValues);
+    setS3PortStates(initialS3PortStates);
+  }, [initialS3PortStates, initialS3PortValues]);
+
+  const emitTerminal = React.useCallback((state, line) => {
+    if (!window.ServerInstallerTerminalHook) return;
+    window.ServerInstallerTerminalHook({
+      open: true,
+      state,
+      line,
+    });
+  }, []);
 
   const setSourcePathInForm = (pathValue) => {
     if (!formRef.current || !sourcePathKey) return;
@@ -164,92 +202,80 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
   };
 
   React.useEffect(() => {
-    if (!isS3Install || !httpsPortField) return undefined;
-    const p = String(httpsPort || "").trim();
+    if (!isS3Install || s3PortFields.length === 0) return undefined;
+    const fieldNames = s3PortFields.map((f) => f.name);
+    const nextStates = {};
+    const numericValues = {};
+    const duplicates = new Set();
 
-    if (!p) {
-      setHttpsPortState({
-        checking: false,
-        usable: false,
-        error: true,
-        message: "HTTPS port is required.",
-      });
-      return undefined;
+    for (const fieldName of fieldNames) {
+      const rawValue = String(s3PortValues[fieldName] || "").trim();
+      if (!rawValue) {
+        nextStates[fieldName] = { checking: false, usable: false, error: true, message: "Port is required." };
+        continue;
+      }
+      if (!/^\d+$/.test(rawValue) || Number(rawValue) < 1 || Number(rawValue) > 65535) {
+        nextStates[fieldName] = { checking: false, usable: false, error: true, message: "Port must be a number between 1 and 65535." };
+        continue;
+      }
+      if (fieldName === "LOCALS3_HTTPS_PORT" && Number(rawValue) === 443) {
+        nextStates[fieldName] = { checking: false, usable: false, error: true, message: "S3 HTTPS port 443 is not allowed. Choose a different port." };
+        continue;
+      }
+      const key = Number(rawValue);
+      if (Object.prototype.hasOwnProperty.call(numericValues, key)) {
+        duplicates.add(fieldName);
+        duplicates.add(numericValues[key]);
+      } else {
+        numericValues[key] = fieldName;
+      }
+      nextStates[fieldName] = { checking: true, usable: false, error: false, message: "Checking port availability..." };
     }
-    if (!/^\d+$/.test(p) || Number(p) < 1 || Number(p) > 65535) {
-      setHttpsPortState({
-        checking: false,
-        usable: false,
-        error: true,
-        message: "Port must be a number between 1 and 65535.",
-      });
-      return undefined;
-    }
-    if (Number(p) === 443) {
-      setHttpsPortState({
-        checking: false,
-        usable: false,
-        error: true,
-        message: "S3 HTTPS port 443 is not allowed. Choose a different port.",
-      });
+
+    duplicates.forEach((fieldName) => {
+      nextStates[fieldName] = { checking: false, usable: false, error: true, message: "All S3 ports must be unique." };
+    });
+    setS3PortStates(nextStates);
+
+    const fieldsToCheck = fieldNames.filter((fieldName) => nextStates[fieldName] && nextStates[fieldName].checking);
+    if (fieldsToCheck.length === 0) {
       return undefined;
     }
 
     let canceled = false;
     const timer = setTimeout(async () => {
-      try {
-        setHttpsPortState((prev) => ({ ...prev, checking: true }));
-        const fd = new FormData();
-        fd.append("port", p);
-        fd.append("protocol", "tcp");
-        const resp = await fetch("/api/system/port_check", {
-          method: "POST",
-          headers: { "X-Requested-With": "fetch" },
-          body: fd,
-        });
-        const j = await resp.json();
-        if (canceled) return;
-        if (!j.ok) {
-          setHttpsPortState({
-            checking: false,
-            usable: false,
-            error: true,
-            message: j.error || "Could not validate port availability.",
+      const resolvedStates = { ...nextStates };
+      await Promise.all(fieldsToCheck.map(async (fieldName) => {
+        const port = String(s3PortValues[fieldName] || "").trim();
+        try {
+          const fd = new FormData();
+          fd.append("port", port);
+          fd.append("protocol", "tcp");
+          const resp = await fetch("/api/system/port_check", {
+            method: "POST",
+            headers: { "X-Requested-With": "fetch" },
+            body: fd,
           });
-          return;
+          const j = await resp.json();
+          if (!j.ok) {
+            resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: j.error || "Could not validate port availability." };
+            return;
+          }
+          if (j.busy && !j.managed_owner) {
+            resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: `Port ${port} is already in use by another service.` };
+            return;
+          }
+          if (j.busy && j.managed_owner) {
+            resolvedStates[fieldName] = { checking: false, usable: true, error: false, message: `Port ${port} is already used by this S3 install and can be reused.` };
+            return;
+          }
+          resolvedStates[fieldName] = { checking: false, usable: true, error: false, message: `Port ${port} is available.` };
+        } catch (err) {
+          resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: `Port check failed: ${err}` };
         }
-        if (j.busy && !j.managed_owner) {
-          setHttpsPortState({
-            checking: false,
-            usable: false,
-            error: true,
-            message: `Port ${p} is already in use by another service.`,
-          });
-          return;
-        }
-        if (j.busy && j.managed_owner) {
-          setHttpsPortState({
-            checking: false,
-            usable: true,
-            error: false,
-            message: `Port ${p} is used by existing S3 and can be replaced.`,
-          });
-          return;
-        }
-        setHttpsPortState({
-          checking: false,
-          usable: true,
-          error: false,
-          message: `Port ${p} is available.`,
-        });
-      } catch (err) {
-        if (canceled) return;
-        setHttpsPortState({
-          checking: false,
-          usable: false,
-          error: true,
-          message: `Port check failed: ${err}`,
-        });
+      }));
+      if (!canceled) {
+        setS3PortStates(resolvedStates);
       }
     }, 250);
 
@@ -257,26 +283,37 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
       canceled = true;
       clearTimeout(timer);
     };
-  }, [httpsPort, isS3Install, !!httpsPortField]);
+  }, [isS3Install, s3PortFields, s3PortValues]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     const formEl = formRef.current || e.currentTarget;
+    emitTerminal(`Starting: ${title}`, "============================================================");
+    emitTerminal(`Starting: ${title}`, `[${new Date().toLocaleTimeString()}] ${title} requested`);
     if (formEl && typeof formEl.reportValidity === "function" && !formEl.reportValidity()) {
-      return;
-    }
-    if (isS3Install && httpsPortField && (httpsPortState.checking || !httpsPortState.usable)) {
+      const firstInvalid = formEl.querySelector(":invalid");
+      const invalidLabel = firstInvalid ? (firstInvalid.getAttribute("aria-label") || firstInvalid.getAttribute("name") || "required field") : "required field";
+      emitTerminal("Validation", `[${new Date().toLocaleTimeString()}] ${title} blocked: fill in ${invalidLabel}.`);
       return;
     }
     if (isS3Install) {
+      for (const fieldName of s3PortFieldNames) {
+        const state = s3PortStates[fieldName];
+        if (state && (state.checking || !state.usable)) {
+          emitTerminal("Validation", `[${new Date().toLocaleTimeString()}] ${title} blocked: ${state.message || `${fieldName} is not ready.`}`);
+          return;
+        }
+      }
       const s3Ports = [];
       for (const fieldName of s3PortFieldNames) {
         const input = formEl.querySelector(`[name="${fieldName}"]`);
         const value = String(input && input.value ? input.value : "").trim();
         if (!value) {
+          emitTerminal("Validation", `[${new Date().toLocaleTimeString()}] ${title} blocked: ${fieldName} is required.`);
           return;
         }
         if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
+          emitTerminal("Validation", `[${new Date().toLocaleTimeString()}] ${title} blocked: ${fieldName} must be a number between 1 and 65535.`);
           return;
         }
         s3Ports.push({ fieldName, value: Number(value) });
@@ -284,6 +321,7 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
       const seen = new Set();
       for (const item of s3Ports) {
         if (seen.has(item.value)) {
+          emitTerminal("Validation", `[${new Date().toLocaleTimeString()}] ${title} blocked: all S3 ports must be unique.`);
           window.alert("All S3 ports must be unique.");
           return;
         }
@@ -300,25 +338,13 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
     const hasSelectedUpload = !!(input && input.files && input.files.length > 0);
 
     if (!sourcePathValue && hasSelectedUpload && !uploadedPath) {
-      if (window.ServerInstallerTerminalHook) {
-        window.ServerInstallerTerminalHook({
-          open: true,
-          state: `Uploading for: ${title}`,
-          line: "============================================================",
-        });
-      }
+      emitTerminal(`Uploading for: ${title}`, "============================================================");
       const autoPath = await doUpload();
       if (!autoPath) {
         return;
       }
       sourcePathValue = autoPath;
-      if (window.ServerInstallerTerminalHook) {
-        window.ServerInstallerTerminalHook({
-          open: true,
-          state: `Starting: ${title}`,
-          line: `[${new Date().toLocaleTimeString()}] Upload finished, continuing deployment...`,
-        });
-      }
+      emitTerminal(`Starting: ${title}`, `[${new Date().toLocaleTimeString()}] Upload finished, continuing deployment...`);
     }
 
     onRun(e, action, title);
@@ -331,40 +357,19 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{description}</Typography>
         <Box ref={formRef} component="form" onSubmit={handleSubmit}>
           {(fields || []).map((f) => {
-            if (isS3Install && f.name === "LOCALS3_HTTPS_PORT") {
+            if (isS3Install && s3PortFieldNames.includes(f.name)) {
+              const fieldState = s3PortStates[f.name] || { checking: false, usable: true, error: false, message: "" };
               return (
-                <TextField
+                <Field
                   key={f.name}
-                  fullWidth
-                  size="small"
-                  name={f.name}
-                  label={f.label}
-                  value={httpsPort}
-                  placeholder={f.placeholder || ""}
-                  required
-                  onChange={(ev) => setHttpsPort(ev.target.value)}
-                  error={httpsPortState.error}
-                  helperText={httpsPortState.checking ? "Checking port availability..." : (httpsPortState.message || " ")}
-                  FormHelperTextProps={{
-                    sx: httpsPortState.error ? { color: "error.main", fontWeight: 700 } : {},
+                  field={f}
+                  value={s3PortValues[f.name] ?? ""}
+                  onChange={(ev) => setS3PortValues((prev) => ({ ...prev, [f.name]: ev.target.value }))}
+                  error={fieldState.error}
+                  helperText={fieldState.message || " "}
+                  formHelperTextProps={{
+                    sx: fieldState.error ? { color: "error.main", fontWeight: 700 } : {},
                   }}
-                  sx={{ mb: 1.5 }}
-                />
-              );
-            }
-            if (isS3Install && s3PortFieldNames.includes(f.name) && f.name !== "LOCALS3_HTTPS_PORT") {
-              return (
-                <TextField
-                  key={f.name}
-                  fullWidth
-                  size="small"
-                  type="text"
-                  name={f.name}
-                  label={f.label}
-                  defaultValue={f.defaultValue || ""}
-                  placeholder={f.placeholder || ""}
-                  required
-                  sx={{ mb: 1.5 }}
                 />
               );
             }
@@ -389,7 +394,10 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
             type="submit"
             variant="contained"
             fullWidth
-            disabled={uploading || (isS3Install && !!httpsPortField && (httpsPortState.checking || !httpsPortState.usable))}
+            disabled={uploading || (isS3Install && s3PortFieldNames.some((fieldName) => {
+              const state = s3PortStates[fieldName];
+              return state && (state.checking || !state.usable);
+            }))}
             sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, bgcolor: color || "#1d4ed8" }}
           >
             Start

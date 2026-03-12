@@ -1435,6 +1435,7 @@ function App() {
                   { name: "PROXY_DOMAIN", label: "Domain", placeholder: "Required for real-domain / iran-optimized layers" },
                   { name: "PROXY_EMAIL", label: "Email", placeholder: "Required for real-domain / iran-optimized layers" },
                   { name: "PROXY_DUCKDNS_TOKEN", label: "DuckDNS Token", placeholder: "Optional unless using DuckDNS" },
+                  { name: "PROXY_PANEL_PORT", label: "Proxy Dashboard Port", defaultValue: String((proxy.panel_url || "").match(/:(\d+)\s*$/)?.[1] || "8443"), required: true, placeholder: "8443" },
                   ...(cfg.os === "windows" ? [{ name: "PROXY_WSL_DISTRO", label: "WSL Distro", defaultValue: proxy.distro || "Ubuntu" }] : []),
                 ]}
                 onRun={run}

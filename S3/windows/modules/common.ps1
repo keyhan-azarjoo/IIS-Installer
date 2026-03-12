@@ -396,6 +396,69 @@ function Get-PortListeners([int]$p) {
   return $items
 }
 
+function Test-LocalS3IisBindingOwnsPort([int]$p) {
+  try {
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
+    foreach ($siteName in @("LocalS3", "LocalS3-IIS", "LocalS3-Console")) {
+      if (-not (Test-Path "IIS:\Sites\$siteName")) { continue }
+      $bindings = Get-WebBinding -Name $siteName -ErrorAction SilentlyContinue
+      foreach ($binding in $bindings) {
+        $parts = [string]$binding.bindingInformation -split ":"
+        if ($parts.Count -lt 2) { continue }
+        $bindingPort = 0
+        if ([int]::TryParse($parts[1], [ref]$bindingPort) -and $bindingPort -eq $p) {
+          return $true
+        }
+      }
+    }
+  } catch {}
+  return $false
+}
+
+function Test-LocalS3DockerOwnsPort([int]$p) {
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $false }
+  foreach ($name in @("minio", "nginx", "console")) {
+    try {
+      $raw = docker inspect $name 2>$null | Out-String
+      if (-not $raw.Trim()) { continue }
+      $obj = (ConvertFrom-Json $raw)[0]
+      $labels = $obj.Config.Labels
+      if (($labels.'com.locals3.installer' -ne 'true') -and ($name -notmatch 'minio|locals3|console|nginx')) { continue }
+      foreach ($prop in $obj.NetworkSettings.Ports.PSObject.Properties) {
+        foreach ($binding in @($prop.Value)) {
+          $hostPort = 0
+          if ([int]::TryParse([string]$binding.HostPort, [ref]$hostPort) -and $hostPort -eq $p) {
+            return $true
+          }
+        }
+      }
+    } catch {}
+  }
+  return $false
+}
+
+function Test-LocalS3NativeProcessOwnsPort([int]$p) {
+  try {
+    $conns = Get-NetTCPConnection -State Listen -LocalPort $p -ErrorAction SilentlyContinue
+    foreach ($conn in $conns) {
+      $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+      if (-not $proc) { continue }
+      $procPath = ""
+      $cmdLine = ""
+      try { $procPath = [string]$proc.Path } catch {}
+      try { $cmdLine = [string]((Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)" -ErrorAction SilentlyContinue).CommandLine) } catch {}
+      if ($proc.ProcessName -ieq "minio" -and (($procPath -match 'LocalS3') -or ($cmdLine -match 'LocalS3|run-minio\.cmd'))) {
+        return $true
+      }
+    }
+  } catch {}
+  return $false
+}
+
+function Test-LocalS3ManagedPort([int]$p) {
+  return (Test-LocalS3IisBindingOwnsPort $p) -or (Test-LocalS3DockerOwnsPort $p) -or (Test-LocalS3NativeProcessOwnsPort $p)
+}
+
 
 function Pick-Port([int[]]$candidates) {
   foreach ($p in $candidates) { if (Port-Free $p) { return $p } }

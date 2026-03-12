@@ -13,6 +13,7 @@ TARGET_LAYER="${PROXY_LAYER:-layer3-basic}"
 DOMAIN_VALUE="${PROXY_DOMAIN:-}"
 EMAIL_VALUE="${PROXY_EMAIL:-}"
 DUCKDNS_TOKEN_VALUE="${PROXY_DUCKDNS_TOKEN:-}"
+PANEL_PORT_VALUE="${PROXY_PANEL_PORT:-8443}"
 
 require_root() {
   if [ "$(id -u)" -ne 0 ]; then
@@ -41,6 +42,10 @@ validate_source() {
   fi
   if [ ! -f "$SOURCE_DIR/$TARGET_LAYER/install.sh" ]; then
     err "Unknown proxy layer: $TARGET_LAYER"
+    exit 1
+  fi
+  if ! [[ "$PANEL_PORT_VALUE" =~ ^[0-9]+$ ]] || [ "$PANEL_PORT_VALUE" -lt 1 ] || [ "$PANEL_PORT_VALUE" -gt 65535 ]; then
+    err "PROXY_PANEL_PORT must be a valid TCP port."
     exit 1
   fi
 }
@@ -85,7 +90,7 @@ run_layer_install() {
 
 run_panel_install() {
   info "Installing proxy management panel..."
-  PROXY_REPO_ROOT="$PANEL_DIR/repo" bash "$SOURCE_DIR/panel/install-panel.sh" "--layer=$TARGET_LAYER" "--repo-root=$PANEL_DIR/repo"
+  PROXY_REPO_ROOT="$PANEL_DIR/repo" PROXY_PANEL_PORT="$PANEL_PORT_VALUE" bash "$SOURCE_DIR/panel/install-panel.sh" "--layer=$TARGET_LAYER" "--repo-root=$PANEL_DIR/repo" "--port=$PANEL_PORT_VALUE"
 }
 
 wait_for_service() {
@@ -126,7 +131,7 @@ main() {
 
   info "Proxy installation completed."
   info "Layer: $TARGET_LAYER"
-  info "Panel URL: https://$local_ip:8443"
+  info "Panel URL: https://$local_ip:$PANEL_PORT_VALUE"
 }
 
 main "$@"
