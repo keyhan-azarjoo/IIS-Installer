@@ -15,6 +15,8 @@ JUPYTER_STATE_FILE="${STATE_DIR}/jupyter-state.json"
 VENV_DIR="${STATE_DIR}/venv"
 KERNEL_NAME="python3"
 KERNEL_DISPLAY_NAME="Python 3"
+JUPYTER_CONFIG_DIR="${STATE_DIR}/jupyter-config"
+JUPYTER_CONFIG_FILE="${JUPYTER_CONFIG_DIR}/jupyter_server_config.py"
 JUPYTER_SERVICE_NAME="serverinstaller-jupyter"
 JUPYTER_SERVICE_FILE="/etc/systemd/system/${JUPYTER_SERVICE_NAME}.service"
 JUPYTER_NGINX_CONF="/etc/nginx/conf.d/${JUPYTER_SERVICE_NAME}.conf"
@@ -250,9 +252,12 @@ Type=simple
 User=root
 WorkingDirectory=${NOTEBOOK_DIR}
 Environment=PATH=${VENV_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=JUPYTER_CONFIG_DIR=${JUPYTER_CONFIG_DIR}
+Environment=JUPYTER_CONFIG_PATH=${JUPYTER_CONFIG_DIR}
+Environment=JUPYTER_NO_CONFIG=1
 Environment=JUPYTER_PREFER_ENV_PATH=1
 Environment=JUPYTER_PATH=${VENV_DIR}/share/jupyter:/root/.local/share/jupyter:/usr/local/share/jupyter:/usr/share/jupyter
-ExecStart=${VENV_PYTHON} -m jupyter lab --allow-root --no-browser --ServerApp.ip=127.0.0.1 --ServerApp.port=${JUPYTER_INTERNAL_PORT} --ServerApp.token= --ServerApp.password= --ServerApp.allow_remote_access=True --ServerApp.trust_xheaders=True --ServerApp.root_dir=${NOTEBOOK_DIR}
+ExecStart=${VENV_PYTHON} -m jupyter lab --config=${JUPYTER_CONFIG_FILE}
 Restart=always
 RestartSec=5
 StandardOutput=append:${JUPYTER_LOG_FILE}
@@ -260,6 +265,30 @@ StandardError=append:${JUPYTER_LOG_FILE}
 
 [Install]
 WantedBy=multi-user.target
+EOF
+}
+
+write_jupyter_config() {
+  mkdir -p "${JUPYTER_CONFIG_DIR}"
+  cat > "${JUPYTER_CONFIG_FILE}" <<EOF
+c = get_config()
+
+c.ServerApp.allow_root = True
+c.ServerApp.allow_remote_access = True
+c.ServerApp.base_url = "/"
+c.ServerApp.default_url = "/lab"
+c.ServerApp.ip = "127.0.0.1"
+c.ServerApp.open_browser = False
+c.ServerApp.password = ""
+c.ServerApp.port = ${JUPYTER_INTERNAL_PORT}
+c.ServerApp.root_dir = $(json_escape "${NOTEBOOK_DIR}")
+c.ServerApp.token = ""
+c.ServerApp.trust_xheaders = True
+c.ServerApp.terminals_enabled = True
+c.ServerApp.jpserver_extensions = {
+    "jupyterlab": True,
+    "jupyter_server_terminals": True,
+}
 EOF
 }
 
@@ -421,6 +450,7 @@ ensure_tls_material
 ensure_auth_file
 NGINX_RUN_USER="$(detect_nginx_user)"
 ensure_nginx_can_read_auth_file "${NGINX_RUN_USER}"
+write_jupyter_config
 write_systemd_service
 write_nginx_config
 
