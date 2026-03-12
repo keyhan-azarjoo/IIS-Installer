@@ -1788,25 +1788,24 @@ function App() {
     }
 
     if (page === "python") {
-      if (cfg.os !== "windows") {
-        return <Alert severity="info">Python install automation is currently configured for Windows hosts.</Alert>;
-      }
       const pythonUrl = String(pythonService.jupyter_url || "").trim();
       const pythonPort = String(pythonService.jupyter_port || "8888").trim() || "8888";
       const pythonHost = String(pythonService.host || (selectableIps[0] || "127.0.0.1")).trim();
       const installState = pythonService.installed
         ? `${pythonService.python_version || "installed"}`
         : "Not installed yet";
+      const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
+      const commandShellLabel = cfg.os === "windows" ? "Windows cmd" : "shell";
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
             <ActionCard
-              title="Install Python (Windows)"
+              title={`Install Python (${installOsLabel})`}
               description="Select a Python version, optionally install Jupyter, and prepare the managed interpreter."
-              action="/run/python_windows"
+              action="/run/python_install"
               fields={[
                 { name: "PYTHON_VERSION", label: "Python Version", type: "select", options: ["3.13", "3.12", "3.11", "3.10"], defaultValue: pythonService.requested_version || "3.12", required: true },
-                { name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" },
+                ...(selectableIps.length > 0 ? [{ name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" }] : []),
                 { name: "PYTHON_INSTALL_JUPYTER", label: "Install Jupyter", type: "select", options: ["yes", "no"], defaultValue: pythonService.jupyter_installed ? "yes" : "yes", required: true },
                 { name: "PYTHON_START_JUPYTER", label: "Start Jupyter Now", type: "select", options: ["no", "yes"], defaultValue: pythonService.jupyter_running ? "yes" : "no", required: true },
                 { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
@@ -1831,11 +1830,11 @@ function App() {
           </Grid>
           <Grid item xs={12} md={6}>
             <ActionCard
-              title="Run Python CMD"
-              description="Send a Windows cmd command with the managed Python and Scripts directories placed first in PATH."
+              title={cfg.os === "windows" ? "Run Python CMD" : "Run Python Command"}
+              description={`Send a ${commandShellLabel} command with the managed Python and Scripts directories placed first in PATH.`}
               action="/run/python_command"
               fields={[
-                { name: "PYTHON_CMD", label: "CMD Command", defaultValue: "python -m pip --version", required: true, placeholder: "python -m pip install requests" },
+                { name: "PYTHON_CMD", label: "Command", defaultValue: "python -m pip --version", required: true, placeholder: "python -m pip install requests" },
               ]}
               onRun={run}
               color="#0f766e"
@@ -1849,7 +1848,7 @@ function App() {
                   description="Start managed Jupyter Lab with no browser and no token on the selected host/port."
                   action="/run/python_jupyter_start"
                   fields={[
-                    { name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" },
+                    ...(selectableIps.length > 0 ? [{ name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" }] : []),
                     { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
                     { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: "", placeholder: "Optional. Defaults to installer workspace." },
                   ]}

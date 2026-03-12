@@ -32,14 +32,27 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 BUILD_ID = "docker-service-page-2026-03-12-1215"
 
+
+def _server_installer_data_dir():
+    override = os.environ.get("SERVER_INSTALLER_DATA_DIR", "").strip()
+    if override:
+        return Path(override)
+    if os.name == "nt":
+        return Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
+    if platform.system() == "Darwin":
+        return Path.home() / ".server-installer"
+    return Path.home() / ".server-installer"
+
+
 ROOT = Path(__file__).resolve().parents[1]
-SERVER_INSTALLER_DATA = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
+SERVER_INSTALLER_DATA = _server_installer_data_dir()
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
 LINUX_INSTALLER = ROOT / "DotNet" / "linux" / "install-linux-dotnet-runner.sh"
 S3_WINDOWS_INSTALLER = ROOT / "S3" / "windows" / "setup-storage.ps1"
 S3_LINUX_INSTALLER = ROOT / "S3" / "linux-macos" / "setup-storage.sh"
 MONGO_WINDOWS_INSTALLER = ROOT / "Mongo" / "windows" / "setup-mongodb.ps1"
 PYTHON_WINDOWS_INSTALLER = ROOT / "Python" / "windows" / "setup-python.ps1"
+PYTHON_UNIX_INSTALLER = ROOT / "Python" / "linux-macos" / "setup-python.sh"
 PROXY_LINUX_INSTALLER = ROOT / "Proxy" / "linux-macos" / "setup-proxy.sh"
 PROXY_WINDOWS_INSTALLER = ROOT / "Proxy" / "windows" / "setup-proxy.ps1"
 PROXY_ROOT = ROOT / "Proxy"
@@ -85,6 +98,10 @@ MONGO_UNIX_FILES = [
 
 PYTHON_WINDOWS_FILES = [
     "Python/windows/setup-python.ps1",
+]
+
+PYTHON_UNIX_FILES = [
+    "Python/linux-macos/setup-python.sh",
 ]
 
 PROXY_FILES = [
@@ -378,6 +395,7 @@ def run_windows_python_installer(form=None, live_cb=None):
     env["PYTHON_VERSION"] = version
     env["PYTHON_INSTALL_JUPYTER"] = "1" if install_jupyter in ("1", "true", "yes", "y", "on") else "0"
     env["PYTHON_JUPYTER_PORT"] = jupyter_port
+    env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
     if host_ip:
         env["PYTHON_HOST_IP"] = host_ip
     code, output = run_process(
@@ -398,6 +416,55 @@ def run_windows_python_installer(form=None, live_cb=None):
             host=host_ip or str(state.get("host") or choose_service_host()),
             port=jupyter_port,
             notebook_dir=(form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip(),
+            live_cb=live_cb,
+        )
+        if start_output:
+            output = f"{output.rstrip()}\n{start_output}".strip()
+        if start_code != 0:
+            return start_code, output
+    return 0, output
+
+
+def run_unix_python_installer(form=None, live_cb=None):
+    form = form or {}
+    if os.name == "nt":
+        return 1, "Unix Python installer can only run on Linux or macOS hosts."
+    ensure_repo_files(PYTHON_UNIX_FILES, live_cb=live_cb)
+    env = os.environ.copy()
+    version = (form.get("PYTHON_VERSION", ["3.12"])[0] or "3.12").strip()
+    install_jupyter = (form.get("PYTHON_INSTALL_JUPYTER", ["yes"])[0] or "yes").strip().lower()
+    host_ip = (form.get("PYTHON_HOST_IP", [""])[0] or "").strip()
+    jupyter_port = (form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip()
+    start_jupyter = (form.get("PYTHON_START_JUPYTER", ["no"])[0] or "no").strip().lower()
+    notebook_dir = (form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip()
+    env["PYTHON_VERSION"] = version
+    env["PYTHON_INSTALL_JUPYTER"] = "1" if install_jupyter in ("1", "true", "yes", "y", "on") else "0"
+    env["PYTHON_JUPYTER_PORT"] = jupyter_port
+    env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
+    if host_ip:
+        env["PYTHON_HOST_IP"] = host_ip
+    cmd = ["bash", str(PYTHON_UNIX_INSTALLER)]
+    if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
+        cmd = ["sudo", "env"]
+        for key in ("PYTHON_VERSION", "PYTHON_INSTALL_JUPYTER", "PYTHON_JUPYTER_PORT", "PYTHON_HOST_IP", "SERVER_INSTALLER_DATA_DIR"):
+            value = env.get(key, "").strip()
+            if value:
+                cmd.append(f"{key}={value}")
+        cmd += ["bash", str(PYTHON_UNIX_INSTALLER)]
+    code, output = run_process(cmd, env=env, live_cb=live_cb)
+    if code != 0:
+        return code, output
+    state = _read_json_file(PYTHON_STATE_FILE)
+    if host_ip:
+        state["host"] = host_ip
+    if jupyter_port:
+        state["jupyter_port"] = jupyter_port
+    _write_json_file(PYTHON_STATE_FILE, state)
+    if start_jupyter in ("1", "true", "yes", "y", "on"):
+        start_code, start_output = start_python_jupyter(
+            host=host_ip or str(state.get("host") or choose_service_host()),
+            port=jupyter_port,
+            notebook_dir=notebook_dir,
             live_cb=live_cb,
         )
         if start_output:
@@ -5867,13 +5934,17 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_linux_proxy_installer(form)
                 self.respond_run_result(title, code, output)
             return
-        if self.path == "/run/python_windows":
-            title = "Python Installer (Windows)"
+        if self.path == "/run/python_install":
+            title = f"Python Installer ({'Windows' if os.name == 'nt' else 'Linux/macOS'})"
             if self.is_fetch():
-                job_id = start_live_job(title, lambda cb: run_windows_python_installer(form, live_cb=cb))
+                runner = (lambda cb: run_windows_python_installer(form, live_cb=cb)) if os.name == "nt" else (lambda cb: run_unix_python_installer(form, live_cb=cb))
+                job_id = start_live_job(title, runner)
                 self.write_json({"job_id": job_id, "title": title})
             else:
-                code, output = run_windows_python_installer(form)
+                if os.name == "nt":
+                    code, output = run_windows_python_installer(form)
+                else:
+                    code, output = run_unix_python_installer(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/python_command":
