@@ -67,21 +67,8 @@ def cache_root() -> Path:
     return Path.home() / ".server-installer"
 
 
-def clear_managed_cache(root: Path) -> None:
-    managed_paths = [
-        root / "dashboard",
-        root / "Mongo",
-        root / "DotNet",
-        root / "S3",
-    ]
-    for path in managed_paths:
-        if path.exists():
-            shutil.rmtree(path, ignore_errors=True)
-
-
 def ensure_files(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    clear_managed_cache(root)
     for rel in sync_files_for_current_os():
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -677,7 +664,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         print(f"Local HTTP check: FAIL ({detail})")
         print(f"Inspect log: {log_path}")
     print("")
-    print(f"Dashboard ready: {scheme}://{display_host}:{selected_port}")
+    print(f"Dashboard ready: https://{display_host}:{selected_port}")
     print("Re-running this same command will update files and restart the service.")
     return 0
 
