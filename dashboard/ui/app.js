@@ -972,12 +972,20 @@ function App() {
 
   const s3ServiceUrls = React.useMemo(() => uniqUrls((s3Services || []).flatMap((svc) => svc?.urls || [])), [s3Services]);
   const s3ConsoleUrl = React.useMemo(() => {
-    const fromTerminal = extractLabeledUrl(termText, "Console URL");
+    const fromTerminal = (
+      extractLabeledUrl(termText, "Console URL") ||
+      extractLabeledUrl(termText, "MinIO Console") ||
+      extractLabeledUrl(termText, "LAN Console")
+    );
     if (fromTerminal) return fromTerminal;
-    return s3ServiceUrls.find((url) => /:(9443|10443|18443|8444)(\/|$)/.test(url)) || "";
+    return s3ServiceUrls.find((url) => /:(9443|10443|11443|12443|13443|18443|8444)(\/|$)/.test(url)) || "";
   }, [s3ServiceUrls, termText]);
   const s3ApiUrl = React.useMemo(() => {
-    const fromTerminal = extractLabeledUrl(termText, "API URL");
+    const fromTerminal = (
+      extractLabeledUrl(termText, "API URL") ||
+      extractLabeledUrl(termText, "S3 API / Share links") ||
+      extractLabeledUrl(termText, "LAN S3 API")
+    );
     if (fromTerminal) return fromTerminal;
     return s3ServiceUrls.find((url) => url !== s3ConsoleUrl) || s3ServiceUrls[0] || "";
   }, [s3ConsoleUrl, s3ServiceUrls, termText]);
