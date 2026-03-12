@@ -6,6 +6,7 @@ function Field({ field, value, onChange, error, helperText, formHelperTextProps 
   const isPassword = field.type === "password";
   const [showPassword, setShowPassword] = React.useState(false);
   const controlled = typeof value !== "undefined";
+  const trailingAction = field.trailingAction || null;
   if (field.type === "folder") {
     return (
       <Box sx={{ mb: 1.5 }}>
@@ -48,6 +49,39 @@ function Field({ field, value, onChange, error, helperText, formHelperTextProps 
       </FormControl>
     );
   }
+  const endActions = [];
+  if (isPassword) {
+    endActions.push(
+      <Button
+        key="toggle-password"
+        type="button"
+        size="small"
+        onClick={() => setShowPassword((v) => !v)}
+        sx={{ minWidth: 0, px: 1, textTransform: "none", fontWeight: 700 }}
+      >
+        {showPassword ? "Hide" : "Show"}
+      </Button>
+    );
+  }
+  if (trailingAction) {
+    endActions.push(
+      <Button
+        key="trailing-action"
+        type="button"
+        size="small"
+        onClick={() => {
+          if (typeof trailingAction.onClick === "function") {
+            trailingAction.onClick();
+          } else if (trailingAction.href) {
+            window.open(trailingAction.href, trailingAction.target || "_blank", "noopener,noreferrer");
+          }
+        }}
+        sx={{ minWidth: 0, px: 1, textTransform: "none", fontWeight: 700 }}
+      >
+        {trailingAction.label || "Open"}
+      </Button>
+    );
+  }
   return (
     <TextField
       fullWidth
@@ -62,17 +96,12 @@ function Field({ field, value, onChange, error, helperText, formHelperTextProps 
       error={!!error}
       helperText={helperText}
       FormHelperTextProps={formHelperTextProps}
-      InputProps={isPassword ? {
+      InputProps={endActions.length ? {
         endAdornment: (
           <InputAdornment position="end">
-            <Button
-              type="button"
-              size="small"
-              onClick={() => setShowPassword((v) => !v)}
-              sx={{ minWidth: 0, px: 1, textTransform: "none", fontWeight: 700 }}
-            >
-              {showPassword ? "Hide" : "Show"}
-            </Button>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              {endActions}
+            </Box>
           </InputAdornment>
         ),
       } : undefined}
@@ -88,9 +117,19 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
   const s3Actions = ["/run/s3_linux", "/run/s3_windows", "/run/s3_windows_iis", "/run/s3_windows_docker"];
   const isS3Install = s3Actions.includes(action);
   const s3PortFieldNames = ["LOCALS3_HTTPS_PORT", "LOCALS3_API_PORT", "LOCALS3_UI_PORT", "LOCALS3_CONSOLE_PORT"];
+  const fieldSignature = React.useMemo(
+    () => JSON.stringify((fields || []).map((f) => ({
+      name: f.name,
+      defaultValue: f.defaultValue ?? "",
+      required: !!f.required,
+      placeholder: f.placeholder ?? "",
+      type: f.type ?? "text",
+    }))),
+    [fields]
+  );
   const s3PortFields = React.useMemo(
     () => (fields || []).filter((f) => s3PortFieldNames.includes(f.name)),
-    [fields]
+    [fieldSignature]
   );
   const initialS3PortValues = React.useMemo(() => {
     const next = {};
@@ -98,14 +137,14 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
       next[field.name] = field.defaultValue ? String(field.defaultValue) : "";
     }
     return next;
-  }, [fields]);
+  }, [fieldSignature, s3PortFields]);
   const initialS3PortStates = React.useMemo(() => {
     const next = {};
     for (const field of s3PortFields) {
       next[field.name] = { checking: false, usable: true, error: false, message: "" };
     }
     return next;
-  }, [fields]);
+  }, [fieldSignature, s3PortFields]);
   const [s3PortValues, setS3PortValues] = React.useState(initialS3PortValues);
   const [s3PortStates, setS3PortStates] = React.useState(initialS3PortStates);
   const uploadInputRef = React.useRef(null);

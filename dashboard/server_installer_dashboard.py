@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, quote
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "s3-fix-2026-03-09-1416"
+BUILD_ID = "proxy-layout-fix-2026-03-12-0948"
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
@@ -40,7 +40,7 @@ S3_LINUX_INSTALLER = ROOT / "S3" / "linux-macos" / "setup-storage.sh"
 MONGO_WINDOWS_INSTALLER = ROOT / "Mongo" / "windows" / "setup-mongodb.ps1"
 PROXY_LINUX_INSTALLER = ROOT / "Proxy" / "linux-macos" / "setup-proxy.sh"
 PROXY_WINDOWS_INSTALLER = ROOT / "Proxy" / "windows" / "setup-proxy.ps1"
-PROXY_SOURCE_ROOT = ROOT / "Proxy" / "source"
+PROXY_ROOT = ROOT / "Proxy"
 PROXY_WINDOWS_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "proxy" / "proxy-wsl.json"
 REPO_RAW_BASE = os.environ.get(
     "SERVER_INSTALLER_REPO_BASE",
@@ -83,12 +83,41 @@ MONGO_UNIX_FILES = [
 PROXY_FILES = [
     "Proxy/linux-macos/setup-proxy.sh",
     "Proxy/windows/setup-proxy.ps1",
+    "Proxy/common/add-user.sh",
+    "Proxy/common/backup-config.sh",
+    "Proxy/common/delete-user.sh",
+    "Proxy/common/list-users.sh",
+    "Proxy/common/status.sh",
+    "Proxy/common/uninstall.sh",
+    "Proxy/common/view-users.sh",
+    "Proxy/panel/install-panel.sh",
+    "Proxy/panel/proxy-panel.py",
+    "Proxy/panel/proxy-panel.service",
+    "Proxy/panel/static/app.js",
+    "Proxy/panel/static/style.css",
+    "Proxy/panel/templates/dashboard.html",
+    "Proxy/panel/templates/login.html",
+    "Proxy/layers/layer3-basic/install.sh",
+    "Proxy/layers/layer4-nginx/install.sh",
+    "Proxy/layers/layer6-stunnel/install.sh",
+    "Proxy/layers/layer7-iran-optimized/add-user.sh",
+    "Proxy/layers/layer7-iran-optimized/delete-user.sh",
+    "Proxy/layers/layer7-iran-optimized/install.sh",
+    "Proxy/layers/layer7-real-domain/add-user.sh",
+    "Proxy/layers/layer7-real-domain/delete-user.sh",
+    "Proxy/layers/layer7-real-domain/install.sh",
+    "Proxy/layers/layer7-v2ray-vless/add-user.sh",
+    "Proxy/layers/layer7-v2ray-vless/delete-user.sh",
+    "Proxy/layers/layer7-v2ray-vless/install.sh",
+    "Proxy/layers/layer7-v2ray-vmess/add-user.sh",
+    "Proxy/layers/layer7-v2ray-vmess/delete-user.sh",
+    "Proxy/layers/layer7-v2ray-vmess/install.sh",
 ]
 
 
 def _iter_proxy_sync_files():
-    base = ROOT / "Proxy"
-    if not base.exists():
+    base = PROXY_ROOT
+    if not (base.exists() and (base / "common").exists() and (base / "layers").exists() and (base / "panel").exists()):
         return list(PROXY_FILES)
     files = []
     for path in base.rglob("*"):
@@ -96,6 +125,8 @@ def _iter_proxy_sync_files():
             continue
         rel = path.relative_to(ROOT).as_posix()
         if "/.git/" in rel or rel.endswith("/.git") or "/__pycache__/" in rel or rel.endswith(".pyc"):
+            continue
+        if "/docs/" in rel:
             continue
         files.append(rel)
     for rel in PROXY_FILES:
@@ -1411,7 +1442,7 @@ def _proxy_service_probe(units, prefix=None):
 
 def get_proxy_info():
     info = {
-        "available": PROXY_SOURCE_ROOT.exists(),
+        "available": PROXY_ROOT.exists(),
         "installed": False,
         "layer": "",
         "panel_url": "",
@@ -2839,7 +2870,7 @@ def run_linux_proxy_installer(form=None, live_cb=None):
             usage = get_port_usage(panel_port, "tcp")
             if not usage.get("managed_owner"):
                 return 1, f"Requested proxy dashboard port {panel_port} is already in use. Choose another port."
-    env["PROXY_REPO_ROOT"] = str(PROXY_SOURCE_ROOT)
+    env["PROXY_REPO_ROOT"] = str(PROXY_ROOT)
     if not PROXY_LINUX_INSTALLER.exists():
         return 1, f"Proxy installer is missing: {PROXY_LINUX_INSTALLER}"
     cmd = ["bash", str(PROXY_LINUX_INSTALLER)]
@@ -2922,6 +2953,8 @@ def run_linux_s3_installer(form=None, live_cb=None):
     if live_cb:
         live_cb(f"[DEBUG] Dashboard build: {BUILD_ID}\n")
         live_cb(f"[DEBUG] Linux S3 core path: {(ROOT / 'S3' / 'linux-macos' / 'modules' / 'core.sh')}\n")
+    if not ((form.get("LOCALS3_CONSOLE_PORT", [""])[0] or "").strip()):
+        form["LOCALS3_CONSOLE_PORT"] = ["9443"]
 
     requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
     if requested_https and (not requested_https.isdigit()):

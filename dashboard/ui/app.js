@@ -450,6 +450,9 @@ function App() {
       if (selectedIp) {
         body.set("LOCALS3_HOST_IP", selectedIp);
       }
+      if (action === "/run/s3_linux" && !String(body.get("LOCALS3_CONSOLE_PORT") || "").trim()) {
+        body.set("LOCALS3_CONSOLE_PORT", "9443");
+      }
 
       // Strict pre-check: do not start if port is owned by another app.
       const p = String(body.get("LOCALS3_HTTPS_PORT") || "").trim();
@@ -1434,7 +1437,7 @@ function App() {
                   { name: "PROXY_LAYER", label: "Layer", type: "select", options: layerOptions, defaultValue: proxy.layer || "layer3-basic", required: true },
                   { name: "PROXY_DOMAIN", label: "Domain", placeholder: "Required for real-domain / iran-optimized layers" },
                   { name: "PROXY_EMAIL", label: "Email", placeholder: "Required for real-domain / iran-optimized layers" },
-                  { name: "PROXY_DUCKDNS_TOKEN", label: "DuckDNS Token", placeholder: "Optional unless using DuckDNS" },
+                { name: "PROXY_DUCKDNS_TOKEN", label: "DuckDNS Token", placeholder: "Optional unless using DuckDNS", trailingAction: { label: "Open DuckDNS", href: "https://www.duckdns.org/" } },
                   { name: "PROXY_PANEL_PORT", label: "Proxy Dashboard Port", defaultValue: String((proxy.panel_url || "").match(/:(\d+)\s*$/)?.[1] || "8443"), required: true, placeholder: "8443" },
                   ...(cfg.os === "windows" ? [{ name: "PROXY_WSL_DISTRO", label: "WSL Distro", defaultValue: proxy.distro || "Ubuntu" }] : []),
                 ]}
