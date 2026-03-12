@@ -672,8 +672,10 @@ function App() {
   const onServiceAction = async (action, svc) => {
     if (!svc || !svc.name) return;
     if (action === "stop" || action === "delete") {
-      const label = action === "delete" ? "delete" : "stop";
-      const ok = window.confirm(`Do you want to ${label} '${svc.name}'?`);
+      const prompt = action === "delete" && String(svc.kind || "").toLowerCase() === "python_version"
+        ? `Do you want to hide detected Python '${svc.detail || svc.sub_status || svc.name}' from the dashboard?`
+        : `Do you want to ${action === "delete" ? "delete" : "stop"} '${svc.name}'?`;
+      const ok = window.confirm(prompt);
       if (!ok) return;
     }
     setServiceBusy(true);
@@ -682,6 +684,7 @@ function App() {
       body.set("action", action);
       body.set("name", svc.name);
       body.set("kind", svc.kind || "service");
+      body.set("detail", svc.detail || svc.sub_status || "");
       const r = await fetch("/api/system/service", {
         method: "POST",
         headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
@@ -733,6 +736,7 @@ function App() {
           body.set("action", "stop");
           body.set("name", svc.name);
           body.set("kind", svc.kind || "service");
+          body.set("detail", svc.detail || svc.sub_status || "");
           const r = await fetch("/api/system/service", {
             method: "POST",
             headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
@@ -792,6 +796,7 @@ function App() {
           body.set("action", action);
           body.set("name", svc.name);
           body.set("kind", svc.kind || "service");
+          body.set("detail", svc.detail || svc.sub_status || "");
           const r = await fetch("/api/system/service", {
             method: "POST",
             headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },

@@ -61,6 +61,7 @@ PROXY_NATIVE_STATE = SERVER_INSTALLER_DATA / "proxy" / "proxy-state.json"
 PYTHON_STATE_DIR = SERVER_INSTALLER_DATA / "python"
 PYTHON_STATE_FILE = PYTHON_STATE_DIR / "python-state.json"
 PYTHON_JUPYTER_STATE_FILE = PYTHON_STATE_DIR / "jupyter-state.json"
+PYTHON_IGNORED_FILE = PYTHON_STATE_DIR / "ignored-python.json"
 JUPYTER_SYSTEMD_SERVICE = "serverinstaller-jupyter.service"
 WINDOWS_LOCALS3_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "install-state.json"
 REPO_RAW_BASE = os.environ.get(
@@ -205,6 +206,25 @@ def _read_json_file(path_value):
     except Exception:
         pass
     return {}
+
+
+def _read_json_list(path_value):
+    data = _read_json_file(path_value)
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def _write_json_list(path_value, items):
+    safe = []
+    seen = set()
+    for item in items or []:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        safe.append(value)
+    return _write_json_file(path_value, safe)
 
 
 def _normalize_python_version(version_text):
@@ -358,6 +378,7 @@ def _linux_systemd_unit_status(unit_name):
 def _detect_python_versions():
     versions = []
     seen = set()
+    ignored = {str(item).strip() for item in _read_json_list(PYTHON_IGNORED_FILE) if str(item).strip()}
 
     def add_candidate(cmd, managed=False):
         rc, out = run_capture(cmd, timeout=20)
@@ -369,6 +390,8 @@ def _detect_python_versions():
         exe = lines[0]
         version = _normalize_python_version(lines[1])
         if not exe or not version:
+            return
+        if exe in ignored:
             return
         key = (exe.lower(), version)
         if key in seen:
@@ -414,12 +437,13 @@ def _python_state_service_item(info):
             "display_name": "Managed Python" if is_managed else "Detected Python",
             "status": "installed",
             "sub_status": runtime.get("python_executable") or "",
+            "detail": runtime.get("python_executable") or "",
             "autostart": False,
             "platform": "windows" if os.name == "nt" else "linux",
             "urls": [],
             "ports": [],
             "manageable": False,
-            "deletable": is_managed,
+            "deletable": True,
         })
     port_text = str(info.get("jupyter_port") or "").strip()
     ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
@@ -499,6 +523,17 @@ def _cleanup_managed_python():
     except Exception:
         pass
     return True, "Managed Python removed."
+
+
+def _hide_detected_python(python_executable):
+    path_value = str(python_executable or "").strip()
+    if not path_value:
+        return False, "A Python executable path is required."
+    current = _read_json_list(PYTHON_IGNORED_FILE)
+    if path_value not in current:
+        current.append(path_value)
+        _write_json_list(PYTHON_IGNORED_FILE, current)
+    return True, f"Detected Python hidden: {path_value}"
 
 
 def get_python_info():
@@ -2501,7 +2536,7 @@ def _windows_remove_service_and_files(svc_name):
     return rc == 0, (out or f"Service '{svc_name}' and managed files removed.")
 
 
-def manage_service(action, name, kind):
+def manage_service(action, name, kind, detail=""):
     action = (action or "").strip().lower()
     kind = (kind or "service").strip().lower()
     svc_name = _safe_service_name(name)
@@ -2615,6 +2650,11 @@ def manage_service(action, name, kind):
         if action == "delete":
             return _cleanup_managed_python()
         return False, "Unsupported managed Python action."
+
+    if kind == "python_version":
+        if action == "delete":
+            return _hide_detected_python(detail)
+        return False, "Detected Python entries only support delete."
 
     if os.name == "nt":
         if not is_windows_admin():
@@ -6303,7 +6343,8 @@ class Handler(BaseHTTPRequestHandler):
             action = (form.get("action", [""])[0] or "").strip()
             name = (form.get("name", [""])[0] or "").strip()
             kind = (form.get("kind", ["service"])[0] or "service").strip()
-            ok, message = manage_service(action, name, kind)
+            detail = (form.get("detail", [""])[0] or "").strip()
+            ok, message = manage_service(action, name, kind, detail)
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             self.write_json({"ok": ok, "message": message}, status)
             return
