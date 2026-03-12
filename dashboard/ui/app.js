@@ -1453,6 +1453,16 @@ function App() {
                   {!!proxy.layer && <Typography variant="body2">Layer: {proxy.layer}</Typography>}
                   {!!proxy.distro && <Typography variant="body2">WSL Distro: {proxy.distro}</Typography>}
                   {!!panelUrl && <Typography variant="body2" sx={{ mt: 1 }}>Panel URL: {panelUrl}</Typography>}
+                  {!!panelUrl && (
+                    <Button
+                      variant="contained"
+                      size="small"
+                      sx={{ mt: 1, textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+                      onClick={() => window.open(panelUrl, "_blank", "noopener,noreferrer")}
+                    >
+                      Open Proxy Panel
+                    </Button>
+                  )}
                   <Typography variant="body2">Source: vendored local copy of the proxy project</Typography>
                 </CardContent>
               </Card>
@@ -1468,6 +1478,15 @@ function App() {
                         Open Proxy Panel
                       </Button>
                     )}
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(proxyServices) ? "success" : "error"}
+                      disabled={serviceBusy || proxyServices.length === 0}
+                      onClick={() => batchServiceAction(proxyServices, "Proxy", hasStoppedServices(proxyServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+                    >
+                      {hasStoppedServices(proxyServices) ? "Start All Proxy" : "Stop All Proxy"}
+                    </Button>
                     <Button variant="outlined" disabled={isScopeLoading("proxy")} onClick={() => Promise.all([loadProxyInfo.current(), loadProxyServices.current()])} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}>
                       Refresh
                     </Button>

@@ -2858,7 +2858,7 @@ def run_linux_proxy_installer(form=None, live_cb=None):
     ensure_repo_files(PROXY_SYNC_FILES, live_cb=live_cb, refresh=True)
     form = form or {}
     env = os.environ.copy()
-    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT"):
+    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT", "SERVER_INSTALLER_DASHBOARD_PORT"):
         value = (form.get(key, [""])[0] or "").strip()
         if value:
             env[key] = value
@@ -2876,7 +2876,7 @@ def run_linux_proxy_installer(form=None, live_cb=None):
     cmd = ["bash", str(PROXY_LINUX_INSTALLER)]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         cmd = ["sudo", "env"]
-        for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT", "PROXY_REPO_ROOT"):
+        for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_PANEL_PORT", "PROXY_REPO_ROOT", "SERVER_INSTALLER_DASHBOARD_PORT"):
             value = env.get(key, "").strip()
             if value:
                 cmd.append(f"{key}={value}")
@@ -2894,7 +2894,7 @@ def run_windows_proxy_installer(form=None, live_cb=None):
     ensure_repo_files(PROXY_SYNC_FILES, live_cb=live_cb, refresh=True)
     form = form or {}
     env = os.environ.copy()
-    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_WSL_DISTRO", "PROXY_PANEL_PORT"):
+    for key in ("PROXY_LAYER", "PROXY_DOMAIN", "PROXY_EMAIL", "PROXY_DUCKDNS_TOKEN", "PROXY_WSL_DISTRO", "PROXY_PANEL_PORT", "SERVER_INSTALLER_DASHBOARD_PORT"):
         value = (form.get(key, [""])[0] or "").strip()
         if value:
             env[key] = value
@@ -5299,6 +5299,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/proxy_windows":
+            form["SERVER_INSTALLER_DASHBOARD_PORT"] = [str(getattr(self.server, "server_port", ""))]
             title = "Proxy Installer (Windows)"
             if self.is_fetch():
                 job_id = start_live_job(title, lambda cb: run_windows_proxy_installer(form, live_cb=cb))
@@ -5308,6 +5309,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/proxy_linux":
+            form["SERVER_INSTALLER_DASHBOARD_PORT"] = [str(getattr(self.server, "server_port", ""))]
             title = "Proxy Installer (Linux/macOS)"
             if self.is_fetch():
                 job_id = start_live_job(title, lambda cb: run_linux_proxy_installer(form, live_cb=cb))

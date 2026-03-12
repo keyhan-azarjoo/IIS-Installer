@@ -57,6 +57,14 @@ stop_proxy_panel() {
     return 1
 }
 
+allow_dashboard_port() {
+    local dashboard_port="${SERVER_INSTALLER_DASHBOARD_PORT:-}"
+    if [[ "$dashboard_port" =~ ^[0-9]+$ ]] && [ "$dashboard_port" -ge 1 ] && [ "$dashboard_port" -le 65535 ]; then
+        ufw allow "${dashboard_port}/tcp" >/dev/null 2>&1 || true
+        log "Dashboard port ${dashboard_port}/tcp allowed through firewall"
+    fi
+}
+
 
 # Pre-flight checks
 preflight_check() {
@@ -170,6 +178,7 @@ EOF
     # Configure firewall
     echo "Configuring firewall..."
     ufw allow 22/tcp
+    allow_dashboard_port
     ufw --force enable
     log "Firewall configured"
 

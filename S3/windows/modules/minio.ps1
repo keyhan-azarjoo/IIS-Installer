@@ -105,11 +105,13 @@ function Test-MinIOHealth([int]$apiPort) {
 function Test-HttpReachable([string]$uri) {
   try {
     $r = Invoke-WebRequest -Uri $uri -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 8
-    if ($r -and $r.StatusCode) { return $true }
+    if ($r -and $r.StatusCode -and $r.StatusCode -lt 500) { return $true }
   } catch {
-    # Any HTTP response (including 3xx/4xx/5xx) means endpoint is reachable.
     $resp = $_.Exception.Response
-    if ($resp -and $resp.StatusCode) { return $true }
+    if ($resp -and $resp.StatusCode) {
+      $statusCode = [int]$resp.StatusCode
+      if ($statusCode -lt 500) { return $true }
+    }
     return $false
   }
   return $false

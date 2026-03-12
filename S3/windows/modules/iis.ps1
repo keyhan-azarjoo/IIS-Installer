@@ -124,7 +124,12 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
             <add input="{SERVER_PORT}" pattern="^$consoleHttpsPort$" />
           </conditions>
           <serverVariables>
+            <set name="HTTP_HOST" value="{HTTP_HOST}" />
+            <set name="HTTP_X_REAL_IP" value="{REMOTE_ADDR}" />
             <set name="HTTP_X_FORWARDED_PROTO" value="https" />
+            <set name="HTTP_X_FORWARDED_SCHEME" value="https" />
+            <set name="HTTP_X_FORWARDED_SSL" value="on" />
+            <set name="HTTP_X_FORWARDED_PORT" value="{SERVER_PORT}" />
             <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
             <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
             <set name="HTTP_UPGRADE" value="{HTTP_UPGRADE}" />
@@ -135,7 +140,12 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
         <rule name="MinIOApiProxy" stopProcessing="true">
           <match url="(.*)" />
           <serverVariables>
+            <set name="HTTP_HOST" value="{HTTP_HOST}" />
+            <set name="HTTP_X_REAL_IP" value="{REMOTE_ADDR}" />
             <set name="HTTP_X_FORWARDED_PROTO" value="https" />
+            <set name="HTTP_X_FORWARDED_SCHEME" value="https" />
+            <set name="HTTP_X_FORWARDED_SSL" value="on" />
+            <set name="HTTP_X_FORWARDED_PORT" value="{SERVER_PORT}" />
             <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
             <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
           </serverVariables>
@@ -173,6 +183,9 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
     Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/proxy" -Name "preserveHostHeader" -Value "True" -ErrorAction Stop | Out-Null
     Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/proxy" -Name "reverseRewriteHostInResponseHeaders" -Value "False" -ErrorAction Stop | Out-Null
     try {
+      Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/proxy" -Name "maxResponseBufferSize" -Value 0 -ErrorAction Stop | Out-Null
+    } catch {}
+    try {
       Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/proxy" -Name "allowSslOffloading" -Value "True" -ErrorAction Stop | Out-Null
     } catch {
       Warn "ARR property 'allowSslOffloading' is not available on this IIS version. Continuing."
@@ -187,7 +200,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
 
   try {
     $allowedVars = Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/rewrite/allowedServerVariables" -Name "." -ErrorAction Stop
-    foreach ($varName in @("HTTP_X_FORWARDED_PROTO","HTTP_X_FORWARDED_HOST","HTTP_X_FORWARDED_FOR","HTTP_UPGRADE","HTTP_CONNECTION")) {
+    foreach ($varName in @("HTTP_HOST","HTTP_X_REAL_IP","HTTP_X_FORWARDED_PROTO","HTTP_X_FORWARDED_SCHEME","HTTP_X_FORWARDED_SSL","HTTP_X_FORWARDED_PORT","HTTP_X_FORWARDED_HOST","HTTP_X_FORWARDED_FOR","HTTP_UPGRADE","HTTP_CONNECTION")) {
       $alreadyAllowed = $false
       if ($allowedVars -and $allowedVars.Collection) {
         $alreadyAllowed = $null -ne ($allowedVars.Collection | Where-Object { $_.Attributes["name"].Value -eq $varName } | Select-Object -First 1)
@@ -349,6 +362,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   if (-not (Test-HttpReachable -uri $proxyUri)) {
     Warn "IIS HTTPS endpoint probe failed: $proxyUri"
     Warn "Check IIS logs/Event Viewer and confirm URL Rewrite + ARR are installed and enabled."
+    Warn "If the browser shows HTTP 500, inspect the LocalS3 IIS site and ARR proxy settings."
   }
   if (-not (Test-HttpReachable -uri $consoleProxyUri)) {
     Warn "IIS console HTTPS endpoint probe failed: $consoleProxyUri"
