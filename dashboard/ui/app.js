@@ -1816,10 +1816,6 @@ function App() {
                 { name: "PYTHON_VERSION", label: "Python Version", type: "select", options: ["3.13", "3.12", "3.11", "3.10"], defaultValue: pythonService.requested_version || "3.12", required: true },
                 ...(selectableIps.length > 0 ? [{ name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" }] : []),
                 { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
-                ...(cfg.os !== "windows" ? [
-                  { name: "PYTHON_JUPYTER_USER", label: "Jupyter Username", defaultValue: pythonService.jupyter_username || "", required: !pythonService.jupyter_auth_enabled, placeholder: "admin" },
-                  { name: "PYTHON_JUPYTER_PASSWORD", label: "Jupyter Password", type: "password", defaultValue: "", required: !pythonService.jupyter_auth_enabled, placeholder: pythonService.jupyter_auth_enabled ? "Leave blank to keep current password" : "Required" },
-                ] : []),
                 { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: "Managed default notebook directory." },
               ]}
               onRun={run}
@@ -1897,6 +1893,11 @@ function App() {
                             </Button>
                             <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
                           </>
+                        )}
+                        {svc.deletable && (
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
+                            Delete
+                          </Button>
                         )}
                       </Stack>
                     </Paper>

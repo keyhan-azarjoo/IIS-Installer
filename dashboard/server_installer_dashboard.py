@@ -406,10 +406,11 @@ def _python_state_service_item(info):
         return []
     items = []
     for runtime in info.get("python_versions") or []:
+        is_managed = bool(runtime.get("managed"))
         items.append({
-            "kind": "python_version",
+            "kind": "python_installation" if is_managed else "python_version",
             "name": f"python-{runtime.get('version') or 'unknown'}",
-            "display_name": "Managed Python" if runtime.get("managed") else "Detected Python",
+            "display_name": "Managed Python" if is_managed else "Detected Python",
             "status": "installed",
             "sub_status": runtime.get("python_executable") or "",
             "autostart": False,
@@ -417,6 +418,7 @@ def _python_state_service_item(info):
             "urls": [],
             "ports": [],
             "manageable": False,
+            "deletable": is_managed,
         })
     port_text = str(info.get("jupyter_port") or "").strip()
     ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
@@ -433,8 +435,69 @@ def _python_state_service_item(info):
         "urls": [info.get("jupyter_url")] if info.get("jupyter_url") else [],
         "ports": ports,
         "manageable": True,
+        "deletable": True,
     })
     return items
+
+
+def _cleanup_managed_jupyter():
+    if os.name != "nt":
+        if command_exists("systemctl"):
+            run_capture(["systemctl", "stop", JUPYTER_SYSTEMD_SERVICE], timeout=30)
+            run_capture(["systemctl", "disable", JUPYTER_SYSTEMD_SERVICE], timeout=30)
+        for path in (
+            Path("/etc/systemd/system") / JUPYTER_SYSTEMD_SERVICE,
+            Path("/etc/nginx/conf.d") / "serverinstaller-jupyter.conf",
+        ):
+            try:
+                if path.exists():
+                    path.unlink()
+            except Exception:
+                pass
+        cert_dir = Path("/etc/nginx/ssl/serverinstaller-jupyter")
+        try:
+            if cert_dir.exists():
+                shutil.rmtree(cert_dir, ignore_errors=True)
+        except Exception:
+            pass
+        if command_exists("systemctl"):
+            run_capture(["systemctl", "daemon-reload"], timeout=30)
+            run_capture(["systemctl", "reload", "nginx"], timeout=30)
+    for path in (
+        PYTHON_JUPYTER_STATE_FILE,
+        PYTHON_STATE_DIR / "jupyter.htpasswd",
+        PYTHON_STATE_DIR / "jupyter.log",
+    ):
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception:
+            pass
+    state = _read_json_file(PYTHON_STATE_FILE)
+    for key in (
+        "jupyter_installed",
+        "jupyter_running",
+        "jupyter_url",
+        "jupyter_port",
+        "jupyter_internal_port",
+        "jupyter_username",
+        "jupyter_auth_enabled",
+        "jupyter_https_enabled",
+        "service_mode",
+    ):
+        state.pop(key, None)
+    _write_json_file(PYTHON_STATE_FILE, state)
+    return True, "Managed Jupyter removed."
+
+
+def _cleanup_managed_python():
+    _cleanup_managed_jupyter()
+    try:
+        if PYTHON_STATE_DIR.exists():
+            shutil.rmtree(PYTHON_STATE_DIR, ignore_errors=True)
+    except Exception:
+        pass
+    return True, "Managed Python removed."
 
 
 def get_python_info():
@@ -582,8 +645,6 @@ def run_unix_python_installer(form=None, live_cb=None):
     host_ip = (form.get("PYTHON_HOST_IP", [""])[0] or "").strip()
     jupyter_port = (form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip()
     notebook_dir = _resolve_python_notebook_dir((form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip())
-    jupyter_user = (form.get("PYTHON_JUPYTER_USER", [""])[0] or "").strip()
-    jupyter_password = (form.get("PYTHON_JUPYTER_PASSWORD", [""])[0] or "").strip()
     system_user = (form.get("SYSTEM_USERNAME", [""])[0] or "").strip()
     system_password = (form.get("SYSTEM_PASSWORD", [""])[0] or "").strip()
     env["PYTHON_VERSION"] = version
@@ -593,12 +654,10 @@ def run_unix_python_installer(form=None, live_cb=None):
     env["PYTHON_NOTEBOOK_DIR"] = notebook_dir
     if host_ip:
         env["PYTHON_HOST_IP"] = host_ip
-    effective_user = system_user or jupyter_user
-    effective_password = system_password or jupyter_password
-    if effective_user:
-        env["PYTHON_JUPYTER_USER"] = effective_user
-    if effective_password:
-        env["PYTHON_JUPYTER_PASSWORD"] = effective_password
+    if system_user:
+        env["PYTHON_JUPYTER_USER"] = system_user
+    if system_password:
+        env["PYTHON_JUPYTER_PASSWORD"] = system_password
     cmd = ["bash", str(PYTHON_UNIX_INSTALLER)]
     if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
         cmd = ["sudo", "env"]
@@ -620,9 +679,9 @@ def run_unix_python_installer(form=None, live_cb=None):
     state["notebook_dir"] = notebook_dir
     if host_ip:
         state["host"] = host_ip
-    if effective_user:
-        state["jupyter_username"] = effective_user
-    if effective_user or state.get("jupyter_username"):
+    if system_user:
+        state["jupyter_username"] = system_user
+    if system_user or state.get("jupyter_username"):
         state["jupyter_auth_enabled"] = True
     state["jupyter_https_enabled"] = True
     state["service_mode"] = True
@@ -2544,12 +2603,15 @@ def manage_service(action, name, kind):
             )
             return code == 0, output
         if action == "delete":
-            stop_python_jupyter()
-            _write_json_file(PYTHON_JUPYTER_STATE_FILE, {})
-            return True, "Managed Jupyter state removed."
+            return _cleanup_managed_jupyter()
         if action in ("autostart_on", "autostart_off"):
             return False, "Auto-start is not configured for managed Jupyter yet."
         return False, "Unsupported Python runtime action."
+
+    if kind == "python_installation":
+        if action == "delete":
+            return _cleanup_managed_python()
+        return False, "Unsupported managed Python action."
 
     if os.name == "nt":
         if not is_windows_admin():
@@ -2682,6 +2744,136 @@ def is_windows_admin():
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except Exception:
         return False
+
+
+def is_windows_local_system():
+    if os.name != "nt":
+        return False
+    username = str(os.environ.get("USERNAME") or "").strip().lower()
+    userdomain = str(os.environ.get("USERDOMAIN") or "").strip().lower()
+    if username == "system":
+        return True
+    return userdomain == "nt authority" and username == "system"
+
+
+def _ps_single_quote(value):
+    return "'" + str(value or "").replace("'", "''") + "'"
+
+
+def get_active_windows_user():
+    if os.name != "nt":
+        return ""
+    rc, out = run_capture(["query", "user"], timeout=15)
+    if rc != 0 or not out:
+        return ""
+    for line in out.splitlines():
+        match = re.match(r"^\s*>?(?P<user>\S+)\s+\S+\s+\d+\s+Active\b", line)
+        if match:
+            return match.group("user").strip()
+    return ""
+
+
+def run_windows_interactive_powershell_file(script_path, env=None, live_cb=None, timeout=3600):
+    if os.name != "nt":
+        return 1, "Interactive Windows runner is only available on Windows hosts."
+    active_user = get_active_windows_user()
+    if not active_user:
+        return 1, "No active signed-in Windows user session was found."
+    job_dir = SERVER_INSTALLER_DATA / "jobs" / "interactive"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    token = f"{int(time.time())}-{secrets.token_hex(4)}"
+    task_name = f"ServerInstaller-Interactive-{token}"
+    runner_path = job_dir / f"{token}-runner.ps1"
+    log_path = job_dir / f"{token}.log"
+    exit_path = job_dir / f"{token}.exit"
+    env = env or os.environ.copy()
+    passthrough_keys = sorted(
+        key for key, value in env.items()
+        if str(value or "").strip()
+    )
+    runner_lines = [
+        "$ErrorActionPreference = 'Stop'",
+        f"$logFile = {_ps_single_quote(str(log_path))}",
+        f"$exitFile = {_ps_single_quote(str(exit_path))}",
+        f"$targetScript = {_ps_single_quote(str(script_path))}",
+        "$null = New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($logFile))",
+        "Set-Content -Path $logFile -Value '' -Encoding UTF8",
+    ]
+    for key in passthrough_keys:
+        runner_lines.append(f"$env:{key} = {_ps_single_quote(env.get(key, ''))}")
+    runner_lines += [
+        "try {",
+        "  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $targetScript *>&1 | Tee-Object -FilePath $logFile -Append",
+        "  $code = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }",
+        "} catch {",
+        "  ($_ | Out-String) | Tee-Object -FilePath $logFile -Append | Out-Null",
+        "  $code = 1",
+        "}",
+        "Set-Content -Path $exitFile -Value $code -Encoding ASCII",
+        "exit $code",
+    ]
+    runner_path.write_text("\r\n".join(runner_lines) + "\r\n", encoding="utf-8")
+
+    register_ps = "\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        f"$taskName = {_ps_single_quote(task_name)}",
+        f"$runner = {_ps_single_quote(str(runner_path))}",
+        f"$user = {_ps_single_quote(active_user)}",
+        "schtasks /Delete /TN $taskName /F 1>$null 2>$null | Out-Null",
+        "$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -File \"' + $runner + '\"')",
+        "$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest",
+        "$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries",
+        "Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null",
+        "Start-ScheduledTask -TaskName $taskName",
+    ])
+    rc, out = run_capture(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", register_ps],
+        timeout=60,
+    )
+    if rc != 0:
+        try:
+            runner_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return 1, out or "Failed to start interactive installer task."
+
+    chunks = []
+    offset = 0
+    deadline = time.time() + max(30, int(timeout))
+    try:
+        while time.time() < deadline:
+            if log_path.exists():
+                try:
+                    content = log_path.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    content = ""
+                if offset < len(content):
+                    new_text = content[offset:]
+                    offset = len(content)
+                    chunks.append(new_text)
+                    if live_cb and new_text:
+                        live_cb(new_text)
+            if exit_path.exists():
+                break
+            time.sleep(0.7)
+        if not exit_path.exists():
+            return 1, "".join(chunks).rstrip() + ("\nTimed out waiting for interactive installer task." if chunks else "Timed out waiting for interactive installer task.")
+        try:
+            exit_code = int(exit_path.read_text(encoding="ascii", errors="ignore").strip() or "1")
+        except Exception:
+            exit_code = 1
+        return exit_code, "".join(chunks).strip()
+    finally:
+        cleanup_ps = "\n".join([
+            f"$taskName = {_ps_single_quote(task_name)}",
+            "Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null",
+        ])
+        run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cleanup_ps], timeout=30)
+        for path in (runner_path, exit_path):
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def validate_os_credentials(username, password):
@@ -3724,6 +3916,14 @@ def run_windows_proxy_installer(form=None, live_cb=None):
             usage = get_port_usage(panel_port, "tcp")
             if not usage.get("managed_owner"):
                 return 1, f"Requested proxy dashboard port {panel_port} is already in use. Choose another port."
+    if is_windows_local_system():
+        env["PROXY_SKIP_INTERACTIVE_RELAUNCH"] = "1"
+        return run_windows_interactive_powershell_file(
+            PROXY_WINDOWS_INSTALLER,
+            env=env,
+            live_cb=live_cb,
+            timeout=3600,
+        )
     return run_process(
         ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(PROXY_WINDOWS_INSTALLER)],
         env=env,
