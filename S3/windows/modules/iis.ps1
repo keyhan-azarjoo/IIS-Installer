@@ -94,6 +94,26 @@ function Ensure-IISInstalled {
   Info "IIS prerequisites installed successfully."
 }
 
+function Ensure-HttpSysUrlSegmentLimit([int]$minimumLength = 4096) {
+  $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\HTTP\Parameters"
+  $currentValue = $null
+  try {
+    $currentValue = (Get-ItemProperty -Path $regPath -Name "UrlSegmentMaxLength" -ErrorAction SilentlyContinue).UrlSegmentMaxLength
+  } catch {}
+
+  $effectiveValue = if ($null -eq $currentValue) { 260 } else { [int]$currentValue }
+  if ($effectiveValue -ge $minimumLength) {
+    Info "HTTP.sys UrlSegmentMaxLength is already $effectiveValue."
+    return
+  }
+
+  Warn "Windows HTTP.sys UrlSegmentMaxLength is $effectiveValue, which is too small for MinIO shared-file URLs."
+  Info "Raising HTTP.sys UrlSegmentMaxLength to $minimumLength..."
+  New-Item -Path $regPath -Force | Out-Null
+  New-ItemProperty -Path $regPath -Name "UrlSegmentMaxLength" -PropertyType DWord -Value $minimumLength -Force | Out-Null
+  Mark-RestartRequired "HTTP.sys UrlSegmentMaxLength increased to support long MinIO shared-file URLs"
+}
+
 
 function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath,[string]$keyPath,[int]$httpsPort,[int]$targetPort,[int]$consoleHttpsPort,[int]$uiPort,[string]$lanIp) {
   Import-Module WebAdministration
@@ -430,6 +450,10 @@ function Install-IISMode {
   $consoleRedirectUrl = if ($domain -eq "localhost" -and $lanIp) { "" } else { $consoleBrowserUrl }
 
   Ensure-IISInstalled
+  Ensure-HttpSysUrlSegmentLimit
+  if (Finish-Or-Restart) {
+    return
+  }
   Ensure-MinIONative -root $root -apiPort $apiPort -uiPort $uiPort -publicUrl $publicUrl -consoleBrowserUrl $consoleRedirectUrl -browserSessionDuration $browserSessionDuration
   $crt = Join-Path $certDir "localhost.crt"
   $key = Join-Path $certDir "localhost.key"
