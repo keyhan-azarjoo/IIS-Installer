@@ -347,6 +347,27 @@ def _python_run_capture(args, timeout=30):
     return run_capture([python_exe] + list(args), timeout=timeout)
 
 
+def _hash_jupyter_password(python_executable, password_text):
+    python_exe = str(python_executable or "").strip()
+    password_value = str(password_text or "")
+    if not python_exe or not password_value:
+        return ""
+    rc, out = run_capture(
+        [
+            python_exe,
+            "-c",
+            (
+                "from jupyter_server.auth import passwd; "
+                f"print(passwd({password_value!r}))"
+            ),
+        ],
+        timeout=30,
+    )
+    if rc != 0:
+        return ""
+    return str(out or "").strip().splitlines()[-1].strip()
+
+
 def _python_process_running(pid):
     try:
         pid_num = int(pid)
@@ -614,6 +635,7 @@ def _cleanup_managed_jupyter():
         "jupyter_port",
         "jupyter_internal_port",
         "jupyter_username",
+        "jupyter_password_hash",
         "jupyter_auth_enabled",
         "jupyter_https_enabled",
         "service_mode",
@@ -777,6 +799,8 @@ def run_windows_python_installer(form=None, live_cb=None):
     host_ip = (form.get("PYTHON_HOST_IP", [""])[0] or "").strip()
     jupyter_port = (form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip()
     notebook_dir = _resolve_python_notebook_dir((form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip())
+    system_user = (form.get("SYSTEM_USERNAME", [""])[0] or "").strip()
+    system_password = (form.get("SYSTEM_PASSWORD", [""])[0] or "").strip()
     env["PYTHON_VERSION"] = version
     env["PYTHON_INSTALL_JUPYTER"] = "1" if install_jupyter in ("1", "true", "yes", "y", "on") else "0"
     env["PYTHON_JUPYTER_PORT"] = jupyter_port
@@ -797,6 +821,15 @@ def run_windows_python_installer(form=None, live_cb=None):
         state["jupyter_port"] = jupyter_port
     state["default_notebook_dir"] = notebook_dir
     state["notebook_dir"] = notebook_dir
+    if system_user:
+        state["jupyter_username"] = system_user
+    if system_password:
+        state["jupyter_password_hash"] = _hash_jupyter_password(state.get("python_executable"), system_password)
+        state["jupyter_auth_enabled"] = bool(state.get("jupyter_password_hash"))
+    else:
+        state["jupyter_password_hash"] = ""
+        state["jupyter_auth_enabled"] = False
+    state["jupyter_https_enabled"] = False
     _write_json_file(PYTHON_STATE_FILE, state)
     if install_jupyter in ("1", "true", "yes", "y", "on"):
         start_code, start_output = start_python_jupyter(
@@ -899,6 +932,8 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
     python_executable = str(resolved.get("python_executable") or "").strip()
     if not python_executable:
         return 1, "Install Python first."
+    python_state = _read_json_file(PYTHON_STATE_FILE)
+    password_hash = str(python_state.get("jupyter_password_hash") or "").strip()
     rc_j, out_j = run_capture([python_executable, "-m", "jupyter", "--version"], timeout=20)
     if rc_j != 0:
         return 1, "Jupyter is not installed for the managed Python interpreter."
@@ -941,17 +976,22 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
         f"--ServerApp.ip={bind_host}",
         f"--ServerApp.port={port}",
         "--ServerApp.port_retries=0",
-        "--ServerApp.token=",
-        "--ServerApp.password=",
         "--ServerApp.allow_remote_access=True",
         f"--ServerApp.root_dir={notebook_dir}",
     ]
+    if password_hash:
+        args.append("--IdentityProvider.token=")
+        args.append(f"--PasswordIdentityProvider.hashed_password={password_hash}")
+    else:
+        args.append("--ServerApp.token=")
+        args.append("--ServerApp.password=")
     env = _python_env(python_executable)
     env["JUPYTER_CONFIG_DIR"] = str(jupyter_config_dir)
     env["JUPYTER_DATA_DIR"] = str(jupyter_data_dir)
     env["JUPYTER_RUNTIME_DIR"] = str(jupyter_runtime_dir)
     env["JUPYTER_NO_CONFIG"] = "1"
     env["JUPYTER_PREFER_ENV_PATH"] = "1"
+    env["JUPYTER_ALLOW_INSECURE_WRITES"] = "true"
     env["IPYTHONDIR"] = str(ipython_dir)
     try:
         log_handle = open(log_path, "ab")
@@ -997,6 +1037,9 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
             "url": url,
             "log_path": str(log_path),
             "notebook_dir": notebook_dir,
+            "username": str(python_state.get("jupyter_username") or "").strip(),
+            "auth_enabled": bool(password_hash),
+            "https_enabled": False,
             "running": True,
         })
         message = f"Jupyter Lab started at {url}."

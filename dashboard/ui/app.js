@@ -1851,6 +1851,10 @@ function App() {
                 },
                 { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
                 { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
+                ...(cfg.os === "windows" ? [
+                  { name: "SYSTEM_USERNAME", label: "Jupyter Username", defaultValue: pythonService.jupyter_username || "admin", required: true, placeholder: "admin" },
+                  { name: "SYSTEM_PASSWORD", label: "Jupyter Password", type: "password", required: true, placeholder: "Enter Jupyter password" },
+                ] : []),
               ]}
               onRun={run}
               color="#2563eb"
@@ -1866,8 +1870,8 @@ function App() {
                 <Typography variant="body2">Notebook Directory: {pythonNotebookDir || "-"}</Typography>
                 <Typography variant="body2">Jupyter: {pythonService.jupyter_installed ? "Installed" : "Not installed"}</Typography>
                 <Typography variant="body2">Jupyter Status: {pythonService.jupyter_running ? "Running" : "Stopped"}</Typography>
-                {cfg.os !== "windows" && <Typography variant="body2">HTTPS: {pythonService.jupyter_https_enabled ? "Enabled" : "Disabled"}</Typography>}
-                {cfg.os !== "windows" && <Typography variant="body2">Auth User: {pythonService.jupyter_username || "-"}</Typography>}
+                <Typography variant="body2">HTTPS: {pythonService.jupyter_https_enabled ? "Enabled" : "Disabled"}</Typography>
+                <Typography variant="body2">Auth User: {pythonService.jupyter_username || "-"}</Typography>
                 {!!pythonUrl && <Typography variant="body2" sx={{ mt: 1 }}>URL: {pythonUrl}</Typography>}
               </CardContent>
             </Card>
