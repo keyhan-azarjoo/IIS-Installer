@@ -23,6 +23,11 @@ DASHBOARD_KEY = os.environ.get("DASHBOARD_KEY", "").strip()
 SYNC_DASHBOARD_FILES = [
     "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
+    "dashboard/file_manager.py",
+    "dashboard/ui_assets.py",
+    "dashboard/ui/core.js",
+    "dashboard/ui/utils.js",
+    "dashboard/ui/actions.js",
     "dashboard/ui/components.js",
     "dashboard/ui/app.js",
 ]

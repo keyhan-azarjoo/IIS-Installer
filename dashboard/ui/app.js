@@ -4,204 +4,37 @@ const {
 } = MaterialUI;
 
 const { ActionCard, NavCard } = (window.ServerInstallerUI && window.ServerInstallerUI.components) || {};
-const cfg = window.__APP_CONFIG__ || { os: "windows", os_label: "Windows", message: "" };
-const MuiIcons = window.MaterialUIIcons || {};
-const DownloadCompassIcon = MuiIcons.DownloadRounded || MuiIcons.Download || null;
-const CopyCompassIcon = MuiIcons.ContentCopyRounded || MuiIcons.ContentCopy || null;
-const TryOpenCompassIcon = MuiIcons.OpenInNewRounded || MuiIcons.LaunchRounded || MuiIcons.OpenInNew || MuiIcons.Launch || null;
-const OpenCompassStyleIcon = MuiIcons.LanguageRounded || MuiIcons.PublicRounded || MuiIcons.Language || MuiIcons.Public || null;
-const RefreshSmallIcon = MuiIcons.RefreshRounded || MuiIcons.SyncRounded || MuiIcons.Refresh || null;
-const StartAllIcon = MuiIcons.PlayArrowRounded || MuiIcons.PlayArrow || null;
-const StopAllIcon = MuiIcons.StopRounded || MuiIcons.Stop || null;
-const DRAWER_W = 250;
-const DRAWER_MIN = 82;
-
-function formatBytes(v) {
-  const n = Number(v || 0);
-  if (!n || n < 0) return "-";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let idx = 0;
-  let size = n;
-  while (size >= 1024 && idx < units.length - 1) {
-    size /= 1024;
-    idx += 1;
-  }
-  return `${size.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
-}
-
-function formatUptime(v) {
-  const sec = Number(v || 0);
-  if (!sec) return "-";
-  const d = Math.floor(sec / 86400);
-  const h = Math.floor((sec % 86400) / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  return `${d}d ${h}h ${m}m`;
-}
-
-function clampPercent(v) {
-  const n = Number(v || 0);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, n));
-}
-
-function isSelectableHostIp(ip) {
-  const value = String(ip || "").trim();
-  if (!value) return false;
-  if (value.includes(":")) return false;
-  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return false;
-  const octets = value.split(".").map((part) => Number(part));
-  if (octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-  if (value.startsWith("127.")) return false;
-  if (value.startsWith("169.254.")) return false;
-  if (value === "0.0.0.0") return false;
-  if (octets[0] === 172 && (octets[1] < 16 || octets[1] > 31)) return false;
-  return true;
-}
-
-function getSelectableIps(systemInfo) {
-  const values = [];
-  const pushIp = (ip) => {
-    if (!isSelectableHostIp(ip)) return;
-    if (!values.includes(ip)) values.push(ip);
-  };
-  (systemInfo?.ips || []).forEach(pushIp);
-  pushIp(systemInfo?.public_ip);
-  return values;
-}
-
-function trimDetectedUrl(value) {
-  return String(value || "").trim().replace(/[),.;]+$/, "");
-}
-
-function extractLabeledUrl(text, label) {
-  const source = String(text || "");
-  const safeLabel = String(label || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = source.match(new RegExp(`${safeLabel}\\s*:\\s*(https?:\\/\\/\\S+)`, "i"));
-  return match ? trimDetectedUrl(match[1]) : "";
-}
-
-function uniqUrls(items) {
-  const values = [];
-  (items || []).forEach((item) => {
-    const url = trimDetectedUrl(item);
-    if (!url || values.includes(url)) return;
-    values.push(url);
-  });
-  return values;
-}
-
-function defaultNotebookDirForOs(osName) {
-  const value = String(osName || "").toLowerCase();
-  if (value === "windows") return "C:\\ServerInstaller-Notebooks";
-  return "/root/notebooks";
-}
-
-function defaultPythonApiDirForOs(osName) {
-  const value = String(osName || "").toLowerCase();
-  if (value === "windows") return "C:\\ServerInstaller-PythonApi";
-  if (value === "darwin") return "/usr/local/serverinstaller/python-api";
-  return "/opt/serverinstaller/python-api";
-}
-
-function defaultWebsiteDirForOs(osName) {
-  const value = String(osName || "").toLowerCase();
-  if (value === "windows") return "C:\\ServerInstaller-Websites";
-  return "/var/www/site";
-}
-
-function MiniMetric({ label, valueText, percent, color }) {
-  return (
-    <Paper variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.3 }}>
-        <Typography variant="caption" color="text.secondary">{label}</Typography>
-        <Typography variant="caption" fontWeight={700}>{valueText}</Typography>
-      </Stack>
-      <LinearProgress
-        variant="determinate"
-        value={clampPercent(percent)}
-        sx={{
-          height: 5,
-          borderRadius: 3,
-          bgcolor: "rgba(15,23,42,.08)",
-          "& .MuiLinearProgress-bar": { bgcolor: color || "#2563eb" },
-        }}
-      />
-    </Paper>
-  );
-}
-
-function ActionIcon({ title, onClick, disabled, color = "primary", variant = "outlined", IconComp, fallback }) {
-  return (
-    <Tooltip title={title}>
-      <span>
-        <Button
-          type="button"
-          color={color}
-          variant={variant}
-          disabled={disabled}
-          onClick={onClick}
-          aria-label={title}
-          startIcon={IconComp ? <IconComp fontSize="small" /> : null}
-          sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
-        >
-          {title}
-          {!IconComp && fallback ? ` ${fallback}` : ""}
-        </Button>
-      </span>
-    </Tooltip>
-  );
-}
-
-function IconOnlyAction({ title, onClick, disabled, color = "default", variant = "outlined", IconComp, fallback }) {
-  const showFallback = !IconComp && !!fallback;
-  return (
-    <Tooltip title={title}>
-      <span>
-        <IconButton
-          type="button"
-          color={color}
-          disabled={disabled}
-          onClick={onClick}
-          aria-label={title}
-          size="small"
-          sx={{
-            border: "1px solid",
-            borderColor: variant === "contained" ? "transparent" : "rgba(37,99,235,.22)",
-            bgcolor: variant === "contained" ? "primary.main" : "transparent",
-            color: variant === "contained" ? "#fff" : "inherit",
-            borderRadius: 2,
-            px: showFallback ? 1 : 0.8,
-            minWidth: showFallback ? 40 : "auto",
-            "&:hover": {
-              bgcolor: variant === "contained" ? "primary.dark" : "rgba(37,99,235,.08)",
-            },
-          }}
-        >
-          {IconComp ? <IconComp fontSize="small" /> : (
-            showFallback ? <Typography component="span" variant="caption" fontWeight={800}>{fallback}</Typography> : null
-          )}
-        </IconButton>
-      </span>
-    </Tooltip>
-  );
-}
-
-function isServiceRunningStatus(status, subStatus = "") {
-  const primary = String(status || "").trim();
-  const secondary = String(subStatus || "").trim();
-  if (/running|up/i.test(secondary)) return true;
-  if (/dead|failed|inactive|exited/i.test(secondary)) return false;
-  return /running|active|up/i.test(primary);
-}
-
-function formatServiceState(status, subStatus = "") {
-  const primary = String(status || "").trim();
-  const secondary = String(subStatus || "").trim();
-  if (primary && secondary && primary.toLowerCase() !== secondary.toLowerCase()) {
-    return `${primary}/${secondary}`;
-  }
-  return primary || secondary || "-";
-}
+const { core = {}, utils = {}, actions = {} } = window.ServerInstallerUI || {};
+const {
+  cfg = { os: "windows", os_label: "Windows", message: "" },
+  DownloadCompassIcon,
+  CopyCompassIcon,
+  TryOpenCompassIcon,
+  OpenCompassStyleIcon,
+  RefreshSmallIcon,
+  StartAllIcon,
+  StopAllIcon,
+  DRAWER_W = 250,
+  DRAWER_MIN = 82,
+} = core;
+const {
+  clampPercent,
+  defaultNotebookDirForOs,
+  defaultPythonApiDirForOs,
+  defaultWebsiteDirForOs,
+  extractLabeledUrl,
+  formatBytes,
+  formatUptime,
+  getSelectableIps,
+  uniqUrls,
+} = utils;
+const {
+  ActionIcon,
+  formatServiceState,
+  IconOnlyAction,
+  isServiceRunningStatus,
+  MiniMetric,
+} = actions;
 
 function App() {
   const isMobile = MaterialUI.useMediaQuery("(max-width:1100px)");
