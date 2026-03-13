@@ -1474,8 +1474,38 @@ def _python_api_service_items():
             "manageable": True,
             "deletable": True,
             "detail": str(payload.get("entry_file") or ""),
+            "python_api": True,
+            "target_page": "python-system" if kind == "service" else ("python-docker" if kind == "docker" else ("python-iis" if kind == "iis_site" else "python-api")),
+            "deployment_key": str(payload.get("deployment_key") or ""),
+            "form_name": str(payload.get("form_name") or name),
+            "project_path": str(payload.get("project_path") or ""),
+            "deploy_root": str(payload.get("deploy_root") or ""),
+            "main_file": str(payload.get("entry_file") or ""),
+            "host": str(payload.get("host") or ""),
+            "port_value": str(payload.get("port") or ""),
+            "service_log": str(payload.get("service_log") or ""),
         })
     return items
+
+
+def _windows_service_state(service_name):
+    rc, out = run_capture(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            f"$svc=Get-CimInstance Win32_Service -Filter \"Name='{service_name}'\" -ErrorAction SilentlyContinue; if($svc){{Write-Output ($svc.State + '|' + $svc.StartMode)}}",
+        ],
+        timeout=20,
+    )
+    if rc != 0 or not out:
+        return "", ""
+    parts = str(out).strip().split("|", 1)
+    state = parts[0].strip() if parts else ""
+    start_mode = parts[1].strip() if len(parts) > 1 else ""
+    return state, start_mode
 
 
 def run_windows_python_api_service(form=None, live_cb=None):
@@ -1519,15 +1549,20 @@ def run_windows_python_api_service(form=None, live_cb=None):
         keyfile=keyfile,
     )
     service_script = deploy["deploy_root"] / ".serverinstaller" / "windows_service.py"
+    service_log = deploy["deploy_root"] / ".serverinstaller" / "service-runtime.log"
     service_script.write_text(
         "\n".join([
+            "import os",
             "import subprocess",
             "import sys",
+            "import time",
             "import win32event",
+            "import servicemanager",
             "import win32service",
             "import win32serviceutil",
             "",
             f"RUNNER = r'''{str(runner_script.resolve())}'''",
+            f"LOG_PATH = r'''{str(service_log.resolve())}'''",
             f"SERVICE_NAME = {service_name!r}",
             f"DISPLAY_NAME = {service_name.replace('-', ' ').title()!r}",
             "",
@@ -1539,6 +1574,7 @@ def run_windows_python_api_service(form=None, live_cb=None):
             "        win32serviceutil.ServiceFramework.__init__(self, args)",
             "        self.stop_event = win32event.CreateEvent(None, 0, 0, None)",
             "        self.proc = None",
+            "        self.log_handle = None",
             "    def SvcStop(self):",
             "        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)",
             "        if self.proc and self.proc.poll() is None:",
@@ -1547,14 +1583,25 @@ def run_windows_python_api_service(form=None, live_cb=None):
             "                self.proc.wait(timeout=15)",
             "            except Exception:",
             "                self.proc.kill()",
+            "        if self.log_handle:",
+            "            self.log_handle.flush()",
+            "            self.log_handle.close()",
             "        win32event.SetEvent(self.stop_event)",
             "    def SvcDoRun(self):",
-            f"        self.proc = subprocess.Popen([r'''{venv_python}''', RUNNER], cwd=r'''{str(deploy['deploy_root'].resolve())}''')",
+            "        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)",
+            "        self.log_handle = open(LOG_PATH, 'a', encoding='utf-8', buffering=1)",
+            "        self.log_handle.write(f'[{time.strftime(\"%Y-%m-%d %H:%M:%S\")}] Service starting\\n')",
+            f"        self.proc = subprocess.Popen([r'''{venv_python}''', RUNNER], cwd=r'''{str(deploy['deploy_root'].resolve())}''', stdout=self.log_handle, stderr=subprocess.STDOUT)",
+            "        self.ReportServiceStatus(win32service.SERVICE_RUNNING)",
+            "        servicemanager.LogInfoMsg(f'{SERVICE_NAME} started')",
             "        while True:",
             "            status = win32event.WaitForSingleObject(self.stop_event, 2000)",
             "            if status == win32event.WAIT_OBJECT_0:",
             "                break",
             "            if self.proc.poll() is not None:",
+            "                if self.log_handle:",
+            "                    self.log_handle.write(f'[{time.strftime(\"%Y-%m-%d %H:%M:%S\")}] Runner exited with code {self.proc.returncode}\\n')",
+            "                    self.log_handle.flush()",
             "                raise RuntimeError(f'Python API process exited with code {self.proc.returncode}.')",
             "",
             "if __name__ == '__main__':",
@@ -1568,18 +1615,37 @@ def run_windows_python_api_service(form=None, live_cb=None):
     if code != 0:
         return code, output or "Failed to install the Windows Python API service."
     code, output = run_process([venv_python, str(service_script), "start"], live_cb=live_cb)
-    if code != 0:
-        return code, output or "Failed to start the Windows Python API service."
+    if code != 0 and live_cb:
+        live_cb((output or "Service start command returned a non-zero exit code.") + "\n")
+    deadline = time.time() + 25
+    service_state = ""
+    start_mode = ""
+    while time.time() < deadline:
+        service_state, start_mode = _windows_service_state(service_name)
+        if service_state.lower() == "running":
+            break
+        time.sleep(1)
+    if service_state.lower() != "running":
+        try:
+            runtime_log = service_log.read_text(encoding="utf-8", errors="ignore").strip()
+        except Exception:
+            runtime_log = ""
+        detail = runtime_log[-4000:] if runtime_log else (output or "Service did not reach the Running state.")
+        return 1, f"Windows service '{service_name}' failed to start.\nService state: {service_state or 'unknown'}\n{detail}"
     manage_firewall_port("open", deploy["https_port"], "tcp")
     url = f"https://{deploy['host']}:{deploy['https_port']}"
     _update_python_api_state(service_name, {
         "kind": "service",
         "name": service_name,
+        "form_name": service_name,
+        "deployment_key": deploy["deploy_key"],
         "url": url,
         "deploy_root": str(deploy["deploy_root"]),
+        "project_path": str(deploy["deploy_root"] / "app"),
         "entry_file": deploy["entry_rel"],
         "host": deploy["host"],
         "port": deploy["https_port"],
+        "service_log": str(service_log),
     })
     return 0, f"Python API OS service deployed.\nService: {service_name}\nURL: {url}\nEntry file: {deploy['entry_rel']}\n"
 
@@ -1652,8 +1718,11 @@ def run_unix_python_api_service(form=None, live_cb=None):
     _update_python_api_state(service_name, {
         "kind": "service",
         "name": unit_name,
+        "form_name": service_name,
+        "deployment_key": deploy["deploy_key"],
         "url": url,
         "deploy_root": str(deploy["deploy_root"]),
+        "project_path": str(deploy["deploy_root"] / "app"),
         "entry_file": deploy["entry_rel"],
         "host": deploy["host"],
         "port": deploy["https_port"],
@@ -1732,8 +1801,11 @@ def run_python_api_docker(form=None, live_cb=None):
     _update_python_api_state(deployment_name, {
         "kind": "docker",
         "name": deployment_name,
+        "form_name": deployment_name,
+        "deployment_key": deploy["deploy_key"],
         "url": url,
         "deploy_root": str(deploy["deploy_root"]),
+        "project_path": str(deploy["deploy_root"] / "app"),
         "entry_file": deploy["entry_rel"],
         "host": deploy["host"],
         "port": deploy["https_port"],
@@ -1830,8 +1902,11 @@ def run_windows_python_api_iis(form=None, live_cb=None):
     _update_python_api_state(site_key, {
         "kind": "iis_site",
         "name": site_name,
+        "form_name": site_name,
+        "deployment_key": deploy["deploy_key"],
         "url": url,
         "deploy_root": str(deploy["deploy_root"]),
+        "project_path": str(deploy["deploy_root"] / "app"),
         "entry_file": deploy["entry_rel"],
         "host": deploy["host"],
         "port": https_port,
