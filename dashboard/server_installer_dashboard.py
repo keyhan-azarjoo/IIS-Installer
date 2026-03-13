@@ -53,6 +53,7 @@ S3_LINUX_INSTALLER = ROOT / "S3" / "linux-macos" / "setup-storage.sh"
 MONGO_WINDOWS_INSTALLER = ROOT / "Mongo" / "windows" / "setup-mongodb.ps1"
 PYTHON_WINDOWS_INSTALLER = ROOT / "Python" / "windows" / "setup-python.ps1"
 PYTHON_UNIX_INSTALLER = ROOT / "Python" / "linux-macos" / "setup-python.sh"
+PYTHON_API_HOST_TEMPLATE = ROOT / "Python" / "common" / "serverinstaller_python_api_host.py"
 PROXY_LINUX_INSTALLER = ROOT / "Proxy" / "linux-macos" / "setup-proxy.sh"
 PROXY_WINDOWS_INSTALLER = ROOT / "Proxy" / "windows" / "setup-proxy.ps1"
 PROXY_ROOT = ROOT / "Proxy"
@@ -62,6 +63,7 @@ PYTHON_STATE_DIR = SERVER_INSTALLER_DATA / "python"
 PYTHON_STATE_FILE = PYTHON_STATE_DIR / "python-state.json"
 PYTHON_JUPYTER_STATE_FILE = PYTHON_STATE_DIR / "jupyter-state.json"
 PYTHON_IGNORED_FILE = PYTHON_STATE_DIR / "ignored-python.json"
+PYTHON_API_STATE_FILE = PYTHON_STATE_DIR / "python-api-state.json"
 JUPYTER_SYSTEMD_SERVICE = "serverinstaller-jupyter.service"
 WINDOWS_LOCALS3_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "install-state.json"
 REPO_RAW_BASE = os.environ.get(
@@ -102,10 +104,12 @@ MONGO_UNIX_FILES = [
 
 PYTHON_WINDOWS_FILES = [
     "Python/windows/setup-python.ps1",
+    "Python/common/serverinstaller_python_api_host.py",
 ]
 
 PYTHON_UNIX_FILES = [
     "Python/linux-macos/setup-python.sh",
+    "Python/common/serverinstaller_python_api_host.py",
 ]
 
 PROXY_FILES = [
@@ -1070,6 +1074,576 @@ def get_python_info():
                 )
     info["services"] = _python_state_service_item(info)
     return info
+
+
+def _safe_python_api_name(value, default_name="python-api"):
+    raw = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "").strip()).strip("-._").lower()
+    return raw or default_name
+
+
+def _python_api_source_candidates(source_root):
+    root = Path(source_root)
+    if not root.exists():
+        return []
+    blocked = {"__pycache__", ".git", ".venv", "venv", "node_modules", "site-packages"}
+    result = []
+    for path in root.rglob("*.py"):
+        parts = {part.lower() for part in path.parts}
+        if blocked & parts:
+            continue
+        if path.name.lower().startswith("serverinstaller_"):
+            continue
+        result.append(path)
+    return result
+
+
+def _resolve_python_api_source(source_value, entry_hint="", live_cb=None):
+    src = str(source_value or "").strip()
+    if not src:
+        raise RuntimeError("Source path/URL, uploaded file, or uploaded folder is required.")
+
+    source_path = Path(src)
+    if src.lower().startswith(("http://", "https://")):
+        source_root = prepare_source_dir(src, live_cb=live_cb)
+        source_path = Path(source_root)
+    elif source_path.is_dir():
+        pass
+    elif source_path.is_file():
+        pass
+    else:
+        source_root = prepare_source_dir(src, live_cb=live_cb)
+        source_path = Path(source_root)
+
+    if source_path.is_file():
+        if source_path.suffix.lower() != ".py":
+            raise RuntimeError("Direct file input must point to a Python .py file.")
+        return source_path, source_path, source_path.name
+
+    candidates = _python_api_source_candidates(source_path)
+    if not candidates:
+        raise RuntimeError("No Python .py files were found in the selected source.")
+
+    if entry_hint:
+        normalized = entry_hint.replace("\\", "/").strip().lstrip("/")
+        preferred = (source_path / normalized).resolve()
+        try:
+            preferred.relative_to(source_path.resolve())
+        except Exception:
+            raise RuntimeError("Entry file must stay inside the selected source folder.")
+        if not preferred.exists() or not preferred.is_file():
+            raise RuntimeError(f"Entry file was not found: {normalized}")
+        return source_path, preferred, preferred.relative_to(source_path).as_posix()
+
+    preferred_names = ["app.py", "main.py", "server.py", "api.py", "run.py", "wsgi.py", "asgi.py"]
+    candidates.sort(key=lambda p: (preferred_names.index(p.name.lower()) if p.name.lower() in preferred_names else 999, len(p.parts), str(p).lower()))
+    chosen = candidates[0]
+    return source_path, chosen, chosen.relative_to(source_path).as_posix()
+
+
+def _copy_python_api_source(source_root, entry_file, deploy_root):
+    source_root = Path(source_root)
+    entry_file = Path(entry_file)
+    deploy_root = Path(deploy_root)
+    app_root = deploy_root / "app"
+    if app_root.exists():
+        shutil.rmtree(app_root, ignore_errors=True)
+    app_root.mkdir(parents=True, exist_ok=True)
+
+    if source_root.is_file():
+        shutil.copy2(source_root, app_root / entry_file.name)
+        return app_root / entry_file.name, entry_file.name
+
+    if entry_file.parent == source_root and len(list(source_root.iterdir())) == 1 and entry_file.is_file():
+        shutil.copy2(entry_file, app_root / entry_file.name)
+        return app_root / entry_file.name, entry_file.name
+
+    for item in source_root.iterdir():
+        target = app_root / item.name
+        if item.is_dir():
+            shutil.copytree(item, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(item, target)
+    copied_entry = app_root / entry_file.relative_to(source_root)
+    return copied_entry, copied_entry.relative_to(app_root).as_posix()
+
+
+def _ensure_python_api_runtime_deps(python_executable, app_root, extra_packages=None, live_cb=None):
+    python_exe = str(python_executable or "").strip()
+    if not python_exe:
+        return 1, "Install Python first."
+    env = _python_env(python_exe)
+    req_file = Path(app_root) / "requirements.txt"
+    if req_file.exists():
+        if live_cb:
+            live_cb(f"Installing Python app requirements from {req_file}...\n")
+        code, output = run_process([python_exe, "-m", "pip", "install", "-r", str(req_file)], env=env, live_cb=live_cb)
+        if code != 0:
+            return code, output or "Failed to install requirements.txt."
+    packages = [pkg for pkg in (extra_packages or []) if str(pkg or "").strip()]
+    if packages:
+        if live_cb:
+            live_cb(f"Installing deployment runtime packages: {', '.join(packages)}\n")
+        code, output = run_process([python_exe, "-m", "pip", "install", "--upgrade"] + packages, env=env, live_cb=live_cb)
+        if code != 0:
+            return code, output or "Failed to install Python deployment runtime packages."
+    return 0, ""
+
+
+def _ensure_python_api_https_assets(python_executable, host, deploy_name):
+    python_exe = str(python_executable or "").strip()
+    host_value = str(host or "").strip() or "localhost"
+    name = _safe_python_api_name(deploy_name, "python-api")
+    cert_dir = PYTHON_STATE_DIR / "api-certs" / name
+    cert_path = cert_dir / "tls-cert.pem"
+    key_path = cert_dir / "tls-key.pem"
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    if cert_path.exists() and key_path.exists():
+        return str(cert_path), str(key_path)
+    rc_import, _ = run_capture([python_exe, "-c", "import trustme"], timeout=20)
+    if rc_import != 0:
+        rc_install, _ = run_capture([python_exe, "-m", "pip", "install", "--upgrade", "trustme"], timeout=240)
+        if rc_install != 0:
+            return "", ""
+    script = (
+        "from pathlib import Path\n"
+        "import trustme\n"
+        f"cert_path = Path(r'''{str(cert_path)}''')\n"
+        f"key_path = Path(r'''{str(key_path)}''')\n"
+        f"host = {host_value!r}\n"
+        "ca = trustme.CA()\n"
+        "server_cert = ca.issue_cert(host, 'localhost', '127.0.0.1')\n"
+        "server_cert.cert_chain_pems[0].write_to_path(cert_path)\n"
+        "server_cert.private_key_pem.write_to_path(key_path)\n"
+    )
+    rc, _ = run_capture([python_exe, "-c", script], timeout=60)
+    if rc != 0 or not cert_path.exists() or not key_path.exists():
+        return "", ""
+    return str(cert_path), str(key_path)
+
+
+def _write_python_api_runtime_files(deploy_root, app_entry_rel, app_object, host, port, certfile="", keyfile=""):
+    deploy_root = Path(deploy_root)
+    runtime_dir = deploy_root / ".serverinstaller"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    host_script = runtime_dir / "serverinstaller_python_api_host.py"
+    shutil.copy2(PYTHON_API_HOST_TEMPLATE, host_script)
+    runner_script = runtime_dir / "run_api.py"
+    runner_script.write_text(
+        "\n".join([
+            "import os",
+            "import runpy",
+            f"os.environ['SERVER_INSTALLER_APP_FILE'] = r'''{str((deploy_root / 'app' / app_entry_rel).resolve())}'''",
+            f"os.environ['SERVER_INSTALLER_APP_OBJECT'] = r'''{str(app_object or '').strip()}'''",
+            f"os.environ['SERVER_INSTALLER_HOST'] = r'''{str(host or '').strip()}'''",
+            f"os.environ['SERVER_INSTALLER_PORT'] = r'''{str(port or '').strip()}'''",
+            f"os.environ['SERVER_INSTALLER_CERTFILE'] = r'''{str(certfile or '').strip()}'''",
+            f"os.environ['SERVER_INSTALLER_KEYFILE'] = r'''{str(keyfile or '').strip()}'''",
+            f"runpy.run_path(r'''{str(host_script.resolve())}''', run_name='__main__')",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    return runtime_dir, runner_script
+
+
+def _prepare_python_api_deployment(form, deployment_name, live_cb=None):
+    source_value = resolve_source_value(form, "PYTHON_API_SOURCE", "PYTHON_API_SOURCE_FILE", "PYTHON_API_SOURCE_FOLDER")
+    if not source_value:
+        raise RuntimeError("Source path/URL, uploaded file, or uploaded folder is required.")
+    source_root, entry_file, entry_rel = _resolve_python_api_source(
+        source_value,
+        entry_hint=(form.get("PYTHON_API_ENTRY_FILE", [""])[0] or "").strip(),
+        live_cb=live_cb,
+    )
+    python_info = get_python_info()
+    python_executable = str(python_info.get("python_executable") or "").strip()
+    if not python_executable:
+        raise RuntimeError("Install Python first on the main Python page.")
+    host = (form.get("PYTHON_API_HOST_IP", [""])[0] or "").strip() or choose_service_host()
+    https_port = (form.get("PYTHON_API_PORT", ["8443"])[0] or "8443").strip()
+    if not https_port.isdigit():
+        raise RuntimeError("HTTPS port must be numeric.")
+    app_object = (form.get("PYTHON_API_APP_OBJECT", [""])[0] or "").strip()
+    deploy_key = _safe_python_api_name(deployment_name)
+    deploy_root = PYTHON_STATE_DIR / "api" / deploy_key
+    deploy_root.mkdir(parents=True, exist_ok=True)
+    copied_entry, copied_entry_rel = _copy_python_api_source(source_root, entry_file, deploy_root)
+    return {
+        "python_executable": python_executable,
+        "host": host,
+        "https_port": https_port,
+        "app_object": app_object,
+        "deploy_key": deploy_key,
+        "deploy_root": deploy_root,
+        "entry_path": copied_entry,
+        "entry_rel": copied_entry_rel,
+    }
+
+
+def _update_python_api_state(name, payload):
+    state = _read_json_file(PYTHON_API_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        deployments = {}
+    deployments[_safe_python_api_name(name)] = payload
+    state["deployments"] = deployments
+    _write_json_file(PYTHON_API_STATE_FILE, state)
+
+
+def run_windows_python_api_service(form=None, live_cb=None):
+    form = form or {}
+    if os.name != "nt":
+        return 1, "Python API OS service deployment is only available on Windows from this page."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    ensure_repo_files(PYTHON_WINDOWS_FILES, live_cb=live_cb)
+    service_name = _safe_python_api_name((form.get("PYTHON_API_SERVICE_NAME", ["serverinstaller-python-api"])[0] or "").strip(), "serverinstaller-python-api")
+    try:
+        deploy = _prepare_python_api_deployment(form, service_name, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    if is_local_tcp_port_listening(deploy["https_port"]):
+        usage = get_port_usage(deploy["https_port"], "tcp")
+        if not usage.get("managed_owner"):
+            return 1, f"Requested HTTPS port {deploy['https_port']} is already in use. Choose another port."
+    certfile, keyfile = _ensure_python_api_https_assets(deploy["python_executable"], deploy["host"], service_name)
+    if not certfile or not keyfile:
+        return 1, "Failed to create HTTPS certificate files for the Python API service."
+    code, output = _ensure_python_api_runtime_deps(
+        deploy["python_executable"],
+        deploy["deploy_root"] / "app",
+        extra_packages=["uvicorn", "trustme", "pywin32"],
+        live_cb=live_cb,
+    )
+    if code != 0:
+        return code, output
+    rc_post, out_post = run_capture([deploy["python_executable"], "-m", "pywin32_postinstall", "-install"], timeout=180)
+    if rc_post != 0 and live_cb:
+        live_cb((out_post or "pywin32 postinstall returned a non-zero exit code.") + "\n")
+    _, runner_script = _write_python_api_runtime_files(
+        deploy["deploy_root"],
+        deploy["entry_rel"],
+        deploy["app_object"],
+        deploy["host"],
+        deploy["https_port"],
+        certfile=certfile,
+        keyfile=keyfile,
+    )
+    service_script = deploy["deploy_root"] / ".serverinstaller" / "windows_service.py"
+    service_script.write_text(
+        "\n".join([
+            "import subprocess",
+            "import sys",
+            "import win32event",
+            "import win32service",
+            "import win32serviceutil",
+            "",
+            f"RUNNER = r'''{str(runner_script.resolve())}'''",
+            f"SERVICE_NAME = {service_name!r}",
+            f"DISPLAY_NAME = {service_name.replace('-', ' ').title()!r}",
+            "",
+            "class PythonApiService(win32serviceutil.ServiceFramework):",
+            "    _svc_name_ = SERVICE_NAME",
+            "    _svc_display_name_ = DISPLAY_NAME",
+            "    _svc_description_ = 'Server Installer managed Python API service'",
+            "    def __init__(self, args):",
+            "        win32serviceutil.ServiceFramework.__init__(self, args)",
+            "        self.stop_event = win32event.CreateEvent(None, 0, 0, None)",
+            "        self.proc = None",
+            "    def SvcStop(self):",
+            "        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)",
+            "        if self.proc and self.proc.poll() is None:",
+            "            self.proc.terminate()",
+            "            try:",
+            "                self.proc.wait(timeout=15)",
+            "            except Exception:",
+            "                self.proc.kill()",
+            "        win32event.SetEvent(self.stop_event)",
+            "    def SvcDoRun(self):",
+            "        self.proc = subprocess.Popen([sys.executable, RUNNER], cwd=r'''%s''')" % str(deploy["deploy_root"].resolve()),
+            "        while True:",
+            "            status = win32event.WaitForSingleObject(self.stop_event, 2000)",
+            "            if status == win32event.WAIT_OBJECT_0:",
+            "                break",
+            "            if self.proc.poll() is not None:",
+            "                raise RuntimeError(f'Python API process exited with code {self.proc.returncode}.')",
+            "",
+            "if __name__ == '__main__':",
+            "    win32serviceutil.HandleCommandLine(PythonApiService)",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    run_capture([deploy["python_executable"], str(service_script), "remove"], timeout=60)
+    code, output = run_process([deploy["python_executable"], str(service_script), "--startup", "auto", "install"], live_cb=live_cb)
+    if code != 0:
+        return code, output or "Failed to install the Windows Python API service."
+    code, output = run_process([deploy["python_executable"], str(service_script), "start"], live_cb=live_cb)
+    if code != 0:
+        return code, output or "Failed to start the Windows Python API service."
+    manage_firewall_port("open", deploy["https_port"], "tcp")
+    url = f"https://{deploy['host']}:{deploy['https_port']}"
+    _update_python_api_state(service_name, {
+        "kind": "service",
+        "name": service_name,
+        "url": url,
+        "deploy_root": str(deploy["deploy_root"]),
+        "entry_file": deploy["entry_rel"],
+        "host": deploy["host"],
+        "port": deploy["https_port"],
+    })
+    return 0, f"Python API OS service deployed.\nService: {service_name}\nURL: {url}\nEntry file: {deploy['entry_rel']}\n"
+
+
+def run_unix_python_api_service(form=None, live_cb=None):
+    form = form or {}
+    if os.name == "nt":
+        return 1, "Python API OS service deployment from this page is for Linux/macOS hosts."
+    ensure_repo_files(PYTHON_UNIX_FILES, live_cb=live_cb)
+    service_name = _safe_python_api_name((form.get("PYTHON_API_SERVICE_NAME", ["serverinstaller-python-api"])[0] or "").strip(), "serverinstaller-python-api")
+    try:
+        deploy = _prepare_python_api_deployment(form, service_name, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    if is_local_tcp_port_listening(deploy["https_port"]):
+        usage = get_port_usage(deploy["https_port"], "tcp")
+        if not usage.get("managed_owner"):
+            return 1, f"Requested HTTPS port {deploy['https_port']} is already in use. Choose another port."
+    certfile, keyfile = _ensure_python_api_https_assets(deploy["python_executable"], deploy["host"], service_name)
+    if not certfile or not keyfile:
+        return 1, "Failed to create HTTPS certificate files for the Python API service."
+    code, output = _ensure_python_api_runtime_deps(
+        deploy["python_executable"],
+        deploy["deploy_root"] / "app",
+        extra_packages=["uvicorn", "trustme"],
+        live_cb=live_cb,
+    )
+    if code != 0:
+        return code, output
+    _, runner_script = _write_python_api_runtime_files(
+        deploy["deploy_root"],
+        deploy["entry_rel"],
+        deploy["app_object"],
+        deploy["host"],
+        deploy["https_port"],
+        certfile=certfile,
+        keyfile=keyfile,
+    )
+    prefix = _sudo_prefix()
+    unit_name = f"{service_name}.service"
+    unit_temp = deploy["deploy_root"] / f"{unit_name}"
+    unit_temp.write_text(
+        "\n".join([
+            "[Unit]",
+            f"Description={service_name}",
+            "After=network.target",
+            "",
+            "[Service]",
+            "Type=simple",
+            f"WorkingDirectory={str(deploy['deploy_root'])}",
+            f"ExecStart={shlex.quote(str(deploy['python_executable']))} {shlex.quote(str(runner_script))}",
+            "Restart=always",
+            "RestartSec=5",
+            "",
+            "[Install]",
+            "WantedBy=multi-user.target",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    run_capture(prefix + ["systemctl", "stop", unit_name], timeout=30)
+    run_capture(prefix + ["cp", str(unit_temp), f"/etc/systemd/system/{unit_name}"], timeout=30)
+    run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
+    rc_enable, out_enable = run_capture(prefix + ["systemctl", "enable", "--now", unit_name], timeout=60)
+    if rc_enable != 0:
+        return 1, out_enable or f"Failed to enable and start {unit_name}."
+    manage_firewall_port("open", deploy["https_port"], "tcp")
+    url = f"https://{deploy['host']}:{deploy['https_port']}"
+    _update_python_api_state(service_name, {
+        "kind": "service",
+        "name": unit_name,
+        "url": url,
+        "deploy_root": str(deploy["deploy_root"]),
+        "entry_file": deploy["entry_rel"],
+        "host": deploy["host"],
+        "port": deploy["https_port"],
+    })
+    return 0, f"Python API OS service deployed.\nService: {unit_name}\nURL: {url}\nEntry file: {deploy['entry_rel']}\n"
+
+
+def run_python_api_docker(form=None, live_cb=None):
+    form = form or {}
+    if not command_exists("docker"):
+        return 1, "Docker is not available on this host."
+    deployment_name = _safe_python_api_name((form.get("PYTHON_API_CONTAINER_NAME", ["serverinstaller-python-api"])[0] or "").strip(), "serverinstaller-python-api")
+    try:
+        deploy = _prepare_python_api_deployment(form, deployment_name, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    if is_local_tcp_port_listening(deploy["https_port"]):
+        usage = get_port_usage(deploy["https_port"], "tcp")
+        if not usage.get("managed_owner"):
+            return 1, f"Requested HTTPS port {deploy['https_port']} is already in use. Choose another port."
+    runtime_dir, runner_script = _write_python_api_runtime_files(
+        deploy["deploy_root"],
+        deploy["entry_rel"],
+        deploy["app_object"],
+        "0.0.0.0",
+        deploy["https_port"],
+        certfile="/app/.serverinstaller/tls-cert.pem",
+        keyfile="/app/.serverinstaller/tls-key.pem",
+    )
+    dockerfile = deploy["deploy_root"] / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join([
+            "FROM python:3.12-slim",
+            "WORKDIR /app",
+            "COPY app/ /app/app/",
+            "COPY .serverinstaller/ /app/.serverinstaller/",
+            "RUN python -m pip install --upgrade pip uvicorn trustme \\",
+            " && if [ -f /app/app/requirements.txt ]; then python -m pip install -r /app/app/requirements.txt; fi \\",
+            " && python - <<'PY'",
+            "from pathlib import Path",
+            "import trustme",
+            "cert_dir = Path('/app/.serverinstaller')",
+            "cert_dir.mkdir(parents=True, exist_ok=True)",
+            "ca = trustme.CA()",
+            "server_cert = ca.issue_cert('localhost', '127.0.0.1', '0.0.0.0')",
+            "server_cert.cert_chain_pems[0].write_to_path(cert_dir / 'tls-cert.pem')",
+            "server_cert.private_key_pem.write_to_path(cert_dir / 'tls-key.pem')",
+            "PY",
+            f"EXPOSE {deploy['https_port']}",
+            f'CMD ["python", "/app/.serverinstaller/{runner_script.name}"]',
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    image_name = deployment_name
+    run_capture(["docker", "rm", "-f", deployment_name], timeout=30)
+    code, output = run_process(["docker", "build", "-t", image_name, str(deploy["deploy_root"])], live_cb=live_cb)
+    if code != 0:
+        return code, output or "docker build failed."
+    code, output = run_process(
+        [
+            "docker", "run", "-d",
+            "--restart", "unless-stopped",
+            "--name", deployment_name,
+            "-p", f"{deploy['https_port']}:{deploy['https_port']}",
+            image_name,
+        ],
+        live_cb=live_cb,
+    )
+    if code != 0:
+        return code, output or "docker run failed."
+    manage_firewall_port("open", deploy["https_port"], "tcp")
+    url = f"https://{deploy['host']}:{deploy['https_port']}"
+    _update_python_api_state(deployment_name, {
+        "kind": "docker",
+        "name": deployment_name,
+        "url": url,
+        "deploy_root": str(deploy["deploy_root"]),
+        "entry_file": deploy["entry_rel"],
+        "host": deploy["host"],
+        "port": deploy["https_port"],
+    })
+    return 0, f"Python API Docker deployment completed.\nContainer: {deployment_name}\nURL: {url}\nEntry file: {deploy['entry_rel']}\n"
+
+
+def run_windows_python_api_iis(form=None, live_cb=None):
+    form = form or {}
+    if os.name != "nt":
+        return 1, "Python API IIS deployment is only available on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    ensure_repo_files(PYTHON_WINDOWS_FILES, live_cb=live_cb)
+    site_name = (form.get("PYTHON_API_SITE_NAME", ["ServerInstallerPythonApi"])[0] or "ServerInstallerPythonApi").strip()
+    site_key = _safe_python_api_name(site_name, "serverinstaller-python-api-iis")
+    try:
+        deploy = _prepare_python_api_deployment(form, site_key, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    https_port = deploy["https_port"]
+    if is_local_tcp_port_listening(https_port):
+        usage = get_port_usage(https_port, "tcp")
+        if not usage.get("managed_owner"):
+            return 1, f"Requested IIS HTTPS port {https_port} is already in use. Choose another port."
+    internal_port = str(pick_free_local_tcp_port(range(18080, 18280)) or "")
+    if not internal_port:
+        return 1, "Could not find a free internal port for IIS-backed Python API hosting."
+    code, output = _ensure_python_api_runtime_deps(
+        deploy["python_executable"],
+        deploy["deploy_root"] / "app",
+        extra_packages=["uvicorn", "trustme"],
+        live_cb=live_cb,
+    )
+    if code != 0:
+        return code, output
+    _, runner_script = _write_python_api_runtime_files(
+        deploy["deploy_root"],
+        deploy["entry_rel"],
+        deploy["app_object"],
+        "127.0.0.1",
+        internal_port,
+    )
+    logs_dir = deploy["deploy_root"] / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    web_config = deploy["deploy_root"] / "web.config"
+    web_config.write_text(
+        f"""<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <handlers>
+      <add name="aspNetCore" path="*" verb="*" modules="AspNetCoreModuleV2" resourceType="Unspecified" />
+    </handlers>
+    <aspNetCore processPath="{html.escape(str(deploy['python_executable']))}" arguments="{html.escape(str(runner_script))}" stdoutLogEnabled="true" stdoutLogFile="{html.escape(str(logs_dir / 'stdout'))}" hostingModel="OutOfProcess">
+      <environmentVariables>
+        <environmentVariable name="SERVER_INSTALLER_APP_FILE" value="{html.escape(str((deploy['deploy_root'] / 'app' / deploy['entry_rel']).resolve()))}" />
+        <environmentVariable name="SERVER_INSTALLER_APP_OBJECT" value="{html.escape(str(deploy['app_object']))}" />
+        <environmentVariable name="SERVER_INSTALLER_HOST" value="127.0.0.1" />
+        <environmentVariable name="SERVER_INSTALLER_PORT" value="{html.escape(str(internal_port))}" />
+      </environmentVariables>
+    </aspNetCore>
+  </system.webServer>
+</configuration>
+""",
+        encoding="utf-8",
+    )
+    bind_ip = (form.get("PYTHON_API_HOST_IP", [""])[0] or "").strip() or "*"
+    dns_name = deploy["host"] if re.match(r"^[A-Za-z0-9.-]+$", deploy["host"]) else "localhost"
+    ps = "\n".join([
+        "Import-Module WebAdministration",
+        f"$siteName = {_ps_single_quote(site_name)}",
+        f"$appPool = {_ps_single_quote(site_name)}",
+        f"$physicalPath = {_ps_single_quote(str(deploy['deploy_root']))}",
+        f"$ip = {_ps_single_quote(bind_ip if bind_ip != '*' else '*')}",
+        f"$port = {int(https_port)}",
+        f"$dnsName = {_ps_single_quote(dns_name)}",
+        "if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) { Stop-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null; Remove-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null }",
+        "if (-not (Test-Path ('IIS:\\AppPools\\' + $appPool))) { New-WebAppPool -Name $appPool | Out-Null }",
+        "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name managedRuntimeVersion -Value ''",
+        "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name processModel.identityType -Value 4",
+        "New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip -Ssl -ApplicationPool $appPool | Out-Null",
+        "$cert = New-SelfSignedCertificate -DnsName @($dnsName,'localhost','127.0.0.1') -CertStoreLocation 'cert:\\LocalMachine\\My' -FriendlyName ('ServerInstaller Python API ' + $siteName)",
+        "$bindingPath = ($ip -eq '*' ? '0.0.0.0' : $ip) + '!' + $port",
+        "if (Test-Path ('IIS:\\SslBindings\\' + $bindingPath)) { Remove-Item ('IIS:\\SslBindings\\' + $bindingPath) -Force -ErrorAction SilentlyContinue }",
+        "New-Item ('IIS:\\SslBindings\\' + $bindingPath) -Thumbprint $cert.Thumbprint -SSLFlags 0 | Out-Null",
+        "Start-Website -Name $siteName | Out-Null",
+    ])
+    rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
+    if rc != 0:
+        return 1, out or f"Failed to create IIS site '{site_name}'."
+    manage_firewall_port("open", https_port, "tcp")
+    url = f"https://{deploy['host']}:{https_port}"
+    _update_python_api_state(site_key, {
+        "kind": "iis_site",
+        "name": site_name,
+        "url": url,
+        "deploy_root": str(deploy["deploy_root"]),
+        "entry_file": deploy["entry_rel"],
+        "host": deploy["host"],
+        "port": https_port,
+    })
+    return 0, f"Python API IIS deployment completed.\nSite: {site_name}\nURL: {url}\nEntry file: {deploy['entry_rel']}\n"
 
 
 def run_windows_python_installer(form=None, live_cb=None):
@@ -3223,7 +3797,7 @@ def _windows_remove_service_and_files(svc_name):
         "$dir=''; if($exe){$dir=Split-Path -Parent $exe}; "
         "if($dir -and (Test-Path $dir)){ "
         "$d=$dir.ToLowerInvariant(); "
-        "if($d.Contains('locals3') -or $d.Contains('dotnet') -or $d.Contains('aspnet') -or $d.Contains('kestrel')){ "
+        "if($d.Contains('locals3') -or $d.Contains('dotnet') -or $d.Contains('aspnet') -or $d.Contains('kestrel') -or $d.Contains('server-installer\\python\\api') -or $d.Contains('server-installer/python/api')){ "
         "Remove-Item -Recurse -Force -Path $dir -ErrorAction SilentlyContinue } }"
     )
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=90)
@@ -7182,6 +7756,34 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_python_command(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/python_api_service":
+            title = "Python API OS Service"
+            runner = (lambda cb: run_windows_python_api_service(form, live_cb=cb)) if os.name == "nt" else (lambda cb: run_unix_python_api_service(form, live_cb=cb))
+            if self.is_fetch():
+                job_id = start_live_job(title, runner)
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = runner(None)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/python_api_docker":
+            title = "Python API Docker"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_python_api_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_python_api_docker(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/python_api_iis":
+            title = "Python API IIS"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_python_api_iis(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_python_api_iis(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/python_jupyter_start":

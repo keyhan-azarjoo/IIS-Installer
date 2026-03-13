@@ -2107,30 +2107,42 @@ function App() {
     if (page === "python-system") {
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <Alert severity="info">
-              This page is for Python API apps that should run as an operating system service. Jupyter is on the separate <b>Python</b> page and is not part of this API flow.
-            </Alert>
+          <Grid item xs={12} md={8}>
+            <ActionCard
+              title="Deploy Python API as OS Service"
+              description="Upload or point to your Python API project, choose the entry file, and publish it as a managed HTTPS service."
+              action="/run/python_api_service"
+              fields={[
+                { name: "PYTHON_API_SERVICE_NAME", label: "Service Name", defaultValue: "serverinstaller-python-api", required: true },
+                {
+                  name: "PYTHON_API_HOST_IP",
+                  label: "Bind IP",
+                  type: "select",
+                  options: selectableIps,
+                  defaultValue: selectableIps.length === 1 ? selectableIps[0] : "",
+                  required: true,
+                  disabled: selectableIps.length === 0,
+                  placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
+                },
+                { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
+                { name: "PYTHON_API_SOURCE", label: "Source Path / URL", placeholder: "C:\\apps\\python-api or /srv/python-api", enableUpload: true },
+                { name: "PYTHON_API_ENTRY_FILE", label: "Entry Python File", placeholder: "app.py or src/main.py" },
+                { name: "PYTHON_API_APP_OBJECT", label: "App Object (optional)", placeholder: "app, application, api" },
+              ]}
+              onRun={run}
+              color="#0f766e"
+            />
           </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid item xs={12} md={4}>
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
               <CardContent>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>API as OS Service</Typography>
-                <Typography variant="body2">
-                  {cfg.os === "windows"
-                    ? "Configure your Python API app to run as a Windows service from this branch."
-                    : "Configure your Python API app to run as a native OS service from this branch."}
-                </Typography>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>OS Service Target</Typography>
+                <Typography variant="body2">Protocol: HTTPS</Typography>
+                <Typography variant="body2">Entry file: autodetect if left blank</Typography>
+                <Typography variant="body2">Supported app objects: <code>app</code>, <code>application</code>, <code>api</code>, or <code>create_app()</code></Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>Jupyter is separate and is not part of this page.</Typography>
               </CardContent>
             </Card>
-          </Grid>
-          {cfg.os === "windows" && (
-            <Grid item xs={12} md={6}>
-              <NavCard title="IIS" text="Open the IIS target for Windows-based Python API hosting." onClick={() => setPage("python-iis")} outlined />
-            </Grid>
-          )}
-          <Grid item xs={12} md={6}>
-            <NavCard title="Docker" text="Open the Docker target for a containerized Python API app." onClick={() => setPage("python-docker")} outlined />
           </Grid>
         </Grid>
       );
@@ -2139,16 +2151,41 @@ function App() {
     if (page === "python-docker") {
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <Alert severity="info">
-              Python Docker deployment is not wired in this dashboard yet. Use the main <b>Python</b> page for Jupyter and notebooks, and use Docker separately for containerized Python apps.
-            </Alert>
+          <Grid item xs={12} md={8}>
+            <ActionCard
+              title="Deploy Python API to Docker"
+              description="Build a Docker image from your Python API source and publish it over HTTPS."
+              action="/run/python_api_docker"
+              fields={[
+                { name: "PYTHON_API_CONTAINER_NAME", label: "Container Name", defaultValue: "serverinstaller-python-api", required: true },
+                {
+                  name: "PYTHON_API_HOST_IP",
+                  label: "Public IP",
+                  type: "select",
+                  options: selectableIps,
+                  defaultValue: selectableIps.length === 1 ? selectableIps[0] : "",
+                  required: true,
+                  disabled: selectableIps.length === 0,
+                  placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
+                },
+                { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
+                { name: "PYTHON_API_SOURCE", label: "Source Path / URL", placeholder: "C:\\apps\\python-api or /srv/python-api", enableUpload: true },
+                { name: "PYTHON_API_ENTRY_FILE", label: "Entry Python File", placeholder: "app.py or src/main.py" },
+                { name: "PYTHON_API_APP_OBJECT", label: "App Object (optional)", placeholder: "app, application, api" },
+              ]}
+              onRun={run}
+              color="#1f2937"
+            />
           </Grid>
-          <Grid item xs={12} md={6}>
-            <NavCard title="Open Python Jupyter" text="Configure Python and Jupyter directly on this machine." onClick={() => setPage("python")} />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <NavCard title="Open Docker Page" text="Install Docker and manage existing Docker services from the main Docker page." onClick={() => setPage("docker")} outlined />
+          <Grid item xs={12} md={4}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Docker Target</Typography>
+                <Typography variant="body2">Protocol: HTTPS</Typography>
+                <Typography variant="body2">A container image is built from the uploaded or selected source.</Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>If a <code>requirements.txt</code> file exists, it is installed during image build.</Typography>
+              </CardContent>
+            </Card>
           </Grid>
         </Grid>
       );
@@ -2160,16 +2197,41 @@ function App() {
       }
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <Alert severity="info">
-              Python IIS deployment is not configured in this dashboard yet. Use the main <b>Python</b> page for Jupyter and notebooks, and use this IIS path for a separate Python API app.
-            </Alert>
+          <Grid item xs={12} md={8}>
+            <ActionCard
+              title="Deploy Python API to IIS"
+              description="Create an IIS-backed HTTPS site for your Python API project."
+              action="/run/python_api_iis"
+              fields={[
+                { name: "PYTHON_API_SITE_NAME", label: "IIS Site Name", defaultValue: "ServerInstallerPythonApi", required: true },
+                {
+                  name: "PYTHON_API_HOST_IP",
+                  label: "Bind IP",
+                  type: "select",
+                  options: selectableIps,
+                  defaultValue: selectableIps.length === 1 ? selectableIps[0] : "",
+                  required: true,
+                  disabled: selectableIps.length === 0,
+                  placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
+                },
+                { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
+                { name: "PYTHON_API_SOURCE", label: "Source Path / URL", placeholder: "C:\\apps\\python-api", enableUpload: true },
+                { name: "PYTHON_API_ENTRY_FILE", label: "Entry Python File", placeholder: "app.py or src/main.py" },
+                { name: "PYTHON_API_APP_OBJECT", label: "App Object (optional)", placeholder: "app, application, api" },
+              ]}
+              onRun={run}
+              color="#1d4ed8"
+            />
           </Grid>
-          <Grid item xs={12} md={6}>
-            <NavCard title="Open Python Jupyter" text="Use the current Python and Jupyter installer/runtime controls." onClick={() => setPage("python")} />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <NavCard title="Open DotNet IIS" text="Open the existing IIS deployment flow used for .NET apps." onClick={() => setPage("dotnet-iis")} outlined />
+          <Grid item xs={12} md={4}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>IIS Target</Typography>
+                <Typography variant="body2">Protocol: HTTPS</Typography>
+                <Typography variant="body2">IIS terminates TLS and proxies to the managed Python process.</Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>Use this for Windows-hosted Python APIs that should sit behind an IIS site.</Typography>
+              </CardContent>
+            </Card>
           </Grid>
         </Grid>
       );
