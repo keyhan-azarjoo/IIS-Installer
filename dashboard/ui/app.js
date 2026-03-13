@@ -88,6 +88,8 @@ function App() {
   const [fileOpBusy, setFileOpBusy] = React.useState(false);
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
+  const pageHistoryRef = React.useRef(["home"]);
+  const historyBackRef = React.useRef(false);
   const fileManagerInitRef = React.useRef(false);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
   const selectableIps = React.useMemo(() => getSelectableIps(systemInfo), [systemInfo]);
@@ -173,6 +175,21 @@ function App() {
     const t = setInterval(() => loadSystem.current(), 10000);
     return () => clearInterval(t);
   }, [page, setScopeErrorText, setScopeLoadingFlag]);
+
+  React.useEffect(() => {
+    const history = pageHistoryRef.current;
+    if (historyBackRef.current) {
+      historyBackRef.current = false;
+      if (history.length > 1) history.pop();
+      if (history[history.length - 1] !== page) {
+        history.push(page);
+      }
+      return;
+    }
+    if (history[history.length - 1] !== page) {
+      history.push(page);
+    }
+  }, [page]);
 
   const loadServices = React.useRef(async () => {});
   const loadMongoServices = React.useRef(async () => {});
@@ -495,11 +512,10 @@ function App() {
 
   const goBack = () => {
     if (page === "home") return;
-    if (page === "api" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services" || page === "website" || page === "files") setPage("home");
-    else if (page === "dotnet" || page === "python" || page === "python-api") setPage("api");
-    else if (page.startsWith("dotnet-")) setPage("dotnet");
-    else if (page === "python-system" || page === "python-docker" || page === "python-iis") setPage("python-api");
-    else setPage("home");
+    const history = pageHistoryRef.current;
+    const previousPage = history.length > 1 ? history[history.length - 2] : "home";
+    historyBackRef.current = true;
+    setPage(previousPage || "home");
   };
 
   const headerTitle = (() => {

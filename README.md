@@ -19,7 +19,7 @@ These installers deploy only from prebuilt published output.
 Run higher-level dashboard mode (cross-platform, single URL):
 
 ```powershell
-Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "C:\Users\KeyhanAzarjoo\Downloads\IISForDotNetInstaller\IIS-Installer\start-dashboard.ps1"'
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; $u='https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard-bootstrap.ps1'; $f=Join-Path $env:TEMP 'start-server-dashboard-bootstrap.ps1'; Invoke-WebRequest -Uri $u -OutFile $f; Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',(\"`\"$f`\"\")"
 ```
 
 Dashboard URLs:
@@ -29,7 +29,7 @@ Dashboard URLs:
 Notes for Windows dashboard startup:
 
 - Start the dashboard from an elevated PowerShell session, or use the `Start-Process ... -Verb RunAs` command above.
-- The local launcher `start-dashboard.ps1` is the preferred entrypoint because it can pass the correct local repo path into the bootstrap/update flow.
+- The command above downloads the latest dashboard bootstrap script from GitHub raw and re-launches it elevated.
 - The dashboard startup task is installed as `ServerInstallerDashboard` and is intended to start automatically after reboot.
 - If you use the raw downloaded bootstrap script directly, it may fail unless it is already running elevated.
 
