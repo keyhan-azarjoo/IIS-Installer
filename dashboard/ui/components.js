@@ -183,13 +183,15 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
       setUploadInfo("Select a folder or archive first.");
       return "";
     }
+    const fileCount = input.files.length;
+    const totalBytes = Array.from(input.files).reduce((sum, file) => sum + Number(file.size || 0), 0);
     setUploading(true);
     setUploadInfo("Uploading...");
     if (window.ServerInstallerTerminalHook) {
       window.ServerInstallerTerminalHook({
         open: true,
         state: `Uploading for: ${title}`,
-        line: `[${new Date().toLocaleTimeString()}] Upload started for ${title}`,
+        line: `[${new Date().toLocaleTimeString()}] Upload started for ${title} (${fileCount} file(s), ${totalBytes} bytes)`,
       });
     }
     try {
@@ -212,7 +214,7 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
       }
       if (!json.ok) {
         console.error("Upload failed response:", { status: res.status, body: rawText, parsed: json });
-        throw new Error(json.error || "Upload failed");
+        throw new Error(`Upload failed (HTTP ${res.status}): ${json.error || rawText || "Unknown server error"}`);
       }
       setUploadedPath(json.path || "");
       setSourcePathInForm(json.path || "");
@@ -227,12 +229,16 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
       return json.path || "";
     } catch (err) {
       console.error("Upload exception:", err);
-      setUploadInfo(`Upload failed: ${err}`);
+      const message = String(err);
+      const extra = message.includes("Failed to fetch")
+        ? " The dashboard could not reach /upload/source. Check browser devtools Network tab, dashboard availability, TLS/certificate issues, or request size limits."
+        : "";
+      setUploadInfo(`Upload failed: ${message}${extra}`);
       if (window.ServerInstallerTerminalHook) {
         window.ServerInstallerTerminalHook({
           open: true,
           state: "Error",
-          line: `[${new Date().toLocaleTimeString()}] Upload failed: ${err}`,
+          line: `[${new Date().toLocaleTimeString()}] Upload failed: ${message}${extra}`,
         });
       }
       return "";

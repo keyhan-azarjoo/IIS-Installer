@@ -96,6 +96,13 @@ function defaultNotebookDirForOs(osName) {
   return "/root/notebooks";
 }
 
+function defaultPythonApiDirForOs(osName) {
+  const value = String(osName || "").toLowerCase();
+  if (value === "windows") return "C:\\ServerInstaller-PythonApi";
+  if (value === "darwin") return "/usr/local/serverinstaller/python-api";
+  return "/opt/serverinstaller/python-api";
+}
+
 function MiniMetric({ label, valueText, percent, color }) {
   return (
     <Paper variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
@@ -2125,9 +2132,8 @@ function App() {
                   placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
                 },
                 { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
-                { name: "PYTHON_API_SOURCE", label: "Source Path / URL", placeholder: "C:\\apps\\python-api or /srv/python-api", enableUpload: true },
-                { name: "PYTHON_API_ENTRY_FILE", label: "Entry Python File", placeholder: "app.py or src/main.py" },
-                { name: "PYTHON_API_APP_OBJECT", label: "App Object (optional)", placeholder: "app, application, api" },
+                { name: "PYTHON_API_SOURCE", label: "Project Path", defaultValue: defaultPythonApiDirForOs(cfg.os), placeholder: defaultPythonApiDirForOs(cfg.os), enableUpload: true },
+                { name: "PYTHON_API_MAIN_FILE", label: "Main File Name (optional)", placeholder: "main.py" },
               ]}
               onRun={run}
               color="#0f766e"
@@ -2138,8 +2144,8 @@ function App() {
               <CardContent>
                 <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>OS Service Target</Typography>
                 <Typography variant="body2">Protocol: HTTPS</Typography>
-                <Typography variant="body2">Entry file: autodetect if left blank</Typography>
-                <Typography variant="body2">Supported app objects: <code>app</code>, <code>application</code>, <code>api</code>, or <code>create_app()</code></Typography>
+                <Typography variant="body2">Main file: uses your file name if provided, otherwise auto-detects <code>main.py</code>, <code>app.py</code>, and similar defaults.</Typography>
+                <Typography variant="body2">App object detection still supports <code>app</code>, <code>application</code>, <code>api</code>, or <code>create_app()</code>.</Typography>
                 <Typography variant="body2" sx={{ mt: 1 }}>Jupyter is separate and is not part of this page.</Typography>
               </CardContent>
             </Card>
@@ -2169,9 +2175,8 @@ function App() {
                   placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
                 },
                 { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
-                { name: "PYTHON_API_SOURCE", label: "Source Path / URL", placeholder: "C:\\apps\\python-api or /srv/python-api", enableUpload: true },
-                { name: "PYTHON_API_ENTRY_FILE", label: "Entry Python File", placeholder: "app.py or src/main.py" },
-                { name: "PYTHON_API_APP_OBJECT", label: "App Object (optional)", placeholder: "app, application, api" },
+                { name: "PYTHON_API_SOURCE", label: "Project Path", defaultValue: defaultPythonApiDirForOs(cfg.os), placeholder: defaultPythonApiDirForOs(cfg.os), enableUpload: true },
+                { name: "PYTHON_API_MAIN_FILE", label: "Main File Name (optional)", placeholder: "main.py" },
               ]}
               onRun={run}
               color="#1f2937"
@@ -2215,9 +2220,8 @@ function App() {
                   placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
                 },
                 { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
-                { name: "PYTHON_API_SOURCE", label: "Source Path / URL", placeholder: "C:\\apps\\python-api", enableUpload: true },
-                { name: "PYTHON_API_ENTRY_FILE", label: "Entry Python File", placeholder: "app.py or src/main.py" },
-                { name: "PYTHON_API_APP_OBJECT", label: "App Object (optional)", placeholder: "app, application, api" },
+                { name: "PYTHON_API_SOURCE", label: "Project Path", defaultValue: defaultPythonApiDirForOs(cfg.os), placeholder: defaultPythonApiDirForOs(cfg.os), enableUpload: true },
+                { name: "PYTHON_API_MAIN_FILE", label: "Main File Name (optional)", placeholder: "main.py" },
               ]}
               onRun={run}
               color="#1d4ed8"

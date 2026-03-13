@@ -1125,16 +1125,22 @@ def _resolve_python_api_source(source_value, entry_hint="", live_cb=None):
 
     if entry_hint:
         normalized = entry_hint.replace("\\", "/").strip().lstrip("/")
+        if "/" not in normalized:
+            by_name = [path for path in candidates if path.name.lower() == normalized.lower()]
+            if by_name:
+                by_name.sort(key=lambda p: (len(p.parts), str(p).lower()))
+                preferred = by_name[0]
+                return source_path, preferred, preferred.relative_to(source_path).as_posix()
         preferred = (source_path / normalized).resolve()
         try:
             preferred.relative_to(source_path.resolve())
         except Exception:
-            raise RuntimeError("Entry file must stay inside the selected source folder.")
+            raise RuntimeError("Main file must stay inside the selected source folder.")
         if not preferred.exists() or not preferred.is_file():
-            raise RuntimeError(f"Entry file was not found: {normalized}")
+            raise RuntimeError(f"Main file was not found: {normalized}")
         return source_path, preferred, preferred.relative_to(source_path).as_posix()
 
-    preferred_names = ["app.py", "main.py", "server.py", "api.py", "run.py", "wsgi.py", "asgi.py"]
+    preferred_names = ["main.py", "app.py", "server.py", "api.py", "run.py", "wsgi.py", "asgi.py"]
     candidates.sort(key=lambda p: (preferred_names.index(p.name.lower()) if p.name.lower() in preferred_names else 999, len(p.parts), str(p).lower()))
     chosen = candidates[0]
     return source_path, chosen, chosen.relative_to(source_path).as_posix()
@@ -1296,7 +1302,7 @@ def _prepare_python_api_deployment(form, deployment_name, live_cb=None):
         raise RuntimeError("Source path/URL, uploaded file, or uploaded folder is required.")
     source_root, entry_file, entry_rel = _resolve_python_api_source(
         source_value,
-        entry_hint=(form.get("PYTHON_API_ENTRY_FILE", [""])[0] or "").strip(),
+        entry_hint=((form.get("PYTHON_API_MAIN_FILE", [""])[0] or "").strip() or (form.get("PYTHON_API_ENTRY_FILE", [""])[0] or "").strip()),
         live_cb=live_cb,
     )
     python_info = get_python_info()
