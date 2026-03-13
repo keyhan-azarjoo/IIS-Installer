@@ -2,6 +2,26 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+function Test-IsAdministrator {
+  if (-not $IsWindows) {
+    return $true
+  }
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+  return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+if ($IsWindows -and -not (Test-IsAdministrator)) {
+  $argList = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", ('"' + $PSCommandPath + '"')
+  ) + $args
+
+  $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -Verb RunAs -Wait -PassThru
+  exit $proc.ExitCode
+}
+
 $enableHttps = $env:DASHBOARD_HTTPS
 if ([string]::IsNullOrWhiteSpace($enableHttps)) {
   $enableHttps = "1"
@@ -18,6 +38,11 @@ function Get-RequiredServerInstallerFiles {
   $files = @(
     "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
+    "dashboard/file_manager.py",
+    "dashboard/ui_assets.py",
+    "dashboard/ui/core.js",
+    "dashboard/ui/utils.js",
+    "dashboard/ui/actions.js",
     "dashboard/ui/components.js",
     "dashboard/ui/app.js"
   )
@@ -121,7 +146,14 @@ function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot
     $targetPath = Join-Path $DestinationRoot ($relativePath -replace '/', '\')
     $targetDirectory = Split-Path -Path $targetPath -Parent
     New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
-    Invoke-WebRequest -Uri "$RepoBase/$relativePath" -OutFile $targetPath
+    $tempPath = "$targetPath.download"
+    if ($SourceRoot -and (Test-Path -LiteralPath (Join-Path $SourceRoot ($relativePath -replace '/', '\')))) {
+      $sourcePath = Join-Path $SourceRoot ($relativePath -replace '/', '\')
+      Copy-Item -LiteralPath $sourcePath -Destination $tempPath -Force
+    } else {
+      Invoke-WebRequest -Uri "$RepoBase/$relativePath" -OutFile $tempPath
+    }
+    Move-Item -Path $tempPath -Destination $targetPath -Force
   }
 }
 
@@ -362,10 +394,11 @@ $pyDir = Join-Path $root "python"
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 
 $repo = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
-$dashboard = Join-Path $root "start-server-dashboard.py"
+$localSourceRoot = $env:SERVER_INSTALLER_LOCAL_ROOT
+$dashboard = Join-Path $root "dashboard\start-server-dashboard.py"
 
 Write-Host "[INFO] Downloading dashboard launcher..."
-Sync-ServerInstallerFiles -SourceRoot "" -DestinationRoot $root -RepoBase $repo
+Sync-ServerInstallerFiles -SourceRoot $localSourceRoot -DestinationRoot $root -RepoBase $repo
 Repair-DashboardLauncher -Path $dashboard
 
 $python = Get-CommandPath "python"
@@ -395,4 +428,4 @@ Ensure-DashboardCaCertificate -CertPath $CertPath -KeyPath $KeyPath
 $env:DASHBOARD_HTTPS = "1"
 $env:DASHBOARD_CERT = $certPath
 $env:DASHBOARD_KEY = $keyPath
-& $python $dashboard
+& $python $dashboard @args

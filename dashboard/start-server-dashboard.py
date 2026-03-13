@@ -423,6 +423,10 @@ def try_open_append_log(*paths):
     return None
 
 
+def powershell_single_quote(value: str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def resolve_root() -> Path:
     root = cache_root()
     ensure_files(root)
@@ -644,32 +648,65 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     quoted_args = subprocess.list2cmdline(task_args)
     task_script.write_text(
         "@echo off\r\n"
-        f"{quoted_args} >> {subprocess.list2cmdline([str(log_path)])} 2>&1\r\n",
-        encoding="ascii",
+        "setlocal\r\n"
+        f'cd /d "{root}"\r\n'
+        f"echo [%date% %time%] Starting ServerInstallerDashboard >> {subprocess.list2cmdline([str(log_path)])}\r\n"
+        f"{quoted_args} >> {subprocess.list2cmdline([str(log_path)])} 2>&1\r\n"
+        "exit /b %errorlevel%\r\n",
+        encoding="utf-8",
     )
-    task_cmd = subprocess.list2cmdline([str(task_script)])
-    rc, out = run_capture(
+    task_action = '/d /c ""' + str(task_script) + '""'
+    register_script = "\n".join(
         [
-            "schtasks",
-            "/Create",
-            "/TN",
-            task_name,
-            "/SC",
-            "ONSTART",
-            "/RL",
-            "HIGHEST",
-            "/RU",
-            "SYSTEM",
-            "/TR",
-            task_cmd,
-            "/F",
-        ],
-        timeout=30,
+            "$ErrorActionPreference = 'Stop'",
+            f"$taskName = {powershell_single_quote(task_name)}",
+            f"$taskScript = {powershell_single_quote(str(task_script))}",
+            f"$taskWorkingDirectory = {powershell_single_quote(str(root))}",
+            "$cmdExe = Join-Path $env:SystemRoot 'System32\\cmd.exe'",
+            "$action = New-ScheduledTaskAction -Execute $cmdExe -Argument '/d /c \"\"' + $taskScript + '\"\"' -WorkingDirectory $taskWorkingDirectory",
+            "$startupTrigger = New-ScheduledTaskTrigger -AtStartup",
+            "try { $startupTrigger.Delay = 'PT30S' } catch {}",
+            "$logonTrigger = New-ScheduledTaskTrigger -AtLogOn",
+            "try { $logonTrigger.Delay = 'PT30S' } catch {}",
+            "$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest",
+            "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew",
+            "try { $settings.ExecutionTimeLimit = 'PT0S' } catch {}",
+            "try { $settings.RestartCount = 3; $settings.RestartInterval = 'PT1M' } catch {}",
+            "$task = New-ScheduledTask -Action $action -Principal $principal -Trigger @($startupTrigger, $logonTrigger) -Settings $settings",
+            "Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null",
+            "Start-ScheduledTask -TaskName $taskName",
+        ]
+    )
+    rc, out = run_capture(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", register_script],
+        timeout=60,
     )
     if rc != 0:
-        print(f"schtasks /Create failed:\n{out}", file=sys.stderr)
+        rc, out = run_capture(
+            [
+                "schtasks",
+                "/Create",
+                "/TN",
+                task_name,
+                "/SC",
+                "ONSTART",
+                "/DELAY",
+                "0000:30",
+                "/RL",
+                "HIGHEST",
+                "/RU",
+                "SYSTEM",
+                "/TR",
+                task_action,
+                "/F",
+            ],
+            timeout=30,
+        )
+        if rc == 0:
+            run_capture(["schtasks", "/Run", "/TN", task_name], timeout=20)
+    if rc != 0:
+        print(f"Windows dashboard task registration failed:\n{out}", file=sys.stderr)
         return 1
-    run_capture(["schtasks", "/Run", "/TN", task_name], timeout=20)
 
     # Give the scheduled task a brief chance to come online before using the fallback.
     ok, detail = wait_for_local_http(selected_port, seconds=8, use_https=use_https)
