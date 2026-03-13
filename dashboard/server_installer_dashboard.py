@@ -471,6 +471,9 @@ def _python_state_service_item(info):
 
 
 def _cleanup_managed_jupyter():
+    jupyter_state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
+    jupyter_port = str(jupyter_state.get("port") or _read_json_file(PYTHON_STATE_FILE).get("jupyter_port") or "").strip()
+    stop_python_jupyter()
     if os.name != "nt":
         if command_exists("systemctl"):
             run_capture(["systemctl", "stop", JUPYTER_SYSTEMD_SERVICE], timeout=30)
@@ -493,6 +496,11 @@ def _cleanup_managed_jupyter():
         if command_exists("systemctl"):
             run_capture(["systemctl", "daemon-reload"], timeout=30)
             run_capture(["systemctl", "reload", "nginx"], timeout=30)
+    elif jupyter_port.isdigit():
+        try:
+            manage_firewall_port("close", jupyter_port, "tcp")
+        except Exception:
+            pass
     for path in (
         PYTHON_JUPYTER_STATE_FILE,
         Path("/etc/nginx/auth/serverinstaller-jupyter.htpasswd"),
@@ -521,7 +529,14 @@ def _cleanup_managed_jupyter():
 
 
 def _cleanup_managed_python():
+    state = _read_json_file(PYTHON_STATE_FILE)
+    managed_exe = str(state.get("python_executable") or "").strip()
     _cleanup_managed_jupyter()
+    if managed_exe:
+        current = _read_json_list(PYTHON_IGNORED_FILE)
+        if managed_exe not in current:
+            current.append(managed_exe)
+            _write_json_list(PYTHON_IGNORED_FILE, current)
     try:
         if PYTHON_STATE_DIR.exists():
             shutil.rmtree(PYTHON_STATE_DIR, ignore_errors=True)
