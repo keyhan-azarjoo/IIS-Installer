@@ -31,6 +31,83 @@ function Resolve-PythonFromLauncher {
     }
 }
 
+function Test-PythonExecutable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonExe
+    )
+
+    if (-not (Test-Path $PythonExe)) {
+        return $null
+    }
+
+    try {
+        $output = & $PythonExe -c "import sys; print(sys.executable); print(sys.version.split()[0])" 2>$null
+    } catch {
+        return $null
+    }
+    if (-not $output -or $LASTEXITCODE -ne 0) {
+        return $null
+    }
+
+    $lines = @($output | Where-Object { $_ -and $_.Trim() })
+    if ($lines.Count -lt 1) {
+        return $null
+    }
+
+    return [PSCustomObject]@{
+        Executable = $lines[0].Trim()
+        Version = if ($lines.Count -gt 1) { $lines[1].Trim() } else { "" }
+    }
+}
+
+function Resolve-PythonFromPathOrCommonLocations {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Version
+    )
+
+    $versionPrefix = "$Version."
+    $candidates = New-Object System.Collections.Generic.List[string]
+
+    foreach ($cmdName in @("python.exe", "python3.exe")) {
+        $cmd = Get-Command $cmdName -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) {
+            [void]$candidates.Add($cmd.Source)
+        }
+    }
+
+    $roots = @(
+        $env:ProgramFiles,
+        $env:ProgramW6432,
+        ${env:ProgramFiles(x86)},
+        "C:\Program Files",
+        "C:\Program Files (x86)",
+        $env:LocalAppData
+    ) | Where-Object { $_ } | Select-Object -Unique
+
+    foreach ($root in $roots) {
+        foreach ($pattern in @("Python$($Version.Replace('.', ''))\python.exe", "Programs\Python\Python$($Version.Replace('.', ''))\python.exe")) {
+            $candidate = Join-Path $root $pattern
+            if (Test-Path $candidate) {
+                [void]$candidates.Add($candidate)
+            }
+        }
+    }
+
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        $info = Test-PythonExecutable -PythonExe $candidate
+        if (-not $info) {
+            continue
+        }
+        if ($info.Version -eq $Version -or $info.Version.StartsWith($versionPrefix)) {
+            return $info
+        }
+    }
+
+    return $null
+}
+
 function Install-PythonWithWinget {
     param(
         [Parameter(Mandatory = $true)]
@@ -95,9 +172,15 @@ New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 
 $pythonInfo = Resolve-PythonFromLauncher -Version $requestedVersion
 if (-not $pythonInfo) {
+    $pythonInfo = Resolve-PythonFromPathOrCommonLocations -Version $requestedVersion
+}
+if (-not $pythonInfo) {
     Install-PythonWithWinget -Version $requestedVersion
     Start-Sleep -Seconds 3
     $pythonInfo = Resolve-PythonFromLauncher -Version $requestedVersion
+    if (-not $pythonInfo) {
+        $pythonInfo = Resolve-PythonFromPathOrCommonLocations -Version $requestedVersion
+    }
 }
 
 if (-not $pythonInfo) {
