@@ -1189,6 +1189,50 @@ def _ensure_python_api_runtime_deps(python_executable, app_root, extra_packages=
     return 0, ""
 
 
+def _python_api_venv_python(venv_dir):
+    base = Path(venv_dir)
+    if os.name == "nt":
+        return base / "Scripts" / "python.exe"
+    return base / "bin" / "python"
+
+
+def _create_python_api_venv(deploy_root, python_executable, app_root, extra_packages=None, live_cb=None):
+    deploy_root = Path(deploy_root)
+    app_root = Path(app_root)
+    python_exe = str(python_executable or "").strip()
+    if not python_exe:
+        return "", 1, "Install Python first."
+    venv_dir = deploy_root / ".venv"
+    if venv_dir.exists():
+        shutil.rmtree(venv_dir, ignore_errors=True)
+    if live_cb:
+        live_cb(f"Creating virtual environment at {venv_dir}...\n")
+    code, output = run_process([python_exe, "-m", "venv", str(venv_dir)], live_cb=live_cb)
+    if code != 0:
+        return "", code, output or "Failed to create Python virtual environment."
+    venv_python = _python_api_venv_python(venv_dir)
+    if not venv_python.exists():
+        return "", 1, f"Virtual environment Python was not created: {venv_python}"
+    code, output = run_process([str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], live_cb=live_cb)
+    if code != 0:
+        return "", code, output or "Failed to bootstrap pip inside the virtual environment."
+    req_file = app_root / "requirements.txt"
+    if req_file.exists():
+        if live_cb:
+            live_cb(f"Installing Python app requirements from {req_file} into the virtual environment...\n")
+        code, output = run_process([str(venv_python), "-m", "pip", "install", "-r", str(req_file)], live_cb=live_cb)
+        if code != 0:
+            return "", code, output or "Failed to install requirements.txt into the virtual environment."
+    packages = [pkg for pkg in (extra_packages or []) if str(pkg or "").strip()]
+    if packages:
+        if live_cb:
+            live_cb(f"Installing deployment runtime packages into the virtual environment: {', '.join(packages)}\n")
+        code, output = run_process([str(venv_python), "-m", "pip", "install", "--upgrade"] + packages, live_cb=live_cb)
+        if code != 0:
+            return "", code, output or "Failed to install deployment runtime packages into the virtual environment."
+    return str(venv_python), 0, ""
+
+
 def _ensure_python_api_https_assets(python_executable, host, deploy_name):
     python_exe = str(python_executable or "").strip()
     host_value = str(host or "").strip() or "localhost"
@@ -1309,7 +1353,8 @@ def run_windows_python_api_service(form=None, live_cb=None):
     certfile, keyfile = _ensure_python_api_https_assets(deploy["python_executable"], deploy["host"], service_name)
     if not certfile or not keyfile:
         return 1, "Failed to create HTTPS certificate files for the Python API service."
-    code, output = _ensure_python_api_runtime_deps(
+    venv_python, code, output = _create_python_api_venv(
+        deploy["deploy_root"],
         deploy["python_executable"],
         deploy["deploy_root"] / "app",
         extra_packages=["uvicorn", "trustme", "pywin32"],
@@ -1317,7 +1362,7 @@ def run_windows_python_api_service(form=None, live_cb=None):
     )
     if code != 0:
         return code, output
-    rc_post, out_post = run_capture([deploy["python_executable"], "-m", "pywin32_postinstall", "-install"], timeout=180)
+    rc_post, out_post = run_capture([venv_python, "-m", "pywin32_postinstall", "-install"], timeout=180)
     if rc_post != 0 and live_cb:
         live_cb((out_post or "pywin32 postinstall returned a non-zero exit code.") + "\n")
     _, runner_script = _write_python_api_runtime_files(
@@ -1360,7 +1405,7 @@ def run_windows_python_api_service(form=None, live_cb=None):
             "                self.proc.kill()",
             "        win32event.SetEvent(self.stop_event)",
             "    def SvcDoRun(self):",
-            "        self.proc = subprocess.Popen([sys.executable, RUNNER], cwd=r'''%s''')" % str(deploy["deploy_root"].resolve()),
+            f"        self.proc = subprocess.Popen([r'''{venv_python}''', RUNNER], cwd=r'''{str(deploy['deploy_root'].resolve())}''')",
             "        while True:",
             "            status = win32event.WaitForSingleObject(self.stop_event, 2000)",
             "            if status == win32event.WAIT_OBJECT_0:",
@@ -1375,10 +1420,10 @@ def run_windows_python_api_service(form=None, live_cb=None):
         encoding="utf-8",
     )
     run_capture([deploy["python_executable"], str(service_script), "remove"], timeout=60)
-    code, output = run_process([deploy["python_executable"], str(service_script), "--startup", "auto", "install"], live_cb=live_cb)
+    code, output = run_process([venv_python, str(service_script), "--startup", "auto", "install"], live_cb=live_cb)
     if code != 0:
         return code, output or "Failed to install the Windows Python API service."
-    code, output = run_process([deploy["python_executable"], str(service_script), "start"], live_cb=live_cb)
+    code, output = run_process([venv_python, str(service_script), "start"], live_cb=live_cb)
     if code != 0:
         return code, output or "Failed to start the Windows Python API service."
     manage_firewall_port("open", deploy["https_port"], "tcp")
@@ -1412,7 +1457,8 @@ def run_unix_python_api_service(form=None, live_cb=None):
     certfile, keyfile = _ensure_python_api_https_assets(deploy["python_executable"], deploy["host"], service_name)
     if not certfile or not keyfile:
         return 1, "Failed to create HTTPS certificate files for the Python API service."
-    code, output = _ensure_python_api_runtime_deps(
+    venv_python, code, output = _create_python_api_venv(
+        deploy["deploy_root"],
         deploy["python_executable"],
         deploy["deploy_root"] / "app",
         extra_packages=["uvicorn", "trustme"],
@@ -1441,7 +1487,7 @@ def run_unix_python_api_service(form=None, live_cb=None):
             "[Service]",
             "Type=simple",
             f"WorkingDirectory={str(deploy['deploy_root'])}",
-            f"ExecStart={shlex.quote(str(deploy['python_executable']))} {shlex.quote(str(runner_script))}",
+            f"ExecStart={shlex.quote(str(venv_python))} {shlex.quote(str(runner_script))}",
             "Restart=always",
             "RestartSec=5",
             "",
@@ -1500,8 +1546,9 @@ def run_python_api_docker(form=None, live_cb=None):
             "WORKDIR /app",
             "COPY app/ /app/app/",
             "COPY .serverinstaller/ /app/.serverinstaller/",
-            "RUN python -m pip install --upgrade pip uvicorn trustme \\",
-            " && if [ -f /app/app/requirements.txt ]; then python -m pip install -r /app/app/requirements.txt; fi \\",
+            "RUN python -m venv /opt/serverinstaller-venv \\",
+            " && /opt/serverinstaller-venv/bin/python -m pip install --upgrade pip setuptools wheel uvicorn trustme \\",
+            " && if [ -f /app/app/requirements.txt ]; then /opt/serverinstaller-venv/bin/python -m pip install -r /app/app/requirements.txt; fi \\",
             " && python - <<'PY'",
             "from pathlib import Path",
             "import trustme",
@@ -1513,7 +1560,8 @@ def run_python_api_docker(form=None, live_cb=None):
             "server_cert.private_key_pem.write_to_path(cert_dir / 'tls-key.pem')",
             "PY",
             f"EXPOSE {deploy['https_port']}",
-            f'CMD ["python", "/app/.serverinstaller/{runner_script.name}"]',
+            "ENV PATH=/opt/serverinstaller-venv/bin:$PATH",
+            f'CMD ["/opt/serverinstaller-venv/bin/python", "/app/.serverinstaller/{runner_script.name}"]',
             "",
         ]),
         encoding="utf-8",
@@ -1570,7 +1618,8 @@ def run_windows_python_api_iis(form=None, live_cb=None):
     internal_port = str(pick_free_local_tcp_port(range(18080, 18280)) or "")
     if not internal_port:
         return 1, "Could not find a free internal port for IIS-backed Python API hosting."
-    code, output = _ensure_python_api_runtime_deps(
+    venv_python, code, output = _create_python_api_venv(
+        deploy["deploy_root"],
         deploy["python_executable"],
         deploy["deploy_root"] / "app",
         extra_packages=["uvicorn", "trustme"],
@@ -1595,7 +1644,7 @@ def run_windows_python_api_iis(form=None, live_cb=None):
     <handlers>
       <add name="aspNetCore" path="*" verb="*" modules="AspNetCoreModuleV2" resourceType="Unspecified" />
     </handlers>
-    <aspNetCore processPath="{html.escape(str(deploy['python_executable']))}" arguments="{html.escape(str(runner_script))}" stdoutLogEnabled="true" stdoutLogFile="{html.escape(str(logs_dir / 'stdout'))}" hostingModel="OutOfProcess">
+    <aspNetCore processPath="{html.escape(str(venv_python))}" arguments="{html.escape(str(runner_script))}" stdoutLogEnabled="true" stdoutLogFile="{html.escape(str(logs_dir / 'stdout'))}" hostingModel="OutOfProcess">
       <environmentVariables>
         <environmentVariable name="SERVER_INSTALLER_APP_FILE" value="{html.escape(str((deploy['deploy_root'] / 'app' / deploy['entry_rel']).resolve()))}" />
         <environmentVariable name="SERVER_INSTALLER_APP_OBJECT" value="{html.escape(str(deploy['app_object']))}" />
