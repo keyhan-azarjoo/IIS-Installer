@@ -395,9 +395,8 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
         if (!effectiveUploadPath) {
           return;
         }
-      } else {
-        setSourcePathInForm(effectiveUploadPath);
       }
+      setSourcePathInForm(effectiveUploadPath);
       sourcePathValue = effectiveUploadPath;
       emitTerminal(`Starting: ${title}`, `[${new Date().toLocaleTimeString()}] Upload finished, using uploaded project path: ${effectiveUploadPath}`);
     }
