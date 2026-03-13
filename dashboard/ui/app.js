@@ -465,9 +465,10 @@ function App() {
     }
   };
 
-  const run = async (event, action, title) => {
+  const run = async (event, action, title, formElement = null) => {
     event.preventDefault();
-    const body = new FormData(event.currentTarget);
+    const formTarget = formElement || event.currentTarget || event.target;
+    const body = new FormData(formTarget);
     append("============================================================");
     append(`[${new Date().toLocaleTimeString()}] ${title} started`);
     setTermState(`Running: ${title}`);

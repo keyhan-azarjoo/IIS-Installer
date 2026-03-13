@@ -401,7 +401,7 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
       emitTerminal(`Starting: ${title}`, `[${new Date().toLocaleTimeString()}] Upload finished, using uploaded project path: ${effectiveUploadPath}`);
     }
 
-    onRun(e, action, title);
+    onRun(e, action, title, formEl);
   };
 
   return (

@@ -801,6 +801,7 @@ def _python_state_service_item(info):
             "manageable": True,
             "deletable": True,
         })
+    items.extend(_python_api_service_items())
     return items
 
 
@@ -1155,20 +1156,50 @@ def _copy_python_api_source(source_root, entry_file, deploy_root):
         shutil.rmtree(app_root, ignore_errors=True)
     app_root.mkdir(parents=True, exist_ok=True)
 
+    upload_base = upload_root_dir().resolve()
+    source_resolved = source_root.resolve()
+    is_uploaded_temp = False
+    try:
+        source_resolved.relative_to(upload_base)
+        is_uploaded_temp = True
+    except Exception:
+        is_uploaded_temp = False
+
     if source_root.is_file():
-        shutil.copy2(source_root, app_root / entry_file.name)
-        return app_root / entry_file.name, entry_file.name
+        target_file = app_root / entry_file.name
+        if is_uploaded_temp:
+            shutil.move(str(source_root), str(target_file))
+        else:
+            shutil.copy2(source_root, target_file)
+        return target_file, entry_file.name
 
     if entry_file.parent == source_root and len(list(source_root.iterdir())) == 1 and entry_file.is_file():
-        shutil.copy2(entry_file, app_root / entry_file.name)
-        return app_root / entry_file.name, entry_file.name
-
-    for item in source_root.iterdir():
-        target = app_root / item.name
-        if item.is_dir():
-            shutil.copytree(item, target, dirs_exist_ok=True)
+        target_file = app_root / entry_file.name
+        if is_uploaded_temp:
+            shutil.move(str(entry_file), str(target_file))
+            try:
+                source_root.rmdir()
+            except Exception:
+                pass
         else:
-            shutil.copy2(item, target)
+            shutil.copy2(entry_file, target_file)
+        return target_file, entry_file.name
+
+    if is_uploaded_temp:
+        for item in source_root.iterdir():
+            target = app_root / item.name
+            shutil.move(str(item), str(target))
+        try:
+            shutil.rmtree(source_root, ignore_errors=True)
+        except Exception:
+            pass
+    else:
+        for item in source_root.iterdir():
+            target = app_root / item.name
+            if item.is_dir():
+                shutil.copytree(item, target, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, target)
     copied_entry = app_root / entry_file.relative_to(source_root)
     return copied_entry, copied_entry.relative_to(app_root).as_posix()
 
@@ -1338,6 +1369,113 @@ def _update_python_api_state(name, payload):
     deployments[_safe_python_api_name(name)] = payload
     state["deployments"] = deployments
     _write_json_file(PYTHON_API_STATE_FILE, state)
+
+
+def _cleanup_python_api_state_entry(service_name, kind=""):
+    state = _read_json_file(PYTHON_API_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        return
+    remove_keys = []
+    for key, payload in deployments.items():
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("name") or "").strip() != str(service_name or "").strip():
+            continue
+        if kind and str(payload.get("kind") or "").strip() != str(kind or "").strip():
+            continue
+        deploy_root = Path(str(payload.get("deploy_root") or "").strip())
+        try:
+            if deploy_root.exists():
+                shutil.rmtree(deploy_root, ignore_errors=True)
+        except Exception:
+            pass
+        remove_keys.append(key)
+    for key in remove_keys:
+        deployments.pop(key, None)
+    state["deployments"] = deployments
+    _write_json_file(PYTHON_API_STATE_FILE, state)
+
+
+def _python_api_service_items():
+    state = _read_json_file(PYTHON_API_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        return []
+    items = []
+    for _, payload in deployments.items():
+        if not isinstance(payload, dict):
+            continue
+        kind = str(payload.get("kind") or "").strip().lower()
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            continue
+        url = str(payload.get("url") or "").strip()
+        port_text = str(payload.get("port") or "").strip()
+        ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
+        running = False
+        autostart = False
+        sub_status = ""
+        if kind == "service":
+            if os.name == "nt":
+                rc, out = run_capture(
+                    [
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        f"$svc=Get-CimInstance Win32_Service -Filter \"Name='{name}'\" -ErrorAction SilentlyContinue; if($svc){{Write-Output ($svc.State + '|' + $svc.StartMode)}}",
+                    ],
+                    timeout=20,
+                )
+                if rc == 0 and out:
+                    parts = str(out).strip().split("|", 1)
+                    sub_status = parts[0] if parts else ""
+                    running = sub_status.lower() == "running"
+                    autostart = len(parts) > 1 and parts[1].strip().lower() == "auto"
+            else:
+                svc = _linux_systemd_unit_status(name)
+                sub_status = str(svc.get("active") or "")
+                running = bool(svc.get("running"))
+                autostart = bool(svc.get("autostart"))
+        elif kind == "docker":
+            details = _get_docker_container_details(name)
+            sub_status = str(details.get("state") or "")
+            running = sub_status == "running"
+            autostart = str(details.get("restart_policy") or "") in ("always", "unless-stopped")
+        elif kind == "iis_site" and os.name == "nt":
+            rc, out = run_capture(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    f"Import-Module WebAdministration; $site=Get-Website -Name '{name}' -ErrorAction SilentlyContinue; if($site){{Write-Output ($site.State + '|' + [string]$site.serverAutoStart)}}",
+                ],
+                timeout=20,
+            )
+            if rc == 0 and out:
+                parts = str(out).strip().split("|", 1)
+                sub_status = parts[0] if parts else ""
+                running = sub_status.lower() == "started"
+                autostart = len(parts) > 1 and parts[1].strip().lower() == "true"
+        items.append({
+            "kind": kind or "service",
+            "name": name,
+            "display_name": "Python API",
+            "status": "running" if running else "stopped",
+            "sub_status": sub_status or ("running" if running else "stopped"),
+            "autostart": autostart,
+            "platform": "windows" if os.name == "nt" else "linux",
+            "urls": [url] if url else [],
+            "ports": ports,
+            "manageable": True,
+            "deletable": True,
+            "detail": str(payload.get("entry_file") or ""),
+        })
+    return items
 
 
 def run_windows_python_api_service(form=None, live_cb=None):
@@ -3880,6 +4018,8 @@ def manage_service(action, name, kind, detail=""):
             return rc == 0, (out or f"Auto-start disabled for docker container '{svc_name}'.")
         if action == "delete":
             rc, out = run_capture(["docker", "rm", "-f", svc_name], timeout=60)
+            if rc == 0 and _is_python_name(svc_name):
+                _cleanup_python_api_state_entry(svc_name, "docker")
             if _is_locals3_name(svc_name):
                 if os.name == "nt":
                     _windows_cleanup_locals3()
@@ -3938,7 +4078,10 @@ def manage_service(action, name, kind, detail=""):
                 return _windows_cleanup_locals3()
             if _is_mongo_name(svc_name):
                 return _windows_cleanup_localmongo()
-            return _windows_remove_iis_site_and_path(svc_name)
+            ok, message = _windows_remove_iis_site_and_path(svc_name)
+            if ok and _is_python_name(svc_name):
+                _cleanup_python_api_state_entry(svc_name, "iis_site")
+            return ok, message
         if action in ("autostart_on", "autostart_off"):
             val = "$true" if action == "autostart_on" else "$false"
             rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Set-ItemProperty \"IIS:\\Sites\\{svc_name}\" -Name serverAutoStart -Value {val}"], timeout=30)
@@ -4016,7 +4159,10 @@ def manage_service(action, name, kind, detail=""):
                 return _windows_cleanup_locals3()
             if _is_mongo_name(svc_name):
                 return _windows_cleanup_localmongo()
-            return _windows_remove_service_and_files(svc_name)
+            ok, message = _windows_remove_service_and_files(svc_name)
+            if ok and _is_python_name(svc_name):
+                _cleanup_python_api_state_entry(svc_name, "service")
+            return ok, message
         ps_map = {
             "start": f"Start-Service -Name '{svc_name}' -ErrorAction Stop",
             "stop": f"Stop-Service -Name '{svc_name}' -Force -ErrorAction Stop",
@@ -4060,6 +4206,8 @@ def manage_service(action, name, kind, detail=""):
                 rc, out = run_capture(prefix + ["rm", "-f", unit_file], timeout=30)
                 run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
                 if rc == 0:
+                    if _is_python_name(unit):
+                        _cleanup_python_api_state_entry(unit, "service")
                     return True, (out or f"Service unit '{unit}' deleted.")
                 continue
             rc, out = run_capture(prefix + ["systemctl", action, unit], timeout=60)
