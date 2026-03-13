@@ -244,8 +244,18 @@ function App() {
   const [pythonApiEditorSeed, setPythonApiEditorSeed] = React.useState(0);
   const [websiteEditor, setWebsiteEditor] = React.useState(null);
   const [websiteEditorSeed, setWebsiteEditorSeed] = React.useState(0);
+  const [fileManagerPath, setFileManagerPath] = React.useState("");
+  const [fileManagerData, setFileManagerData] = React.useState(null);
+  const [fileManagerLoading, setFileManagerLoading] = React.useState(false);
+  const [fileManagerError, setFileManagerError] = React.useState("");
+  const [fileEditorPath, setFileEditorPath] = React.useState("");
+  const [fileEditorContent, setFileEditorContent] = React.useState("");
+  const [fileEditorMeta, setFileEditorMeta] = React.useState(null);
+  const [fileEditorDirty, setFileEditorDirty] = React.useState(false);
+  const [fileOpBusy, setFileOpBusy] = React.useState(false);
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
+  const fileManagerInitRef = React.useRef(false);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
   const selectableIps = React.useMemo(() => getSelectableIps(systemInfo), [systemInfo]);
 
@@ -652,7 +662,7 @@ function App() {
 
   const goBack = () => {
     if (page === "home") return;
-    if (page === "api" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services" || page === "website") setPage("home");
+    if (page === "api" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services" || page === "website" || page === "files") setPage("home");
     else if (page === "dotnet" || page === "python" || page === "python-api") setPage("api");
     else if (page.startsWith("dotnet-")) setPage("dotnet");
     else if (page === "python-system" || page === "python-docker" || page === "python-iis") setPage("python-api");
@@ -669,6 +679,7 @@ function App() {
     if (page === "proxy") return "Proxy";
     if (page === "python") return "Python";
     if (page === "website") return "Websites";
+    if (page === "files") return "File Manager";
     if (page === "python-api") return "Python > API";
     if (page === "python-system") return "Python > OS Service";
     if (page === "python-docker") return "Python > Docker";
@@ -993,6 +1004,7 @@ function App() {
       port: String(svc.port_value || (Array.isArray(svc.ports) && svc.ports[0] ? svc.ports[0].port : "") || "").trim(),
       source: String(svc.project_path || svc.deploy_root || "").trim(),
       kind: String(svc.kind_value || "auto").trim(),
+      target: String(svc.target_value || "service").trim(),
     });
     setWebsiteEditorSeed((prev) => prev + 1);
     setPage("website");
@@ -1361,6 +1373,194 @@ function App() {
     }
   };
 
+  const loadFileManager = React.useCallback(async (targetPath = fileManagerPath) => {
+    setFileManagerLoading(true);
+    setFileManagerError("");
+    try {
+      const query = targetPath ? `?path=${encodeURIComponent(targetPath)}` : "";
+      const r = await fetch(`/api/files/list${query}`, { headers: { "X-Requested-With": "fetch" } });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setFileManagerData(j);
+      setFileManagerPath(j.path || "");
+    } catch (err) {
+      setFileManagerError(String(err));
+      setFileManagerData(null);
+    } finally {
+      setFileManagerLoading(false);
+    }
+  }, [fileManagerPath]);
+
+  const openFileInEditor = React.useCallback(async (targetPath) => {
+    setFileOpBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("path", targetPath);
+      const r = await fetch("/api/files/read", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setFileEditorPath(j.path || targetPath);
+      setFileEditorContent(j.content || "");
+      setFileEditorMeta(j);
+      setFileEditorDirty(false);
+      setInfoMessage(`Opened ${j.path || targetPath}`);
+    } catch (err) {
+      setInfoMessage(`Could not open file: ${err}`);
+    } finally {
+      setFileOpBusy(false);
+    }
+  }, []);
+
+  const saveFileEditor = React.useCallback(async () => {
+    if (!fileEditorPath) return;
+    setFileOpBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("path", fileEditorPath);
+      fd.append("content", fileEditorContent);
+      const r = await fetch("/api/files/write", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setFileEditorDirty(false);
+      setInfoMessage(`Saved ${fileEditorPath}`);
+      loadFileManager(fileManagerPath);
+    } catch (err) {
+      setInfoMessage(`Save failed: ${err}`);
+    } finally {
+      setFileOpBusy(false);
+    }
+  }, [fileEditorContent, fileEditorPath, fileManagerPath, loadFileManager]);
+
+  const createFolderInCurrentPath = React.useCallback(async () => {
+    const folderName = window.prompt("New folder name:");
+    if (!folderName) return;
+    const separator = cfg.os === "windows" ? "\\" : "/";
+    const nextPath = fileManagerPath
+      ? `${String(fileManagerPath).replace(/[\\/]+$/, "")}${separator}${folderName}`
+      : folderName;
+    setFileOpBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("path", nextPath);
+      const r = await fetch("/api/files/mkdir", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setInfoMessage(`Created folder ${nextPath}`);
+      loadFileManager(fileManagerPath);
+    } catch (err) {
+      setInfoMessage(`Create folder failed: ${err}`);
+    } finally {
+      setFileOpBusy(false);
+    }
+  }, [cfg.os, fileManagerPath, loadFileManager]);
+
+  const createFileInCurrentPath = React.useCallback(async () => {
+    const fileName = window.prompt("New file name:");
+    if (!fileName) return;
+    const separator = cfg.os === "windows" ? "\\" : "/";
+    const nextPath = fileManagerPath
+      ? `${String(fileManagerPath).replace(/[\\/]+$/, "")}${separator}${fileName}`
+      : fileName;
+    setFileOpBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("path", nextPath);
+      fd.append("content", "");
+      const r = await fetch("/api/files/write", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setInfoMessage(`Created file ${nextPath}`);
+      await loadFileManager(fileManagerPath);
+      await openFileInEditor(nextPath);
+    } catch (err) {
+      setInfoMessage(`Create file failed: ${err}`);
+    } finally {
+      setFileOpBusy(false);
+    }
+  }, [cfg.os, fileManagerPath, loadFileManager, openFileInEditor]);
+
+  const renameFileManagerPath = React.useCallback(async (sourcePath) => {
+    const currentName = String(sourcePath || "").split(/[\\/]/).pop() || "";
+    const nextName = window.prompt("Rename to:", currentName);
+    if (!nextName || nextName === currentName) return;
+    const nextPath = String(sourcePath).replace(/[\\/][^\\/]+$/, `${cfg.os === "windows" ? "\\" : "/"}${nextName}`);
+    setFileOpBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("source", sourcePath);
+      fd.append("target", nextPath);
+      const r = await fetch("/api/files/rename", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (fileEditorPath === sourcePath) {
+        setFileEditorPath(nextPath);
+      }
+      setInfoMessage(`Renamed to ${nextPath}`);
+      loadFileManager(fileManagerPath);
+    } catch (err) {
+      setInfoMessage(`Rename failed: ${err}`);
+    } finally {
+      setFileOpBusy(false);
+    }
+  }, [cfg.os, fileEditorPath, fileManagerPath, loadFileManager]);
+
+  const deleteFileManagerPath = React.useCallback(async (targetPath, isDir) => {
+    const confirmed = window.confirm(`Delete ${isDir ? "folder" : "file"}?\n${targetPath}`);
+    if (!confirmed) return;
+    setFileOpBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("path", targetPath);
+      const r = await fetch("/api/files/delete", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (fileEditorPath === targetPath) {
+        setFileEditorPath("");
+        setFileEditorContent("");
+        setFileEditorMeta(null);
+        setFileEditorDirty(false);
+      }
+      setInfoMessage(`Deleted ${targetPath}`);
+      loadFileManager(fileManagerPath);
+    } catch (err) {
+      setInfoMessage(`Delete failed: ${err}`);
+    } finally {
+      setFileOpBusy(false);
+    }
+  }, [fileEditorPath, fileManagerPath, loadFileManager]);
+
+  const uploadIntoCurrentPath = React.useCallback(async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!fileManagerPath || files.length === 0) return;
+    setFileOpBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("target", fileManagerPath);
+      files.forEach((file) => {
+        fd.append("files", file, file.webkitRelativePath || file.name);
+      });
+      const r = await fetch("/api/files/upload", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setInfoMessage(`Uploaded ${j.written?.length || files.length} item(s).`);
+      loadFileManager(fileManagerPath);
+    } catch (err) {
+      setInfoMessage(`Upload failed: ${err}`);
+    } finally {
+      event.target.value = "";
+      setFileOpBusy(false);
+    }
+  }, [fileManagerPath, loadFileManager]);
+
+  React.useEffect(() => {
+    if (page === "files" && !fileManagerInitRef.current) {
+      fileManagerInitRef.current = true;
+      loadFileManager(fileManagerPath);
+    } else if (page !== "files") {
+      fileManagerInitRef.current = false;
+    }
+  }, [fileManagerPath, loadFileManager, page]);
+
   const tryOpenCompass = () => {
     try {
       launchCompassProtocol(mongoCompassUri);
@@ -1425,6 +1625,9 @@ function App() {
           <Grid item xs={12} md={6}>
             <NavCard title="Websites" text="Deploy and manage exported static websites, Flutter web builds, and Next export output on IIS." onClick={() => startNewWebsiteDeployment()} outlined />
           </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Files" text="Browse, upload, edit, rename, download, and delete files across the server filesystem." onClick={() => { setPage("files"); setFileManagerData(null); }} outlined />
+          </Grid>
         </Grid>
       );
     }
@@ -1437,6 +1640,115 @@ function App() {
           </Grid>
           <Grid item xs={12} md={6}>
             <NavCard title="Python" text="Configure Python API service deployment separately from Jupyter notebooks." onClick={() => setPage("python-api")} outlined />
+          </Grid>
+        </Grid>
+      );
+    }
+
+    if (page === "files") {
+      const entries = Array.isArray(fileManagerData?.entries) ? fileManagerData.entries : [];
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={7}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Typography variant="h6" fontWeight={800}>File Manager</Typography>
+                  <TextField
+                    size="small"
+                    label="Path"
+                    value={fileManagerPath}
+                    onChange={(e) => setFileManagerPath(e.target.value)}
+                    placeholder={cfg.os === "windows" ? "C:\\" : "/"}
+                    sx={{ flexGrow: 1 }}
+                  />
+                  <Button variant="outlined" disabled={fileManagerLoading} onClick={() => loadFileManager(fileManagerPath)} sx={{ textTransform: "none" }}>
+                    {fileManagerLoading ? "Loading..." : "Open"}
+                  </Button>
+                  <Button variant="outlined" disabled={fileOpBusy} onClick={() => loadFileManager(fileManagerData?.parent || "")} sx={{ textTransform: "none" }}>
+                    Up
+                  </Button>
+                </Stack>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} sx={{ mt: 1.2 }}>
+                  <Button variant="outlined" disabled={fileOpBusy || !fileManagerPath} onClick={createFolderInCurrentPath} sx={{ textTransform: "none" }}>New Folder</Button>
+                  <Button variant="outlined" disabled={fileOpBusy || !fileManagerPath} onClick={createFileInCurrentPath} sx={{ textTransform: "none" }}>New File</Button>
+                  <Button variant="outlined" disabled={fileManagerLoading} onClick={() => loadFileManager(fileManagerPath)} sx={{ textTransform: "none" }}>Refresh</Button>
+                  <Button variant="outlined" onClick={() => loadFileManager("")} sx={{ textTransform: "none" }}>Roots</Button>
+                  <Button component="label" variant="outlined" disabled={fileOpBusy || !fileManagerPath} sx={{ textTransform: "none" }}>
+                    Upload
+                    <input hidden multiple type="file" onChange={uploadIntoCurrentPath} />
+                  </Button>
+                  <Button component="label" variant="outlined" disabled={fileOpBusy || !fileManagerPath} sx={{ textTransform: "none" }}>
+                    Upload Folder
+                    <input hidden multiple type="file" webkitdirectory="" directory="" onChange={uploadIntoCurrentPath} />
+                  </Button>
+                </Stack>
+                {fileManagerError && <Alert severity="error" sx={{ mt: 1.2 }}>{fileManagerError}</Alert>}
+                <Typography variant="body2" sx={{ mt: 1.2 }}>Current: {fileManagerData?.path || (cfg.os === "windows" ? "Computer" : "/")}</Typography>
+                <Box sx={{ mt: 1.2, maxHeight: 540, overflow: "auto" }}>
+                  {entries.length === 0 && <Typography variant="body2">No items found.</Typography>}
+                  {entries.map((entry) => (
+                    <Paper key={entry.path} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                        <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                          <Typography variant="body2" fontWeight={700} sx={{ wordBreak: "break-all" }}>{entry.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {entry.is_dir ? "Folder" : "File"} | {entry.path} {!entry.is_dir ? `| ${formatBytes(entry.size)}` : ""}
+                          </Typography>
+                        </Box>
+                        <Chip size="small" label={entry.is_dir ? "folder" : "file"} />
+                        <Button size="small" variant="outlined" onClick={() => entry.is_dir ? loadFileManager(entry.path) : openFileInEditor(entry.path)} sx={{ textTransform: "none" }}>
+                          {entry.is_dir ? "Open" : "Edit"}
+                        </Button>
+                        {!entry.is_dir && (
+                          <Button size="small" variant="outlined" onClick={() => window.open(`/api/files/download?path=${encodeURIComponent(entry.path)}`, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
+                            Download
+                          </Button>
+                        )}
+                        <Button size="small" variant="outlined" disabled={fileOpBusy} onClick={() => renameFileManagerPath(entry.path)} sx={{ textTransform: "none" }}>Rename</Button>
+                        <Button size="small" variant="outlined" color="error" disabled={fileOpBusy} onClick={() => deleteFileManagerPath(entry.path, entry.is_dir)} sx={{ textTransform: "none" }}>Delete</Button>
+                      </Stack>
+                    </Paper>
+                  ))}
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={5}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+              <CardContent>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Typography variant="h6" fontWeight={800}>Editor</Typography>
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button variant="contained" disabled={fileOpBusy || !fileEditorPath || !fileEditorDirty} onClick={saveFileEditor} sx={{ textTransform: "none" }}>Save</Button>
+                </Stack>
+                {!fileEditorPath && (
+                  <Typography variant="body2" sx={{ mt: 2 }}>
+                    Open a text file from the left side to edit it here. Binary files can still be downloaded from the list.
+                  </Typography>
+                )}
+                {!!fileEditorPath && (
+                  <Box sx={{ mt: 1.2 }}>
+                    <Typography variant="body2" sx={{ wordBreak: "break-all" }}>{fileEditorPath}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {fileEditorMeta?.encoding || "utf-8"} {fileEditorMeta?.size ? `| ${formatBytes(fileEditorMeta.size)}` : ""} {fileEditorDirty ? "| unsaved changes" : ""}
+                    </Typography>
+                    <TextField
+                      multiline
+                      minRows={24}
+                      maxRows={24}
+                      fullWidth
+                      value={fileEditorContent}
+                      onChange={(e) => {
+                        setFileEditorContent(e.target.value);
+                        setFileEditorDirty(true);
+                      }}
+                      sx={{ mt: 1.2 }}
+                    />
+                  </Box>
+                )}
+              </CardContent>
+            </Card>
           </Grid>
         </Grid>
       );
@@ -2393,25 +2705,41 @@ function App() {
     }
 
     if (page === "website") {
-      if (cfg.os !== "windows") {
-        return <Alert severity="info">Website IIS deployment is only available on Windows hosts.</Alert>;
-      }
       const websiteHost = selectableIps.includes(String(websiteEditor?.host || "").trim()) ? String(websiteEditor?.host || "").trim() : (selectableIps.length === 1 ? selectableIps[0] : "");
+      const websiteTargetOptions = [];
+      websiteTargetOptions.push("auto");
+      websiteTargetOptions.push("service");
+      if (cfg.os === "windows") websiteTargetOptions.push("iis");
+      websiteTargetOptions.push("docker");
+      const selectedTarget = websiteTargetOptions.includes(String(websiteEditor?.target || "").trim()) ? String(websiteEditor?.target || "").trim() : websiteTargetOptions[0];
+      const websiteTargetLabel = selectedTarget === "auto"
+        ? "Auto"
+        : selectedTarget === "iis"
+        ? "IIS"
+        : (selectedTarget === "docker" ? "Docker" : (cfg.os === "windows" ? "OS Service (Windows)" : "OS Service"));
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
             <ActionCard
               key={`website-${websiteEditorSeed}`}
-              title="Deploy Website to IIS"
-              description="Upload or point to a built website folder and publish it as a managed IIS website."
-              action="/run/website_iis"
+              title={`Deploy Website to ${websiteTargetLabel}`}
+              description="Upload or point to a website project. The dashboard inspects the files and chooses the correct runtime stack automatically."
+              action="/run/website_deploy"
               fields={[
                 { name: "WEBSITE_SITE_NAME", label: "Website Name", defaultValue: websiteEditor?.name || "ServerInstallerWebsite", required: true },
+                {
+                  name: "WEBSITE_TARGET",
+                  label: "Run On",
+                  type: "select",
+                  options: websiteTargetOptions,
+                  defaultValue: selectedTarget,
+                  required: true,
+                },
                 {
                   name: "WEBSITE_KIND",
                   label: "Website Type",
                   type: "select",
-                  options: ["auto", "static", "next-export", "flutter"],
+                  options: ["auto", "static", "next-export", "nextjs", "flutter", "php"],
                   defaultValue: websiteEditor?.kind || "auto",
                   required: true,
                 },
@@ -2431,15 +2759,27 @@ function App() {
               onRun={run}
               color="#0f766e"
             />
+            {cfg.os !== "windows" && (
+              <Alert severity="info" sx={{ mt: 1.5 }}>
+                IIS is only available on Windows. On this host you can deploy websites as an OS-managed service or Docker container.
+              </Alert>
+            )}
+            {!docker.installed && (
+              <Alert severity="info" sx={{ mt: 1.5 }}>
+                Docker target requires Docker to be installed and running on the host.
+              </Alert>
+            )}
           </Grid>
           <Grid item xs={12} md={4}>
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
               <CardContent>
                 <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Supported Builds</Typography>
-                <Typography variant="body2">Use this page for static HTML sites, React/Vite dist folders, Flutter <code>build/web</code>, and Next.js export output such as <code>out</code>.</Typography>
-                <Typography variant="body2" sx={{ mt: 1 }}>The dashboard auto-detects common publish folders and recreates the IIS website when you deploy the same name again.</Typography>
+                <Typography variant="body2">The dashboard inspects uploaded files and auto-detects static/exported sites, Flutter web, Next.js apps, and PHP apps.</Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>Static/exported builds can run on IIS, Docker, or OS service. Next.js and PHP are routed to Docker or OS service because they need an application runtime.</Typography>
                 <Typography variant="body2" sx={{ mt: 1 }}>Managed websites: {Number(websiteInfo?.count || websiteServices.length || 0)}</Typography>
                 <Typography variant="body2">IIS: {iis.installed ? "Installed" : "Not installed"}</Typography>
+                <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "available"})` : "Not installed"}</Typography>
+                <Typography variant="body2">OS Target: {cfg.os === "windows" ? "Windows service" : (cfg.os === "darwin" ? "launchd" : "systemd")}</Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -2461,6 +2801,9 @@ function App() {
                       <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                         <Box sx={{ minWidth: 280 }}>
                           <Typography variant="body2"><b>{svc.form_name || svc.name}</b> ({svc.stack_label || "website"})</Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                            Target: {svc.target_value || svc.kind || "-"}
+                          </Typography>
                           <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
                             Source: {svc.project_path || "-"}
                           </Typography>
@@ -2920,6 +3263,14 @@ function App() {
       >
         {collapsed ? "Update" : "Update Dashboard"}
       </Button>
+      <Button
+        fullWidth
+        variant={page === "files" ? "contained" : "outlined"}
+        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: page === "files" ? undefined : "#dbeafe", borderColor: "rgba(219,234,254,.35)" }}
+        onClick={() => { setPage("files"); setFileManagerData(null); if (isMobile) setMobileOpen(false); }}
+      >
+        {collapsed ? "Files" : "File Manager"}
+      </Button>
     </Box>
   );
 
@@ -2948,6 +3299,9 @@ function App() {
             </IconButton>
             <IconButton size="small" sx={{ border: "1px solid rgba(219,234,254,.35)", color: "#dbeafe" }} onClick={() => { setPage("services"); loadServices.current(); }} title="Service Manager">
               <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700 }}>SV</Typography>
+            </IconButton>
+            <IconButton size="small" sx={{ border: "1px solid rgba(219,234,254,.35)", color: "#dbeafe" }} onClick={() => { setPage("files"); setFileManagerData(null); }} title="File Manager">
+              <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700 }}>FM</Typography>
             </IconButton>
             <Button size="small" variant="outlined" sx={{ color: "#dbeafe", borderColor: "rgba(219,234,254,.35)", textTransform: "none" }} onClick={() => { window.location.href = "/logout"; }}>
               Logout

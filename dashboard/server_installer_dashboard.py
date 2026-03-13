@@ -10,6 +10,7 @@ import os
 import platform
 import secrets
 import shutil
+import mimetypes
 import socket
 import subprocess
 import sys
@@ -1158,50 +1159,22 @@ def _copy_python_api_source(source_root, entry_file, deploy_root):
         shutil.rmtree(app_root, ignore_errors=True)
     app_root.mkdir(parents=True, exist_ok=True)
 
-    upload_base = upload_root_dir().resolve()
-    source_resolved = source_root.resolve()
-    is_uploaded_temp = False
-    try:
-        source_resolved.relative_to(upload_base)
-        is_uploaded_temp = True
-    except Exception:
-        is_uploaded_temp = False
-
     if source_root.is_file():
         target_file = app_root / entry_file.name
-        if is_uploaded_temp:
-            shutil.move(str(source_root), str(target_file))
-        else:
-            shutil.copy2(source_root, target_file)
+        shutil.copy2(source_root, target_file)
         return target_file, entry_file.name
 
     if entry_file.parent == source_root and len(list(source_root.iterdir())) == 1 and entry_file.is_file():
         target_file = app_root / entry_file.name
-        if is_uploaded_temp:
-            shutil.move(str(entry_file), str(target_file))
-            try:
-                source_root.rmdir()
-            except Exception:
-                pass
-        else:
-            shutil.copy2(entry_file, target_file)
+        shutil.copy2(entry_file, target_file)
         return target_file, entry_file.name
 
-    if is_uploaded_temp:
-        for item in source_root.iterdir():
-            target = app_root / item.name
-            shutil.move(str(item), str(target))
-        try:
-            shutil.rmtree(source_root, ignore_errors=True)
-        except Exception:
-            pass
-    else:
-        for item in source_root.iterdir():
-            target = app_root / item.name
-            if item.is_dir():
-                shutil.copytree(item, target, dirs_exist_ok=True)
-            else:
-                shutil.copy2(item, target)
+    for item in source_root.iterdir():
+        target = app_root / item.name
+        if item.is_dir():
+            shutil.copytree(item, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(item, target)
     copied_entry = app_root / entry_file.relative_to(source_root)
     return copied_entry, copied_entry.relative_to(app_root).as_posix()
 
@@ -1496,6 +1469,11 @@ def _safe_website_name(value, default_name="ServerInstallerWebsite"):
     return text or default_name
 
 
+def _safe_website_runtime_name(value, default_name="serverinstaller-website"):
+    text = re.sub(r"[^A-Za-z0-9.-]+", "-", str(value or "").strip().lower()).strip("-.")
+    return text or default_name
+
+
 def _website_state_key(value):
     cleaned = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
     return cleaned or "website"
@@ -1541,6 +1519,57 @@ def _website_state_payload(site_name):
         if str(payload.get("name") or "").strip().lower() == target:
             return payload
     return {}
+
+
+def _website_state_payload_by_key(site_key):
+    state = _read_json_file(WEBSITE_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        return {}
+    payload = deployments.get(str(site_key or "").strip())
+    return payload if isinstance(payload, dict) else {}
+
+
+def _cleanup_existing_website_runtime(payload):
+    if not isinstance(payload, dict):
+        return
+    name = str(payload.get("name") or "").strip()
+    target = str(payload.get("target") or "").strip().lower()
+    if not name:
+        return
+    if target == "docker" and command_exists("docker"):
+        run_capture(["docker", "rm", "-f", name], timeout=60)
+        image_name = str(payload.get("image_name") or "").strip()
+        if image_name:
+            run_capture(["docker", "rmi", "-f", image_name], timeout=30)
+        return
+    if target == "iis" and os.name == "nt":
+        ps = "\n".join([
+            "Import-Module WebAdministration",
+            f"$siteName = {_ps_single_quote(name)}",
+            "if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) { Stop-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null; Remove-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null }",
+            f"if (Test-Path ('IIS:\\AppPools\\{name}')) {{ Stop-WebAppPool -Name '{name}' -ErrorAction SilentlyContinue | Out-Null; Remove-WebAppPool -Name '{name}' -ErrorAction SilentlyContinue | Out-Null }}",
+        ])
+        run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=90)
+        return
+    if target == "service" and os.name == "nt":
+        run_capture(["sc.exe", "stop", name], timeout=30)
+        run_capture(["sc.exe", "delete", name], timeout=30)
+        return
+    if target == "service" and platform.system() == "Darwin":
+        plist_name = str(payload.get("plist_name") or f"com.serverinstaller.website.{_safe_website_runtime_name(name)}").strip()
+        plist_path = f"/Library/LaunchDaemons/{plist_name}.plist"
+        prefix = _sudo_prefix()
+        run_capture(prefix + ["launchctl", "bootout", "system", plist_path], timeout=30)
+        run_capture(prefix + ["rm", "-f", plist_path], timeout=30)
+        return
+    if target == "service":
+        unit_name = name if name.endswith(".service") else f"{name}.service"
+        prefix = _sudo_prefix()
+        run_capture(prefix + ["systemctl", "stop", unit_name], timeout=30)
+        run_capture(prefix + ["systemctl", "disable", unit_name], timeout=30)
+        run_capture(prefix + ["rm", "-f", f"/etc/systemd/system/{unit_name}"], timeout=30)
+        run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
 
 
 def _detect_static_website_root(source_root: Path, website_kind="auto"):
@@ -1590,40 +1619,230 @@ def _detect_static_website_root(source_root: Path, website_kind="auto"):
     raise RuntimeError("No publishable website folder found. Upload a built site that contains index.html, such as dist, out, build/web, or a plain static folder.")
 
 
-def _prepare_windows_static_website(form=None, live_cb=None):
+def _read_text_if_exists(path_value):
+    path_obj = Path(path_value)
+    if not path_obj.exists() or not path_obj.is_file():
+        return ""
+    try:
+        return path_obj.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def _find_php_public_root(source_root: Path):
+    root = Path(source_root).resolve()
+    for rel in ("public", "web", ""):
+        candidate = root / rel if rel else root
+        if candidate.is_dir() and any((candidate / name).exists() for name in ("index.php", "router.php")):
+            return candidate, (str(candidate.relative_to(root)) if candidate != root else ".")
+    for candidate in root.rglob("*"):
+        if candidate.is_dir() and (candidate / "index.php").exists():
+            return candidate, str(candidate.relative_to(root))
+    raise RuntimeError("Could not find a PHP web root. Expected index.php in the project root or a public/ folder.")
+
+
+def _detect_website_stack(source_root: Path):
+    root = Path(source_root).resolve()
+    package_json = root / "package.json"
+    pubspec = root / "pubspec.yaml"
+    composer_json = root / "composer.json"
+    next_config = any((root / name).exists() for name in ("next.config.js", "next.config.mjs", "next.config.ts"))
+    next_dir = (root / ".next").exists()
+    out_dir = (root / "out" / "index.html").exists()
+    dist_dir = (root / "dist" / "index.html").exists()
+    flutter_build = (root / "build" / "web" / "index.html").exists()
+    php_index = any((root / rel).exists() for rel in ("index.php", "public/index.php", "web/index.php"))
+
+    package_data = {}
+    if package_json.exists():
+        try:
+            package_data = json.loads(package_json.read_text(encoding="utf-8"))
+        except Exception:
+            package_data = {}
+    deps = {}
+    if isinstance(package_data, dict):
+        deps = {
+            **(package_data.get("dependencies") if isinstance(package_data.get("dependencies"), dict) else {}),
+            **(package_data.get("devDependencies") if isinstance(package_data.get("devDependencies"), dict) else {}),
+        }
+    scripts = package_data.get("scripts") if isinstance(package_data.get("scripts"), dict) else {}
+    is_next = ("next" in deps) or next_config or next_dir
+    is_next_export = is_next and (
+        out_dir or
+        "export" in scripts or
+        "next export" in json.dumps(scripts)
+    )
+    if is_next_export and out_dir:
+        return {"kind": "next-export", "runtime": "static", "stack_label": "Next Export / Static Website"}
+    if is_next:
+        return {"kind": "nextjs", "runtime": "node", "stack_label": "Next.js Website"}
+    pubspec_text = _read_text_if_exists(pubspec)
+    if pubspec.exists() and ("flutter:" in pubspec_text.lower() or flutter_build):
+        return {"kind": "flutter", "runtime": "static", "stack_label": "Flutter Web Website"}
+    if composer_json.exists() or php_index:
+        return {"kind": "php", "runtime": "php", "stack_label": "PHP Website"}
+    if out_dir:
+        return {"kind": "next-export", "runtime": "static", "stack_label": "Next Export / Static Website"}
+    if dist_dir or flutter_build or (root / "index.html").exists():
+        return {"kind": "static", "runtime": "static", "stack_label": "Static Website"}
+    raise RuntimeError("Could not detect website type from uploaded files. Supported types currently include static/exported sites, Next.js apps, Flutter web, and PHP.")
+
+
+def _copy_website_source(source_root: Path, deploy_root: Path):
+    if deploy_root.exists():
+        shutil.rmtree(deploy_root, ignore_errors=True)
+    blocked = {".git", "__pycache__", ".venv", "venv", "node_modules", ".next/cache", "vendor/.cache"}
+
+    def ignore_func(_dir, names):
+        ignored = []
+        for name in names:
+            normalized = name.replace("\\", "/")
+            if name in blocked or normalized in blocked:
+                ignored.append(name)
+        return ignored
+
+    shutil.copytree(source_root, deploy_root, ignore=ignore_func)
+
+
+def _choose_website_target(requested_target, detected_runtime):
+    target = str(requested_target or "auto").strip().lower()
+    runtime = str(detected_runtime or "static").strip().lower()
+    if target == "auto":
+        if runtime == "static":
+            if os.name == "nt" and get_iis_info().get("installed"):
+                return "iis"
+            if command_exists("docker"):
+                return "docker"
+            return "service"
+        if runtime in ("node", "php"):
+            if command_exists("docker"):
+                return "docker"
+            return "service"
+    return target if target in ("service", "docker", "iis") else "service"
+
+
+def _validate_website_target(stack_kind, runtime, target):
+    stack = str(stack_kind or "").strip().lower()
+    selected = str(target or "").strip().lower()
+    runtime_value = str(runtime or "").strip().lower()
+    if selected == "iis":
+        if os.name != "nt":
+            raise RuntimeError("IIS target is only available on Windows.")
+        if runtime_value != "static":
+            raise RuntimeError(f"{stack or 'This'} website cannot run directly on IIS from this dashboard. Use Docker or OS service.")
+    if selected == "docker" and not command_exists("docker"):
+        raise RuntimeError("Docker target requires Docker to be installed and running.")
+    if selected == "service" and runtime_value == "node" and not (command_exists("node") and command_exists("npm")):
+        raise RuntimeError("Next.js service target requires Node.js and npm on the host.")
+    if selected == "service" and runtime_value == "php" and not command_exists("php"):
+        raise RuntimeError("PHP service target requires php on the host.")
+
+
+def resolve_unix_python():
+    for name in ("python3", "python"):
+        path_value = shutil.which(name)
+        if path_value:
+            return path_value
+    return sys.executable
+
+
+def _prepare_website_deployment(form=None, live_cb=None):
     form = form or {}
     source_value = resolve_source_value(form, "WEBSITE_SOURCE", "WEBSITE_SOURCE_FILE", "WEBSITE_SOURCE_FOLDER")
     if not source_value:
         raise RuntimeError("Project path, uploaded archive, or uploaded folder is required.")
     source_root = prepare_source_dir(source_value, live_cb=live_cb)
     site_name = _safe_website_name((form.get("WEBSITE_SITE_NAME", ["ServerInstallerWebsite"])[0] or "").strip(), "ServerInstallerWebsite")
+    runtime_name = _safe_website_runtime_name((form.get("WEBSITE_RUNTIME_NAME", [""])[0] or "").strip() or site_name, "serverinstaller-website")
     site_key = _website_state_key(site_name)
-    website_kind = (form.get("WEBSITE_KIND", ["auto"])[0] or "auto").strip().lower()
-    if website_kind not in ("auto", "static", "flutter", "next-export"):
-        website_kind = "auto"
+    requested_kind = (form.get("WEBSITE_KIND", ["auto"])[0] or "auto").strip().lower()
+    if requested_kind not in ("auto", "static", "flutter", "next-export", "nextjs", "php"):
+        requested_kind = "auto"
+    target = (form.get("WEBSITE_TARGET", ["auto"])[0] or "auto").strip().lower()
     bind_ip = (form.get("WEBSITE_BIND_IP", [""])[0] or "").strip() or "*"
     host = bind_ip if bind_ip not in ("", "*", "0.0.0.0") else choose_service_host()
     port_text = (form.get("WEBSITE_PORT", ["8088"])[0] or "8088").strip()
     if not port_text.isdigit() or not (1 <= int(port_text) <= 65535):
         raise RuntimeError("Website port must be a number between 1 and 65535.")
     site_port = int(port_text)
-    publish_root, publish_rel = _detect_static_website_root(source_root, website_kind=website_kind)
     deploy_root = WEBSITE_STATE_DIR / site_key
-    if deploy_root.exists():
-        shutil.rmtree(deploy_root, ignore_errors=True)
-    shutil.copytree(publish_root, deploy_root)
+    detected = _detect_website_stack(source_root)
+    detected_kind = str(detected.get("kind") or "static").strip().lower()
+    runtime = str(detected.get("runtime") or "static").strip().lower()
+    stack_label = str(detected.get("stack_label") or "Website").strip()
+    effective_kind = detected_kind if requested_kind == "auto" else requested_kind
+    if effective_kind in ("static", "flutter", "next-export"):
+        publish_root, publish_rel = _detect_static_website_root(source_root, website_kind=effective_kind)
+        if deploy_root.exists():
+            shutil.rmtree(deploy_root, ignore_errors=True)
+        shutil.copytree(publish_root, deploy_root)
+        content_root = deploy_root
+        content_rel = publish_rel
+    elif effective_kind == "php":
+        source_publish_root, publish_rel = _find_php_public_root(source_root)
+        _copy_website_source(source_root, deploy_root)
+        content_rel = publish_rel
+        content_root = deploy_root / publish_rel if publish_rel not in ("", ".") else deploy_root
+        runtime = "php"
+        stack_label = "PHP Website"
+    elif effective_kind == "nextjs":
+        _copy_website_source(source_root, deploy_root)
+        publish_rel = "."
+        content_rel = "."
+        content_root = deploy_root
+        runtime = "node"
+        stack_label = "Next.js Website"
+    else:
+        raise RuntimeError(f"Unsupported website type '{effective_kind}'.")
+    selected_target = _choose_website_target(target, runtime)
+    _validate_website_target(effective_kind, runtime, selected_target)
+    if live_cb:
+        live_cb(f"Detected website type: {stack_label} ({runtime}). Selected target: {selected_target}.\n")
     return {
         "site_name": site_name,
+        "runtime_name": runtime_name,
         "site_key": site_key,
-        "website_kind": website_kind,
+        "existing_payload": _website_state_payload_by_key(site_key),
+        "website_kind": effective_kind,
+        "detected_kind": detected_kind,
+        "runtime": runtime,
+        "stack_label": stack_label,
+        "target": selected_target,
         "bind_ip": bind_ip,
         "host": host,
         "site_port": site_port,
         "source_root": str(source_root),
-        "publish_root": str(publish_root),
+        "publish_root": str(content_root),
         "publish_rel": publish_rel,
+        "content_rel": content_rel,
         "deploy_root": str(deploy_root),
     }
+
+
+def _write_website_state_entry(payload):
+    _update_website_state(str(payload.get("name") or payload.get("form_name") or "website"), payload)
+
+
+def _website_stack_label(website_kind):
+    return {
+        "flutter": "Flutter / Static Website",
+        "next-export": "Next Export / Static Website",
+        "nextjs": "Next.js Website",
+        "php": "PHP Website",
+        "static": "Static Website",
+        "auto": "Static Website",
+    }.get(str(website_kind or "auto").strip().lower(), "Static Website")
+
+
+def _cleanup_website_artifacts(runtime_name, remove_files=True):
+    payload = _website_state_payload(runtime_name)
+    deploy_root = Path(str(payload.get("deploy_root") or "")).expanduser() if payload else None
+    image_name = str(payload.get("image_name") or "").strip() if payload else ""
+    if remove_files and deploy_root and str(deploy_root).strip():
+        shutil.rmtree(deploy_root, ignore_errors=True)
+    if image_name and command_exists("docker"):
+        run_capture(["docker", "rmi", "-f", image_name], timeout=30)
+    _cleanup_website_state_entry(runtime_name)
 
 
 def _website_service_items():
@@ -1641,10 +1860,19 @@ def _website_service_items():
         port_text = str(payload.get("port") or "").strip()
         url = str(payload.get("url") or "").strip()
         bind_ip = str(payload.get("bind_ip") or "").strip()
+        runtime_target = str(payload.get("target") or "").strip().lower()
         running = False
         sub_status = ""
         autostart = False
-        if os.name == "nt":
+        item_kind = "service"
+        if runtime_target == "docker":
+            item_kind = "docker"
+            details = _get_docker_container_details(name)
+            sub_status = str(details.get("state") or "")
+            running = sub_status == "running"
+            autostart = str(details.get("restart_policy") or "") in ("always", "unless-stopped")
+        elif runtime_target == "iis":
+            item_kind = "iis_site"
             rc, out = run_capture(
                 [
                     "powershell.exe",
@@ -1664,13 +1892,30 @@ def _website_service_items():
                 autostart = len(parts) > 1 and parts[1].strip().lower() == "true"
                 if len(parts) > 2 and parts[2].strip():
                     physical_path = parts[2].strip()
-            else:
-                physical_path = str(payload.get("deploy_root") or "")
         else:
             physical_path = str(payload.get("deploy_root") or "")
+            if os.name == "nt":
+                item_kind = "service"
+                state_text, start_mode = _windows_service_state(name)
+                sub_status = state_text
+                running = state_text.lower() == "running"
+                autostart = start_mode.lower() == "auto"
+            elif platform.system() == "Darwin":
+                item_kind = "website_launchd"
+                plist_name = str(payload.get("plist_name") or "").strip()
+                rc, out = run_capture(["launchctl", "print", f"system/{plist_name}"], timeout=20)
+                running = rc == 0
+                sub_status = "running" if running else "stopped"
+                autostart = bool(plist_name)
+            else:
+                item_kind = "service"
+                svc = _linux_systemd_unit_status(name)
+                sub_status = str(svc.get("active") or "")
+                running = bool(svc.get("running"))
+                autostart = bool(svc.get("autostart"))
         ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
         items.append({
-            "kind": "iis_site",
+            "kind": item_kind,
             "name": name,
             "display_name": f"{str(payload.get('stack_label') or 'Website').strip()} - {physical_path or '-'}",
             "status": "running" if running else "stopped",
@@ -1691,6 +1936,7 @@ def _website_service_items():
             "stack_label": str(payload.get("stack_label") or "Static Website"),
             "publish_rel": str(payload.get("publish_rel") or "."),
             "kind_value": str(payload.get("website_kind") or "auto"),
+            "target_value": runtime_target or "service",
         })
     return items
 
@@ -1704,22 +1950,590 @@ def get_website_info():
     }
 
 
+def _write_windows_website_service_file(deploy_root: Path, runtime_name: str, bind_ip: str, port: int):
+    service_script = deploy_root / "serverinstaller_static_website_service.py"
+    service_script.write_text(
+        "\n".join([
+            "import os",
+            "import sys",
+            "import threading",
+            "import socketserver",
+            "import http.server",
+            "import win32event",
+            "import win32service",
+            "import win32serviceutil",
+            "import servicemanager",
+            "",
+            f"SERVICE_NAME = {runtime_name!r}",
+            f"ROOT_DIR = {str(deploy_root)!r}",
+            f"BIND_HOST = {('0.0.0.0' if bind_ip in ('', '*') else bind_ip)!r}",
+            f"PORT = {int(port)}",
+            "",
+            "class ReusableTCPServer(socketserver.ThreadingTCPServer):",
+            "    allow_reuse_address = True",
+            "",
+            "class StaticWebsiteHandler(http.server.SimpleHTTPRequestHandler):",
+            "    def __init__(self, *args, **kwargs):",
+            "        super().__init__(*args, directory=ROOT_DIR, **kwargs)",
+            "",
+            "class StaticWebsiteService(win32serviceutil.ServiceFramework):",
+            "    _svc_name_ = SERVICE_NAME",
+            "    _svc_display_name_ = SERVICE_NAME",
+            "    _svc_description_ = 'Server Installer managed static website service'",
+            "",
+            "    def __init__(self, args):",
+            "        win32serviceutil.ServiceFramework.__init__(self, args)",
+            "        self.stop_event = win32event.CreateEvent(None, 0, 0, None)",
+            "        self.httpd = None",
+            "",
+            "    def SvcStop(self):",
+            "        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)",
+            "        if self.httpd is not None:",
+            "            try:",
+            "                self.httpd.shutdown()",
+            "            except Exception:",
+            "                pass",
+            "            try:",
+            "                self.httpd.server_close()",
+            "            except Exception:",
+            "                pass",
+            "        win32event.SetEvent(self.stop_event)",
+            "",
+            "    def SvcDoRun(self):",
+            "        os.chdir(ROOT_DIR)",
+            "        self.httpd = ReusableTCPServer((BIND_HOST, PORT), StaticWebsiteHandler)",
+            "        worker = threading.Thread(target=self.httpd.serve_forever, daemon=True)",
+            "        worker.start()",
+            "        win32event.WaitForSingleObject(self.stop_event, win32event.INFINITE)",
+            "",
+            "if __name__ == '__main__':",
+            "    if len(sys.argv) == 1:",
+            "        servicemanager.Initialize()",
+            "        servicemanager.PrepareToHostSingle(StaticWebsiteService)",
+            "        servicemanager.StartServiceCtrlDispatcher()",
+            "    else:",
+            "        win32serviceutil.HandleCommandLine(StaticWebsiteService)",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    return service_script
+
+
+def _find_windows_command(preferred_names):
+    for name in preferred_names:
+        path_value = shutil.which(name)
+        if path_value:
+            return path_value
+    return preferred_names[0] if preferred_names else ""
+
+
+def _website_node_start_command(deploy, host_override=""):
+    host_value = str(host_override or deploy["bind_ip"] or "").strip()
+    host_value = "0.0.0.0" if host_value in ("", "*") else host_value
+    port_value = int(deploy["site_port"])
+    return {
+        "workdir": str(Path(deploy["deploy_root"]).resolve()),
+        "install_cmd_unix": "npm install",
+        "build_cmd_unix": "npm run build",
+        "start_cmd_unix": f"npm run start -- --hostname {shlex.quote(host_value)} --port {port_value}",
+        "npm_cmd_windows": _find_windows_command(["npm.cmd", "npm.exe", "npm"]),
+        "node_cmd_windows": _find_windows_command(["node.exe", "node"]),
+        "host_value": host_value,
+        "port_value": port_value,
+    }
+
+
+def _website_php_start_command(deploy, host_override=""):
+    host_value = str(host_override or deploy["bind_ip"] or "").strip()
+    host_value = "0.0.0.0" if host_value in ("", "*") else host_value
+    port_value = int(deploy["site_port"])
+    public_rel = str(deploy.get("content_rel") or ".").strip()
+    public_dir = Path(deploy["deploy_root"]) / public_rel if public_rel not in ("", ".") else Path(deploy["deploy_root"])
+    return {
+        "workdir": str(Path(deploy["deploy_root"]).resolve()),
+        "php_cmd_windows": _find_windows_command(["php.exe", "php"]),
+        "php_cmd_unix": shutil.which("php") or "php",
+        "host_value": host_value,
+        "port_value": port_value,
+        "public_dir": str(public_dir.resolve()),
+    }
+
+
+def _prepare_nextjs_project(deploy, live_cb=None):
+    cfg = _website_node_start_command(deploy)
+    workdir = cfg["workdir"]
+    if os.name == "nt":
+        npm_cmd = cfg["npm_cmd_windows"]
+        code, output = run_process([npm_cmd, "install"], live_cb=live_cb)
+        if code != 0:
+            return code, output or "npm install failed."
+        code, output = run_process([npm_cmd, "run", "build"], live_cb=live_cb)
+        if code != 0:
+            return code, output or "npm run build failed."
+        return 0, ""
+    shell_cmd = "/bin/sh"
+    install_build = f"cd {shlex.quote(workdir)} && npm install && npm run build"
+    code, output = run_process([shell_cmd, "-lc", install_build], live_cb=live_cb)
+    return code, output
+
+
+def run_windows_website_service(form=None, live_cb=None):
+    form = form or {}
+    if os.name != "nt":
+        return 1, "Website OS service deployment is only available on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    try:
+        deploy = _prepare_website_deployment(form, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    usage = get_port_usage(deploy["site_port"], "tcp")
+    if usage.get("busy") and not usage.get("managed_owner"):
+        return 1, f"Requested website port {deploy['site_port']} is already in use. Choose another port."
+    _cleanup_existing_website_runtime(deploy.get("existing_payload"))
+    python_executable = resolve_windows_python()
+    venv_dir = Path(deploy["deploy_root"]) / ".runtime"
+    if venv_dir.exists():
+        shutil.rmtree(venv_dir, ignore_errors=True)
+    rc, out = run_capture([python_executable, "-m", "venv", str(venv_dir)], timeout=240)
+    if rc != 0:
+        return 1, out or "Failed to create Windows runtime environment for website service."
+    venv_python = _python_api_venv_python(venv_dir)
+    rc, out = run_capture([venv_python, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "pywin32"], timeout=600)
+    if rc != 0:
+        return 1, out or "Failed to install Windows service runtime dependencies."
+    rc_post, out_post = run_capture([venv_python, "-m", "pywin32_postinstall", "-install"], timeout=180)
+    if rc_post != 0 and live_cb:
+        text = str(out_post or "").strip()
+        if "No module named pywin32_postinstall" in text:
+            live_cb("pywin32_postinstall is not available in this pywin32 build; continuing with direct service host setup.\n")
+        else:
+            live_cb((text or "pywin32 postinstall returned a non-zero exit code.") + "\n")
+    runtime = str(deploy.get("runtime") or "static").strip().lower()
+    if runtime == "static":
+        service_script = _write_windows_website_service_file(Path(deploy["deploy_root"]), deploy["runtime_name"], deploy["bind_ip"], deploy["site_port"])
+    elif runtime == "node":
+        node_cfg = _website_node_start_command(deploy)
+        code, output = _prepare_nextjs_project(deploy, live_cb=live_cb)
+        if code != 0:
+            return code, output
+        service_script = Path(deploy["deploy_root"]) / "serverinstaller_nextjs_service.py"
+        service_script.write_text(
+            "\n".join([
+                "import os",
+                "import subprocess",
+                "import sys",
+                "import time",
+                "import win32event",
+                "import win32service",
+                "import win32serviceutil",
+                "import servicemanager",
+                "",
+                f"SERVICE_NAME = {deploy['runtime_name']!r}",
+                f"WORKDIR = {node_cfg['workdir']!r}",
+                f"NPM_CMD = {node_cfg['npm_cmd_windows']!r}",
+                f"HOST_VALUE = {node_cfg['host_value']!r}",
+                f"PORT_VALUE = {node_cfg['port_value']!r}",
+                "",
+                "class NextWebsiteService(win32serviceutil.ServiceFramework):",
+                "    _svc_name_ = SERVICE_NAME",
+                "    _svc_display_name_ = SERVICE_NAME",
+                "    _svc_description_ = 'Server Installer managed Next.js website service'",
+                "",
+                "    def __init__(self, args):",
+                "        win32serviceutil.ServiceFramework.__init__(self, args)",
+                "        self.stop_event = win32event.CreateEvent(None, 0, 0, None)",
+                "        self.proc = None",
+                "",
+                "    def SvcStop(self):",
+                "        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)",
+                "        if self.proc is not None and self.proc.poll() is None:",
+                "            try:",
+                "                self.proc.terminate()",
+                "                self.proc.wait(timeout=20)",
+                "            except Exception:",
+                "                pass",
+                "        win32event.SetEvent(self.stop_event)",
+                "",
+                "    def SvcDoRun(self):",
+                "        os.chdir(WORKDIR)",
+                "        self.proc = subprocess.Popen([NPM_CMD, 'run', 'start', '--', '--hostname', HOST_VALUE, '--port', str(PORT_VALUE)], cwd=WORKDIR)",
+                "        while win32event.WaitForSingleObject(self.stop_event, 1000) != win32event.WAIT_OBJECT_0:",
+                "            if self.proc.poll() is not None:",
+                "                raise RuntimeError(f'Next.js process exited with code {self.proc.returncode}.')",
+                "",
+                "if __name__ == '__main__':",
+                "    if len(sys.argv) == 1:",
+                "        servicemanager.Initialize()",
+                "        servicemanager.PrepareToHostSingle(NextWebsiteService)",
+                "        servicemanager.StartServiceCtrlDispatcher()",
+                "    else:",
+                "        win32serviceutil.HandleCommandLine(NextWebsiteService)",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+    elif runtime == "php":
+        php_cfg = _website_php_start_command(deploy)
+        service_script = Path(deploy["deploy_root"]) / "serverinstaller_php_service.py"
+        service_script.write_text(
+            "\n".join([
+                "import os",
+                "import subprocess",
+                "import sys",
+                "import win32event",
+                "import win32service",
+                "import win32serviceutil",
+                "import servicemanager",
+                "",
+                f"SERVICE_NAME = {deploy['runtime_name']!r}",
+                f"WORKDIR = {php_cfg['workdir']!r}",
+                f"PHP_CMD = {php_cfg['php_cmd_windows']!r}",
+                f"PUBLIC_DIR = {php_cfg['public_dir']!r}",
+                f"HOST_VALUE = {php_cfg['host_value']!r}",
+                f"PORT_VALUE = {php_cfg['port_value']!r}",
+                "",
+                "class PhpWebsiteService(win32serviceutil.ServiceFramework):",
+                "    _svc_name_ = SERVICE_NAME",
+                "    _svc_display_name_ = SERVICE_NAME",
+                "    _svc_description_ = 'Server Installer managed PHP website service'",
+                "",
+                "    def __init__(self, args):",
+                "        win32serviceutil.ServiceFramework.__init__(self, args)",
+                "        self.stop_event = win32event.CreateEvent(None, 0, 0, None)",
+                "        self.proc = None",
+                "",
+                "    def SvcStop(self):",
+                "        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)",
+                "        if self.proc is not None and self.proc.poll() is None:",
+                "            try:",
+                "                self.proc.terminate()",
+                "                self.proc.wait(timeout=20)",
+                "            except Exception:",
+                "                pass",
+                "        win32event.SetEvent(self.stop_event)",
+                "",
+                "    def SvcDoRun(self):",
+                "        os.chdir(WORKDIR)",
+                "        self.proc = subprocess.Popen([PHP_CMD, '-S', f'{HOST_VALUE}:{PORT_VALUE}', '-t', PUBLIC_DIR], cwd=WORKDIR)",
+                "        while win32event.WaitForSingleObject(self.stop_event, 1000) != win32event.WAIT_OBJECT_0:",
+                "            if self.proc.poll() is not None:",
+                "                raise RuntimeError(f'PHP process exited with code {self.proc.returncode}.')",
+                "",
+                "if __name__ == '__main__':",
+                "    if len(sys.argv) == 1:",
+                "        servicemanager.Initialize()",
+                "        servicemanager.PrepareToHostSingle(PhpWebsiteService)",
+                "        servicemanager.StartServiceCtrlDispatcher()",
+                "    else:",
+                "        win32serviceutil.HandleCommandLine(PhpWebsiteService)",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+    else:
+        return 1, f"Unsupported website runtime '{runtime}' for Windows service deployment."
+    run_capture(["sc.exe", "stop", deploy["runtime_name"]], timeout=30)
+    run_capture([venv_python, str(service_script), "remove"], timeout=60)
+    rc, out = run_capture([venv_python, str(service_script), "--startup", "auto", "install"], timeout=180)
+    if rc != 0:
+        return 1, out or f"Failed to install Windows website service '{deploy['runtime_name']}'."
+    rc, out = run_capture([venv_python, str(service_script), "start"], timeout=120)
+    if rc != 0:
+        return 1, out or f"Failed to start Windows website service '{deploy['runtime_name']}'."
+    manage_firewall_port("open", deploy["site_port"], "tcp")
+    url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
+    _write_website_state_entry({
+        "name": deploy["runtime_name"],
+        "form_name": deploy["site_name"],
+        "kind": "service",
+        "target": "service",
+        "website_kind": deploy["website_kind"],
+        "stack_label": deploy["stack_label"],
+        "url": url,
+        "bind_ip": deploy["bind_ip"],
+        "host": deploy["host"],
+        "port": deploy["site_port"],
+        "deploy_root": deploy["deploy_root"],
+        "source_root": deploy["source_root"],
+        "publish_root": deploy["publish_root"],
+        "publish_rel": deploy["publish_rel"],
+    })
+    return 0, f"Website OS service deployed.\nService: {deploy['runtime_name']}\nURL: {url}\nContent: {deploy['publish_root']}\n"
+
+
+def run_unix_website_service(form=None, live_cb=None):
+    form = form or {}
+    if os.name == "nt":
+        return 1, "Unix website service deployment is not available on Windows hosts."
+    try:
+        deploy = _prepare_website_deployment(form, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    usage = get_port_usage(deploy["site_port"], "tcp")
+    if usage.get("busy") and not usage.get("managed_owner"):
+        return 1, f"Requested website port {deploy['site_port']} is already in use. Choose another port."
+    _cleanup_existing_website_runtime(deploy.get("existing_payload"))
+    bind_host = "0.0.0.0" if deploy["bind_ip"] in ("", "*") else deploy["bind_ip"]
+    python_executable = resolve_unix_python()
+    runtime = str(deploy.get("runtime") or "static").strip().lower()
+    prefix = _sudo_prefix()
+    url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
+    if runtime == "static":
+        runner_script = Path(deploy["deploy_root"]) / "serve_static_site.py"
+        runner_script.write_text(
+            "\n".join([
+                "import functools",
+                "import http.server",
+                "import socketserver",
+                "",
+                f"ROOT_DIR = {str(Path(deploy['deploy_root']).resolve())!r}",
+                f"BIND_HOST = {bind_host!r}",
+                f"PORT = {int(deploy['site_port'])}",
+                "",
+                "class ReusableTCPServer(socketserver.ThreadingTCPServer):",
+                "    allow_reuse_address = True",
+                "",
+                "handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=ROOT_DIR)",
+                "with ReusableTCPServer((BIND_HOST, PORT), handler) as httpd:",
+                "    httpd.serve_forever()",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        exec_start = f"{shlex.quote(str(python_executable))} {shlex.quote(str(runner_script))}"
+    elif runtime == "node":
+        node_cfg = _website_node_start_command(deploy, host_override=bind_host)
+        code, output = _prepare_nextjs_project(deploy, live_cb=live_cb)
+        if code != 0:
+            return code, output
+        exec_start = f"/bin/sh -lc {shlex.quote(node_cfg['start_cmd_unix'])}"
+    elif runtime == "php":
+        php_cfg = _website_php_start_command(deploy, host_override=bind_host)
+        exec_start = f"{shlex.quote(str(php_cfg['php_cmd_unix']))} -S {bind_host}:{int(deploy['site_port'])} -t {shlex.quote(str(php_cfg['public_dir']))}"
+    else:
+        return 1, f"Unsupported website runtime '{runtime}' for OS service deployment."
+    if platform.system() == "Darwin":
+        plist_name = f"com.serverinstaller.website.{deploy['runtime_name']}"
+        plist_path = Path("/Library/LaunchDaemons") / f"{plist_name}.plist"
+        plist_temp = Path(deploy["deploy_root"]) / f"{plist_name}.plist"
+        plist_temp.write_text(
+            "\n".join([
+                '<?xml version="1.0" encoding="UTF-8"?>',
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+                '<plist version="1.0">',
+                "<dict>",
+                f"  <key>Label</key><string>{plist_name}</string>",
+                "  <key>ProgramArguments</key>",
+                "  <array>",
+                *([f"    <string>{part}</string>" for part in ([str(python_executable), str(runner_script)] if runtime == "static" else (["/bin/sh", "-lc", node_cfg['install_cmd_unix'] + ' && ' + node_cfg['build_cmd_unix'] + ' && ' + node_cfg['start_cmd_unix']] if runtime == "node" else [str(php_cfg['php_cmd_unix']), "-S", f"{bind_host}:{int(deploy['site_port'])}", "-t", str(php_cfg['public_dir'])]))]),
+                "  </array>",
+                f"  <key>WorkingDirectory</key><string>{str(Path(deploy['deploy_root']).resolve())}</string>",
+                "  <key>RunAtLoad</key><true/>",
+                "  <key>KeepAlive</key><true/>",
+                "  <key>StandardOutPath</key><string>/tmp/serverinstaller-website.log</string>",
+                "  <key>StandardErrorPath</key><string>/tmp/serverinstaller-website.log</string>",
+                "</dict>",
+                "</plist>",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        run_capture(prefix + ["launchctl", "bootout", "system", str(plist_path)], timeout=30)
+        run_capture(prefix + ["cp", str(plist_temp), str(plist_path)], timeout=30)
+        rc, out = run_capture(prefix + ["launchctl", "bootstrap", "system", str(plist_path)], timeout=60)
+        if rc != 0:
+            return 1, out or f"Failed to bootstrap launchd website '{plist_name}'."
+        _write_website_state_entry({
+            "name": deploy["runtime_name"],
+            "form_name": deploy["site_name"],
+            "kind": "website_launchd",
+            "target": "service",
+            "website_kind": deploy["website_kind"],
+            "stack_label": deploy["stack_label"],
+            "url": url,
+            "bind_ip": deploy["bind_ip"],
+            "host": deploy["host"],
+            "port": deploy["site_port"],
+            "deploy_root": deploy["deploy_root"],
+            "source_root": deploy["source_root"],
+            "publish_root": deploy["publish_root"],
+            "publish_rel": deploy["publish_rel"],
+            "plist_name": plist_name,
+        })
+        manage_firewall_port("open", deploy["site_port"], "tcp")
+        return 0, f"Website launchd service deployed.\nService: {plist_name}\nURL: {url}\nContent: {deploy['publish_root']}\n"
+    unit_name = f"{deploy['runtime_name']}.service"
+    unit_temp = Path(deploy["deploy_root"]) / unit_name
+    unit_temp.write_text(
+        "\n".join([
+            "[Unit]",
+            f"Description={deploy['site_name']}",
+            "After=network.target",
+            "",
+            "[Service]",
+            "Type=simple",
+            f"WorkingDirectory={str(Path(deploy['deploy_root']).resolve())}",
+            f"ExecStart={exec_start}",
+            "Restart=always",
+            "RestartSec=3",
+            "",
+            "[Install]",
+            "WantedBy=multi-user.target",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    run_capture(prefix + ["systemctl", "stop", unit_name], timeout=30)
+    run_capture(prefix + ["cp", str(unit_temp), f"/etc/systemd/system/{unit_name}"], timeout=30)
+    run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
+    rc, out = run_capture(prefix + ["systemctl", "enable", "--now", unit_name], timeout=60)
+    if rc != 0:
+        return 1, out or f"Failed to enable website service '{unit_name}'."
+    manage_firewall_port("open", deploy["site_port"], "tcp")
+    _write_website_state_entry({
+        "name": unit_name,
+        "form_name": deploy["site_name"],
+        "kind": "service",
+        "target": "service",
+        "website_kind": deploy["website_kind"],
+        "stack_label": deploy["stack_label"],
+        "url": url,
+        "bind_ip": deploy["bind_ip"],
+        "host": deploy["host"],
+        "port": deploy["site_port"],
+        "deploy_root": deploy["deploy_root"],
+        "source_root": deploy["source_root"],
+        "publish_root": deploy["publish_root"],
+        "publish_rel": deploy["publish_rel"],
+    })
+    return 0, f"Website OS service deployed.\nService: {unit_name}\nURL: {url}\nContent: {deploy['publish_root']}\n"
+
+
+def run_website_docker(form=None, live_cb=None):
+    form = form or {}
+    if not command_exists("docker"):
+        return 1, "Docker is not available on this host."
+    try:
+        deploy = _prepare_website_deployment(form, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    usage = get_port_usage(deploy["site_port"], "tcp")
+    if usage.get("busy") and not usage.get("managed_owner"):
+        return 1, f"Requested website port {deploy['site_port']} is already in use. Choose another port."
+    _cleanup_existing_website_runtime(deploy.get("existing_payload"))
+    runtime = str(deploy.get("runtime") or "static").strip().lower()
+    dockerfile = Path(deploy["deploy_root"]) / "Dockerfile"
+    if runtime == "static":
+        dockerfile.write_text(
+            "\n".join([
+                "FROM nginx:alpine",
+                "WORKDIR /usr/share/nginx/html",
+                "RUN rm -rf /usr/share/nginx/html/*",
+                "COPY ./ /usr/share/nginx/html/",
+                "EXPOSE 80",
+                'CMD ["nginx", "-g", "daemon off;"]',
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        container_port = 80
+    elif runtime == "node":
+        dockerfile.write_text(
+            "\n".join([
+                "FROM node:20-alpine",
+                "WORKDIR /app",
+                "COPY . ./",
+                "RUN npm install",
+                "RUN npm run build",
+                f"EXPOSE {int(deploy['site_port'])}",
+                f'CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "{int(deploy["site_port"])}"]',
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        container_port = int(deploy["site_port"])
+    elif runtime == "php":
+        public_rel = str(deploy.get("content_rel") or ".").strip()
+        php_root = f"/app/{public_rel}" if public_rel not in ("", ".") else "/app"
+        dockerfile.write_text(
+            "\n".join([
+                "FROM php:8.2-cli-alpine",
+                "WORKDIR /app",
+                "COPY . /app/",
+                f"EXPOSE {int(deploy['site_port'])}",
+                f'CMD ["php", "-S", "0.0.0.0:{int(deploy["site_port"])}", "-t", "{php_root}"]',
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        container_port = int(deploy["site_port"])
+    else:
+        return 1, f"Unsupported website runtime '{runtime}' for Docker deployment."
+    image_name = f"{deploy['runtime_name']}-image"
+    container_name = deploy["runtime_name"]
+    run_capture(["docker", "rm", "-f", container_name], timeout=30)
+    run_capture(["docker", "rmi", "-f", image_name], timeout=30)
+    code, output = run_process(["docker", "build", "-t", image_name, str(deploy["deploy_root"])], live_cb=live_cb)
+    if code != 0:
+        return code, output or "docker build failed."
+    publish_binding = f"{deploy['site_port']}:{container_port}"
+    bind_host = str(deploy["bind_ip"] or "").strip()
+    if bind_host and bind_host not in ("*", "0.0.0.0"):
+        publish_binding = f"{bind_host}:{deploy['site_port']}:{container_port}"
+    code, output = run_process(
+        [
+            "docker", "run", "-d",
+            "--restart", "unless-stopped",
+            "--name", container_name,
+            "--label", "com.serverinstaller.website=true",
+            "-p", publish_binding,
+            image_name,
+        ],
+        live_cb=live_cb,
+    )
+    if code != 0:
+        return code, output or "docker run failed."
+    manage_firewall_port("open", deploy["site_port"], "tcp")
+    url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
+    _write_website_state_entry({
+        "name": container_name,
+        "form_name": deploy["site_name"],
+        "kind": "docker",
+        "target": "docker",
+        "website_kind": deploy["website_kind"],
+        "stack_label": deploy["stack_label"],
+        "url": url,
+        "bind_ip": deploy["bind_ip"],
+        "host": deploy["host"],
+        "port": deploy["site_port"],
+        "deploy_root": deploy["deploy_root"],
+        "source_root": deploy["source_root"],
+        "publish_root": deploy["publish_root"],
+        "publish_rel": deploy["publish_rel"],
+        "image_name": image_name,
+    })
+    return 0, f"Website Docker deployment completed.\nContainer: {container_name}\nURL: {url}\nContent: {deploy['publish_root']}\n"
+
+
 def run_windows_website_iis(form=None, live_cb=None):
     form = form or {}
     if os.name != "nt":
-        return 1, "Website deployment is currently available on Windows hosts only."
+        return 1, "Website IIS deployment is currently available on Windows hosts only."
     if not is_windows_admin():
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
     iis_info = get_iis_info()
     if not iis_info.get("installed"):
         return 1, "IIS is not installed. Use the DotNet IIS setup page first."
     try:
-        deploy = _prepare_windows_static_website(form, live_cb=live_cb)
+        deploy = _prepare_website_deployment(form, live_cb=live_cb)
     except Exception as ex:
         return 1, str(ex)
     usage = get_port_usage(deploy["site_port"], "tcp")
     if usage.get("busy") and not usage.get("managed_owner"):
         return 1, f"Requested website port {deploy['site_port']} is already in use. Choose another port."
+    _cleanup_existing_website_runtime(deploy.get("existing_payload"))
     if live_cb:
         live_cb(f"Deploying IIS website '{deploy['site_name']}' from {deploy['publish_root']}\n")
     ps = "\n".join([
@@ -1742,18 +2556,13 @@ def run_windows_website_iis(form=None, live_cb=None):
         return 1, out or f"Failed to create IIS website '{deploy['site_name']}'."
     manage_firewall_port("open", deploy["site_port"], "tcp")
     url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
-    stack_label = {
-        "flutter": "Flutter / Static Website",
-        "next-export": "Next Export / Static Website",
-        "static": "Static Website",
-        "auto": "Static Website",
-    }.get(deploy["website_kind"], "Static Website")
-    _update_website_state(deploy["site_name"], {
+    _write_website_state_entry({
         "name": deploy["site_name"],
         "form_name": deploy["site_name"],
         "kind": "iis_site",
+        "target": "iis",
         "website_kind": deploy["website_kind"],
-        "stack_label": stack_label,
+        "stack_label": deploy["stack_label"],
         "url": url,
         "bind_ip": deploy["bind_ip"],
         "host": deploy["host"],
@@ -1763,7 +2572,19 @@ def run_windows_website_iis(form=None, live_cb=None):
         "publish_root": deploy["publish_root"],
         "publish_rel": deploy["publish_rel"],
     })
-    return 0, f"Website deployment completed.\nSite: {deploy['site_name']}\nURL: {url}\nContent: {deploy['publish_root']}\n"
+    return 0, f"Website IIS deployment completed.\nSite: {deploy['site_name']}\nURL: {url}\nContent: {deploy['publish_root']}\n"
+
+
+def run_website_deploy(form=None, live_cb=None):
+    form = form or {}
+    target = (form.get("WEBSITE_TARGET", ["service"])[0] or "service").strip().lower()
+    if target == "iis":
+        return run_windows_website_iis(form=form, live_cb=live_cb)
+    if target == "docker":
+        return run_website_docker(form=form, live_cb=live_cb)
+    if os.name == "nt":
+        return run_windows_website_service(form=form, live_cb=live_cb)
+    return run_unix_website_service(form=form, live_cb=live_cb)
 
 
 def _windows_service_state(service_name):
@@ -3358,7 +4179,7 @@ def get_port_usage(port, protocol="tcp"):
             elif os.name == "nt" and _windows_localmongo_owns_port(p):
                 managed_owner = True
                 owner_hint = "localmongo-managed"
-            elif os.name == "nt" and _windows_website_owns_port(p):
+            elif _website_owns_port(p):
                 managed_owner = True
                 owner_hint = "website-managed"
             elif _linux_locals3_owns_port(p):
@@ -4170,6 +4991,199 @@ def filter_service_items(scope):
     return items
 
 
+def _file_manager_roots():
+    if os.name == "nt":
+        roots = []
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            drive = f"{letter}:\\"
+            if Path(drive).exists():
+                roots.append(drive)
+        return roots or ["C:\\"]
+    return ["/"]
+
+
+def _normalize_file_manager_path(path_value):
+    raw = str(path_value or "").strip()
+    if not raw:
+        return ""
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        raise RuntimeError("File manager path must be absolute.")
+    return str(path.resolve(strict=False))
+
+
+def _is_file_manager_root(path_value):
+    normalized = str(path_value or "").strip()
+    if not normalized:
+        return False
+    if os.name == "nt":
+        return bool(re.fullmatch(r"(?i)[a-z]:\\?", normalized))
+    return normalized == "/"
+
+
+def _file_manager_entry(path_obj):
+    stat_result = path_obj.stat()
+    is_dir = path_obj.is_dir()
+    return {
+        "name": path_obj.name or str(path_obj),
+        "path": str(path_obj),
+        "is_dir": is_dir,
+        "size": 0 if is_dir else int(stat_result.st_size),
+        "modified_ts": int(stat_result.st_mtime),
+        "readonly": not os.access(str(path_obj), os.W_OK),
+    }
+
+
+def file_manager_list(path_value=""):
+    normalized = _normalize_file_manager_path(path_value)
+    if not normalized:
+        roots = []
+        for root in _file_manager_roots():
+            root_path = Path(root)
+            roots.append({
+                "name": str(root_path),
+                "path": str(root_path),
+                "is_dir": True,
+                "size": 0,
+                "modified_ts": 0,
+                "readonly": not os.access(str(root_path), os.W_OK),
+            })
+        return {
+            "path": "",
+            "name": "Computer" if os.name == "nt" else "/",
+            "parent": "",
+            "is_dir": True,
+            "entries": roots,
+        }
+
+    target = Path(normalized)
+    if not target.exists():
+        raise RuntimeError(f"Path not found: {normalized}")
+    if not target.is_dir():
+        raise RuntimeError("Selected path is not a directory.")
+
+    entries = []
+    for child in sorted(target.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
+        try:
+            entries.append(_file_manager_entry(child))
+        except Exception:
+            continue
+
+    parent = ""
+    if target.parent != target:
+        parent = str(target.parent)
+    elif os.name != "nt":
+        parent = "/"
+
+    return {
+        "path": str(target),
+        "name": target.name or str(target),
+        "parent": parent if parent != str(target) else "",
+        "is_dir": True,
+        "entries": entries,
+    }
+
+
+def file_manager_read_file(path_value, max_bytes=1024 * 1024):
+    normalized = _normalize_file_manager_path(path_value)
+    if not normalized:
+        raise RuntimeError("File path is required.")
+    path = Path(normalized)
+    if not path.exists() or not path.is_file():
+        raise RuntimeError(f"File not found: {normalized}")
+    size = path.stat().st_size
+    if size > max_bytes:
+        raise RuntimeError(f"File is too large to open in editor ({size} bytes). Limit is {max_bytes} bytes.")
+    try:
+        content = path.read_text(encoding="utf-8")
+        encoding = "utf-8"
+    except UnicodeDecodeError:
+        content = path.read_text(encoding="utf-8", errors="replace")
+        encoding = "utf-8 (lossy)"
+    return {
+        "path": str(path),
+        "name": path.name,
+        "size": int(size),
+        "encoding": encoding,
+        "content": content,
+    }
+
+
+def file_manager_write_file(path_value, content):
+    normalized = _normalize_file_manager_path(path_value)
+    if not normalized:
+        raise RuntimeError("File path is required.")
+    path = Path(normalized)
+    if path.exists() and path.is_dir():
+        raise RuntimeError("Cannot overwrite a directory with file content.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(content), encoding="utf-8")
+    return {"path": str(path), "size": int(path.stat().st_size)}
+
+
+def file_manager_make_directory(path_value):
+    normalized = _normalize_file_manager_path(path_value)
+    if not normalized:
+        raise RuntimeError("Folder path is required.")
+    path = Path(normalized)
+    path.mkdir(parents=True, exist_ok=True)
+    return {"path": str(path)}
+
+
+def file_manager_delete_path(path_value):
+    normalized = _normalize_file_manager_path(path_value)
+    if not normalized:
+        raise RuntimeError("Path is required.")
+    if _is_file_manager_root(normalized):
+        raise RuntimeError("Deleting the filesystem root is not allowed.")
+    path = Path(normalized)
+    if not path.exists():
+        raise RuntimeError(f"Path not found: {normalized}")
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+    return {"path": normalized}
+
+
+def file_manager_rename_path(source_value, target_value):
+    source = _normalize_file_manager_path(source_value)
+    target = _normalize_file_manager_path(target_value)
+    if not source or not target:
+        raise RuntimeError("Both source and target paths are required.")
+    if _is_file_manager_root(source):
+        raise RuntimeError("Renaming the filesystem root is not allowed.")
+    source_path = Path(source)
+    target_path = Path(target)
+    if not source_path.exists():
+        raise RuntimeError(f"Path not found: {source}")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.rename(target_path)
+    return {"path": str(target_path)}
+
+
+def file_manager_save_uploads(parts, target_dir):
+    base_dir = Path(_normalize_file_manager_path(target_dir))
+    if not base_dir.exists() or not base_dir.is_dir():
+        raise RuntimeError("Upload target must be an existing folder.")
+    written = []
+    for part in parts:
+        filename = str(part.get("filename") or "").strip()
+        if not filename:
+            continue
+        safe_rel = filename.replace("\\", "/").lstrip("/")
+        rel_path = Path(safe_rel)
+        dest_path = (base_dir / rel_path).resolve(strict=False)
+        try:
+            dest_path.relative_to(base_dir.resolve(strict=False))
+        except Exception:
+            raise RuntimeError(f"Invalid upload path: {filename}")
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_bytes(part.get("content", b""))
+        written.append(str(dest_path))
+    return written
+
+
 def _safe_linux_app_path(path_value, svc_name=""):
     if not path_value:
         return ""
@@ -4186,6 +5200,8 @@ def _safe_linux_app_path(path_value, svc_name=""):
     if _is_dotnet_name(svc_name) and (("dotnet" in low) or ("aspnet" in low) or (svc_low and svc_low in low)):
         return p
     if _is_locals3_name(svc_name) and ("locals3" in low):
+        return p
+    if _is_website_name(svc_name) and (("server-installer" in low and "website" in low) or (svc_low and svc_low in low)):
         return p
     return ""
 
@@ -4306,6 +5322,26 @@ def _linux_cleanup_dotnet_service(prefix, unit_name):
     return True, f"Service '{unit}' and managed files removed."
 
 
+def _linux_cleanup_website_service(prefix, unit_name):
+    payload = _website_state_payload(unit_name)
+    deploy_root = str(payload.get("deploy_root") or "").strip()
+    if platform.system() == "Darwin":
+        plist_name = str(payload.get("plist_name") or f"com.serverinstaller.website.{_safe_website_runtime_name(unit_name)}").strip()
+        plist_path = f"/Library/LaunchDaemons/{plist_name}.plist"
+        run_capture(prefix + ["launchctl", "bootout", "system", plist_path], timeout=30)
+        run_capture(prefix + ["rm", "-f", plist_path], timeout=30)
+    else:
+        unit = unit_name if unit_name.endswith(".service") else f"{unit_name}.service"
+        run_capture(prefix + ["systemctl", "stop", unit], timeout=30)
+        run_capture(prefix + ["systemctl", "disable", unit], timeout=30)
+        run_capture(prefix + ["rm", "-f", f"/etc/systemd/system/{unit}"], timeout=30)
+        run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
+    if deploy_root:
+        run_capture(prefix + ["rm", "-rf", deploy_root], timeout=60)
+    _cleanup_website_artifacts(unit_name, remove_files=False)
+    return True, f"Website '{unit_name}' and managed files removed."
+
+
 def _windows_cleanup_locals3():
     if not is_windows_admin():
         return False, "Administrator is required."
@@ -4353,6 +5389,7 @@ def _windows_remove_service_and_files(svc_name):
         return False, "Administrator is required."
     if _is_mongo_name(svc_name):
         return _windows_cleanup_localmongo()
+    website_payload = _website_state_payload(svc_name)
     ps = (
         f"$s=Get-CimInstance Win32_Service -Filter \"Name='{svc_name}'\" -ErrorAction SilentlyContinue; "
         "$bin=''; if($s){$bin=$s.PathName}; "
@@ -4366,6 +5403,10 @@ def _windows_remove_service_and_files(svc_name):
         "Remove-Item -Recurse -Force -Path $dir -ErrorAction SilentlyContinue } }"
     )
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=90)
+    if rc == 0 and website_payload:
+        deploy_root = str(website_payload.get("deploy_root") or "").strip()
+        if deploy_root:
+            shutil.rmtree(deploy_root, ignore_errors=True)
     return rc == 0, (out or f"Service '{svc_name}' and managed files removed.")
 
 
@@ -4392,6 +5433,8 @@ def manage_service(action, name, kind, detail=""):
             rc, out = run_capture(["docker", "rm", "-f", svc_name], timeout=60)
             if rc == 0 and _is_python_name(svc_name):
                 _cleanup_python_api_state_entry(svc_name, "docker")
+            if rc == 0 and _is_website_name(svc_name):
+                _cleanup_website_artifacts(svc_name)
             if _is_locals3_name(svc_name):
                 if os.name == "nt":
                     _windows_cleanup_locals3()
@@ -4454,7 +5497,7 @@ def manage_service(action, name, kind, detail=""):
             if ok and _is_python_name(svc_name):
                 _cleanup_python_api_state_entry(svc_name, "iis_site")
             if ok and _is_website_name(svc_name):
-                _cleanup_website_state_entry(svc_name)
+                _cleanup_website_artifacts(svc_name)
             return ok, message
         if action in ("autostart_on", "autostart_off"):
             val = "$true" if action == "autostart_on" else "$false"
@@ -4499,6 +5542,30 @@ def manage_service(action, name, kind, detail=""):
             return _hide_detected_python(detail)
         return False, "Detected Python entries only support delete."
 
+    if kind == "website_launchd":
+        if os.name == "nt":
+            return False, "launchd website actions are not available on Windows."
+        payload = _website_state_payload(svc_name)
+        plist_name = str(payload.get("plist_name") or f"com.serverinstaller.website.{_safe_website_runtime_name(svc_name)}").strip()
+        plist_path = f"/Library/LaunchDaemons/{plist_name}.plist"
+        prefix = _sudo_prefix()
+        if action == "start":
+            run_capture(prefix + ["launchctl", "bootout", "system", plist_path], timeout=30)
+            rc, out = run_capture(prefix + ["launchctl", "bootstrap", "system", plist_path], timeout=60)
+            return rc == 0, (out or f"launchd website '{plist_name}' started.")
+        if action == "stop":
+            rc, out = run_capture(prefix + ["launchctl", "bootout", "system", plist_path], timeout=60)
+            return rc == 0, (out or f"launchd website '{plist_name}' stopped.")
+        if action == "restart":
+            run_capture(prefix + ["launchctl", "bootout", "system", plist_path], timeout=30)
+            rc, out = run_capture(prefix + ["launchctl", "bootstrap", "system", plist_path], timeout=60)
+            return rc == 0, (out or f"launchd website '{plist_name}' restarted.")
+        if action == "delete":
+            return _linux_cleanup_website_service(prefix, svc_name)
+        if action in ("autostart_on", "autostart_off"):
+            return False, "Auto-start is controlled by launchd for managed website services."
+        return False, "Unsupported launchd website action."
+
     if is_managed_jupyter_service:
         if action == "start":
             info = get_python_info()
@@ -4536,6 +5603,8 @@ def manage_service(action, name, kind, detail=""):
             ok, message = _windows_remove_service_and_files(svc_name)
             if ok and _is_python_name(svc_name):
                 _cleanup_python_api_state_entry(svc_name, "service")
+            if ok and _is_website_name(svc_name):
+                _cleanup_website_artifacts(svc_name, remove_files=False)
             return ok, message
         ps_map = {
             "start": f"Start-Service -Name '{svc_name}' -ErrorAction Stop",
@@ -4574,6 +5643,8 @@ def manage_service(action, name, kind, detail=""):
                     return _linux_cleanup_locals3(prefix)
                 if _is_dotnet_name(unit):
                     return _linux_cleanup_dotnet_service(prefix, unit)
+                if _is_website_name(unit):
+                    return _linux_cleanup_website_service(prefix, unit)
                 run_capture(prefix + ["systemctl", "stop", unit], timeout=30)
                 run_capture(prefix + ["systemctl", "disable", unit], timeout=30)
                 unit_file = f"/etc/systemd/system/{unit}"
@@ -4582,6 +5653,8 @@ def manage_service(action, name, kind, detail=""):
                 if rc == 0:
                     if _is_python_name(unit):
                         _cleanup_python_api_state_entry(unit, "service")
+                    if _is_website_name(unit):
+                        _cleanup_website_artifacts(unit, remove_files=False)
                     return True, (out or f"Service unit '{unit}' deleted.")
                 continue
             rc, out = run_capture(prefix + ["systemctl", action, unit], timeout=60)
@@ -5319,9 +6392,7 @@ def _windows_localmongo_owns_port(port):
     return False
 
 
-def _windows_website_owns_port(port):
-    if os.name != "nt":
-        return False
+def _website_owns_port(port):
     try:
         target = int(str(port).strip())
     except Exception:
@@ -5334,29 +6405,38 @@ def _windows_website_owns_port(port):
     for payload in deployments.values():
         if not isinstance(payload, dict):
             continue
-        site_name = str(payload.get("name") or "").strip()
-        if site_name:
-            site_names.append(site_name)
+        name = str(payload.get("name") or "").strip()
+        port_text = str(payload.get("port") or "").strip()
+        runtime_target = str(payload.get("target") or "").strip().lower()
+        if runtime_target == "iis" and os.name == "nt" and name:
+            site_names.append(name)
+        elif port_text.isdigit() and int(port_text) == target:
+            return True
     for site_name in site_names:
-        cmd = [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            (
-                "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
-                f"Get-WebBinding -Name '{site_name}' -ErrorAction SilentlyContinue | "
-                "ForEach-Object { $_.bindingInformation }"
-            ),
-        ]
-        rc, out = run_capture(cmd, timeout=20)
-        if rc != 0 or not out:
-            continue
-        for line in out.splitlines():
-            parsed = parse_port_from_addr(line)
-            if parsed and str(parsed).isdigit() and int(parsed) == target:
-                return True
+        rc, out = run_capture(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                (
+                    "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
+                    f"Get-WebBinding -Name '{site_name}' -ErrorAction SilentlyContinue | "
+                    "ForEach-Object { $_.bindingInformation }"
+                ),
+            ],
+            timeout=20,
+        )
+        if rc == 0 and out:
+            for line in out.splitlines():
+                parsed = parse_port_from_addr(line)
+                if parsed and str(parsed).isdigit() and int(parsed) == target:
+                    return True
+        payload = _website_state_payload(site_name)
+        port_text = str(payload.get("port") or "").strip() if payload else ""
+        if port_text.isdigit() and int(port_text) == target:
+            return True
     return False
 
 
@@ -8105,6 +9185,44 @@ class Handler(BaseHTTPRequestHandler):
                 traceback.print_exc()
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
+        if self.path.startswith("/api/files/list"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                query = {}
+                if "?" in self.path:
+                    query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+                payload = file_manager_list((query.get("path", [""])[0] or "").strip())
+                self.write_json({"ok": True, **payload}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            return
+        if self.path.startswith("/api/files/download"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                query = {}
+                if "?" in self.path:
+                    query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+                normalized = _normalize_file_manager_path((query.get("path", [""])[0] or "").strip())
+                if not normalized:
+                    raise RuntimeError("File path is required.")
+                path = Path(normalized)
+                if not path.exists() or not path.is_file():
+                    raise RuntimeError("File not found.")
+                data = path.read_bytes()
+                content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
+                self.end_headers()
+                self.wfile.write(data)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            return
         if self.path == "/mongo/native-ui":
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_html("Unauthorized", HTTPStatus.UNAUTHORIZED)
@@ -8276,6 +9394,67 @@ class Handler(BaseHTTPRequestHandler):
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             self.write_json({"ok": ok, "message": message}, status)
             return
+        if self.path == "/api/files/read":
+            form = self.parse_request_form()
+            try:
+                payload = file_manager_read_file((form.get("path", [""])[0] or "").strip())
+                self.write_json({"ok": True, **payload}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            return
+        if self.path == "/api/files/write":
+            form = self.parse_request_form()
+            try:
+                payload = file_manager_write_file(
+                    (form.get("path", [""])[0] or "").strip(),
+                    form.get("content", [""])[0] or "",
+                )
+                self.write_json({"ok": True, **payload}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            return
+        if self.path == "/api/files/mkdir":
+            form = self.parse_request_form()
+            try:
+                payload = file_manager_make_directory((form.get("path", [""])[0] or "").strip())
+                self.write_json({"ok": True, **payload}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            return
+        if self.path == "/api/files/delete":
+            form = self.parse_request_form()
+            try:
+                payload = file_manager_delete_path((form.get("path", [""])[0] or "").strip())
+                self.write_json({"ok": True, **payload}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            return
+        if self.path == "/api/files/rename":
+            form = self.parse_request_form()
+            try:
+                payload = file_manager_rename_path(
+                    (form.get("source", [""])[0] or "").strip(),
+                    (form.get("target", [""])[0] or "").strip(),
+                )
+                self.write_json({"ok": True, **payload}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            return
+        if self.path == "/api/files/upload":
+            try:
+                parts = self._parse_multipart()
+                target_dir = ""
+                upload_parts = []
+                for part in parts:
+                    if part.get("name") == "target":
+                        target_dir = part.get("content", b"").decode("utf-8", errors="replace").strip()
+                    elif part.get("name") == "files":
+                        upload_parts.append(part)
+                written = file_manager_save_uploads(upload_parts, target_dir)
+                self.write_json({"ok": True, "written": written}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            return
         if self.path == "/api/mongo/native/command":
             form = self.parse_request_form()
             db_name = (form.get("db", ["admin"])[0] or "admin").strip()
@@ -8415,6 +9594,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_windows_website_iis(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/website_deploy":
+            target = (form.get("WEBSITE_TARGET", ["service"])[0] or "service").strip().lower()
+            title = "Website Deploy"
+            if target == "docker":
+                title = "Website Docker"
+            elif target == "iis":
+                title = "Website IIS"
+            elif os.name == "nt":
+                title = "Website OS Service (Windows)"
+            else:
+                title = "Website OS Service"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_website_deploy(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_website_deploy(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/python_jupyter_start":
