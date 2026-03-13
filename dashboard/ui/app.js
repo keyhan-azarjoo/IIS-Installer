@@ -599,7 +599,8 @@ function App() {
     if (page === "docker") return "Docker";
     if (page === "proxy") return "Proxy";
     if (page === "python") return "Python";
-    if (page === "python-system") return "Python > System";
+    if (page === "python-api") return "Python > API";
+    if (page === "python-system") return "Python";
     if (page === "python-docker") return "Python > Docker";
     if (page === "python-iis") return "Python > IIS";
     if (page === "sysinfo") return "SysInfo";
@@ -1229,7 +1230,7 @@ function App() {
             <NavCard title="DotNet" text="Open the existing .NET installer and deployment pages." onClick={() => setPage("dotnet")} />
           </Grid>
           <Grid item xs={12} md={6}>
-            <NavCard title="Python" text="Configure Python runtime and Python service deployment targets." onClick={() => setPage("python")} outlined />
+            <NavCard title="Python" text="Configure Python API service deployment separately from Jupyter notebooks." onClick={() => setPage("python-api")} outlined />
           </Grid>
         </Grid>
       );
@@ -1834,23 +1835,7 @@ function App() {
       return <Alert severity="info">Proxy installer is currently configured for Linux hosts and Windows via WSL.</Alert>;
     }
 
-    if (page === "python") {
-      return (
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
-            <NavCard title="System" text="Run the Python service directly on the host with IP, port, and notebook/service settings." onClick={() => setPage("python-system")} />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <NavCard title="Docker" text="Open Python Docker deployment options." onClick={() => setPage("python-docker")} outlined />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <NavCard title="IIS" text={cfg.os === "windows" ? "Open Python IIS deployment options." : "IIS deployment is only available on Windows hosts."} onClick={() => setPage("python-iis")} outlined />
-          </Grid>
-        </Grid>
-      );
-    }
-
-    if (page === "python-system") {
+    if (page === "python" || page === "python-system") {
       const pythonUrl = String(pythonService.jupyter_url || "").trim();
       const pythonPort = String(pythonService.jupyter_port || "8888").trim() || "8888";
       const pythonHost = String(pythonService.host || "").trim();
@@ -1867,13 +1852,13 @@ function App() {
           <Grid item xs={12} md={8}>
             <ActionCard
               title={`Install Python (${installOsLabel})`}
-              description="Install the managed Python runtime and keep the Python/Jupyter service running in the background."
+              description="Install the managed Python runtime and run Jupyter notebooks directly on this host."
               action="/run/python_install"
               fields={[
                 { name: "PYTHON_VERSION", label: "Python Version", type: "select", options: ["3.13", "3.12", "3.11", "3.10"], defaultValue: pythonService.requested_version || "3.12", required: true },
                 {
                   name: "PYTHON_HOST_IP",
-                  label: "Service IP",
+                  label: "Jupyter IP",
                   type: "select",
                   options: selectableIps,
                   defaultValue: pythonHost,
@@ -1881,8 +1866,8 @@ function App() {
                   disabled: selectableIps.length === 0,
                   placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
                 },
-                { name: "PYTHON_JUPYTER_PORT", label: "Service Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
-                { name: "PYTHON_NOTEBOOK_DIR", label: "Working Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
+                { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
+                { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
               ]}
               onRun={run}
               color="#2563eb"
@@ -1895,10 +1880,10 @@ function App() {
                 <Typography variant="body2">Interpreter: {installState}</Typography>
                 <Typography variant="body2">Executable: {pythonService.python_executable || "-"}</Typography>
                 <Typography variant="body2">Scripts: {pythonService.scripts_dir || "-"}</Typography>
-                <Typography variant="body2">Working Directory: {pythonNotebookDir || "-"}</Typography>
+                <Typography variant="body2">Notebook Directory: {pythonNotebookDir || "-"}</Typography>
                 <Typography variant="body2">Jupyter: {pythonService.jupyter_installed ? "Installed" : "Not installed"}</Typography>
-                <Typography variant="body2">Service IP: {pythonHost || "-"}</Typography>
-                <Typography variant="body2">Service Port: {pythonPort || "-"}</Typography>
+                <Typography variant="body2">Jupyter IP: {pythonHost || "-"}</Typography>
+                <Typography variant="body2">Jupyter Port: {pythonPort || "-"}</Typography>
                 <Typography variant="body2">Jupyter Status: {pythonService.jupyter_running ? "Running" : "Stopped"}</Typography>
                 <Typography variant="body2">HTTPS: {pythonService.jupyter_https_enabled ? "Enabled" : "Disabled"}</Typography>
                 <Typography variant="body2">Auth User: {pythonService.jupyter_username || "-"}</Typography>
@@ -1974,6 +1959,44 @@ function App() {
               </CardContent>
             </Card>
           </Grid>
+          {page === "python" && (
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Deployment Targets</Typography>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={4}>
+                      <NavCard title="API Service" text="Deploy a Python API app as a background service. This is separate from Jupyter notebooks." onClick={() => setPage("python-api")} />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <NavCard title="Docker" text="Open Python Docker deployment options." onClick={() => setPage("python-docker")} outlined />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <NavCard title="IIS" text={cfg.os === "windows" ? "Open Python IIS deployment options." : "IIS deployment is only available on Windows hosts."} onClick={() => setPage("python-iis")} outlined />
+                    </Grid>
+                  </Grid>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
+        </Grid>
+      );
+    }
+
+    if (page === "python-api") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <Alert severity="info">
+              Python API service deployment is separate from Jupyter. Use the main <b>Python</b> page for notebooks and Jupyter, and use this page for a Python web/API app running as a background service.
+            </Alert>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Open Python Jupyter" text="Go back to the main Python page for notebooks, kernels, and Jupyter management." onClick={() => setPage("python")} />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Open IIS Target" text="Use the IIS deployment flow for Python API hosting on Windows." onClick={() => setPage("python-iis")} outlined />
+          </Grid>
         </Grid>
       );
     }
@@ -1983,11 +2006,11 @@ function App() {
         <Grid container spacing={2}>
           <Grid item xs={12}>
             <Alert severity="info">
-              Python Docker deployment is not wired in this dashboard yet. Use <b>API &gt; Python &gt; System</b> for the managed host service today.
+              Python Docker deployment is not wired in this dashboard yet. Use the main <b>Python</b> page for Jupyter and notebooks, and use Docker separately for containerized Python apps.
             </Alert>
           </Grid>
           <Grid item xs={12} md={6}>
-            <NavCard title="Open System Mode" text="Configure the Python service directly on this machine." onClick={() => setPage("python-system")} />
+            <NavCard title="Open Python Jupyter" text="Configure Python and Jupyter directly on this machine." onClick={() => setPage("python")} />
           </Grid>
           <Grid item xs={12} md={6}>
             <NavCard title="Open Docker Page" text="Install Docker and manage existing Docker services from the main Docker page." onClick={() => setPage("docker")} outlined />
@@ -2004,11 +2027,11 @@ function App() {
         <Grid container spacing={2}>
           <Grid item xs={12}>
             <Alert severity="info">
-              Python IIS deployment is not configured in this dashboard yet. The supported Python path right now is <b>System</b>, which runs the managed Python service with host IP and port settings.
+              Python IIS deployment is not configured in this dashboard yet. Use the main <b>Python</b> page for Jupyter and notebooks, and use this IIS path for a separate Python API app.
             </Alert>
           </Grid>
           <Grid item xs={12} md={6}>
-            <NavCard title="Open System Mode" text="Use the current Python service installer and runtime controls." onClick={() => setPage("python-system")} />
+            <NavCard title="Open Python Jupyter" text="Use the current Python and Jupyter installer/runtime controls." onClick={() => setPage("python")} />
           </Grid>
           <Grid item xs={12} md={6}>
             <NavCard title="Open DotNet IIS" text="Open the existing IIS deployment flow used for .NET apps." onClick={() => setPage("dotnet-iis")} outlined />
