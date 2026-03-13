@@ -408,6 +408,214 @@ def _ensure_windows_jupyter_https_assets(python_executable, host):
     return str(cert_path), str(key_path)
 
 
+def _ensure_windows_jupyter_proxy_support(python_executable):
+    python_exe = str(python_executable or "").strip()
+    if os.name != "nt" or not python_exe:
+        return False
+    rc_import, _ = run_capture([python_exe, "-c", "import aiohttp"], timeout=20)
+    if rc_import == 0:
+        return True
+    rc_install, _ = run_capture([python_exe, "-m", "pip", "install", "--upgrade", "aiohttp"], timeout=240)
+    return rc_install == 0
+
+
+def _ensure_windows_jupyter_proxy_script():
+    script_path = PYTHON_STATE_DIR / "serverinstaller_jupyter_proxy.py"
+    script_text = r'''import argparse
+import asyncio
+import base64
+import ssl
+from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
+
+
+def _unauthorized():
+    response = web.Response(status=401, text="Unauthorized")
+    response.headers["WWW-Authenticate"] = 'Basic realm="Restricted Jupyter"'
+    return response
+
+
+def _authorized(request, username, password):
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(header.split(" ", 1)[1]).decode("utf-8")
+    except Exception:
+        return False
+    provided_user, _, provided_pass = decoded.partition(":")
+    return provided_user == username and provided_pass == password
+
+
+def _request_headers(request, backend_host, backend_port):
+    headers = {}
+    for key, value in request.headers.items():
+        lower = key.lower()
+        if lower in {"host", "authorization", "connection", "upgrade", "proxy-connection", "keep-alive", "transfer-encoding"}:
+            continue
+        headers[key] = value
+    headers["Host"] = f"{backend_host}:{backend_port}"
+    headers["X-Forwarded-For"] = request.remote or ""
+    headers["X-Forwarded-Proto"] = "https"
+    headers["X-Forwarded-Host"] = request.host
+    return headers
+
+
+def _response_headers(headers):
+    result = {}
+    for key, value in headers.items():
+        lower = key.lower()
+        if lower in {"content-length", "transfer-encoding", "connection", "keep-alive", "content-encoding"}:
+            continue
+        result[key] = value
+    return result
+
+
+async def _proxy_http(request, session, backend_base, backend_host, backend_port, username, password):
+    if not _authorized(request, username, password):
+        return _unauthorized()
+    target_url = f"{backend_base}{request.rel_url}"
+    body = await request.read()
+    async with session.request(
+        request.method,
+        target_url,
+        headers=_request_headers(request, backend_host, backend_port),
+        data=body if body else None,
+        allow_redirects=False,
+    ) as upstream:
+        payload = await upstream.read()
+        return web.Response(
+            status=upstream.status,
+            headers=_response_headers(upstream.headers),
+            body=payload,
+        )
+
+
+async def _pump_client_to_upstream(ws_client, ws_upstream):
+    async for msg in ws_client:
+        if msg.type == WSMsgType.TEXT:
+            await ws_upstream.send_str(msg.data)
+        elif msg.type == WSMsgType.BINARY:
+            await ws_upstream.send_bytes(msg.data)
+        elif msg.type == WSMsgType.PING:
+            await ws_upstream.ping()
+        elif msg.type == WSMsgType.PONG:
+            await ws_upstream.pong()
+        elif msg.type == WSMsgType.CLOSE:
+            await ws_upstream.close()
+            break
+
+
+async def _pump_upstream_to_client(ws_client, ws_upstream):
+    async for msg in ws_upstream:
+        if msg.type == WSMsgType.TEXT:
+            await ws_client.send_str(msg.data)
+        elif msg.type == WSMsgType.BINARY:
+            await ws_client.send_bytes(msg.data)
+        elif msg.type == WSMsgType.PING:
+            await ws_client.ping()
+        elif msg.type == WSMsgType.PONG:
+            await ws_client.pong()
+        elif msg.type in {WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR}:
+            await ws_client.close()
+            break
+
+
+async def _proxy_ws(request, session, backend_ws_base, backend_host, backend_port, username, password):
+    if not _authorized(request, username, password):
+        return _unauthorized()
+    ws_client = web.WebSocketResponse(autoping=True, autoclose=True, max_msg_size=0)
+    await ws_client.prepare(request)
+    target_url = f"{backend_ws_base}{request.rel_url}"
+    async with session.ws_connect(
+        target_url,
+        headers=_request_headers(request, backend_host, backend_port),
+        autoclose=True,
+        autoping=True,
+        max_msg_size=0,
+    ) as ws_upstream:
+        await asyncio.gather(
+            _pump_client_to_upstream(ws_client, ws_upstream),
+            _pump_upstream_to_client(ws_client, ws_upstream),
+        )
+    return ws_client
+
+
+async def _handle(request):
+    app = request.app
+    connection_header = request.headers.get("Connection", "")
+    upgrade_header = request.headers.get("Upgrade", "")
+    wants_ws = "upgrade" in connection_header.lower() and upgrade_header.lower() == "websocket"
+    if wants_ws:
+        return await _proxy_ws(
+            request,
+            app["session"],
+            app["backend_ws_base"],
+            app["backend_host"],
+            app["backend_port"],
+            app["username"],
+            app["password"],
+        )
+    return await _proxy_http(
+        request,
+        app["session"],
+        app["backend_base"],
+        app["backend_host"],
+        app["backend_port"],
+        app["username"],
+        app["password"],
+    )
+
+
+async def _create_app(args):
+    timeout = ClientTimeout(total=None, sock_connect=30, sock_read=None)
+    app = web.Application(client_max_size=1024**3)
+    app["username"] = args.username
+    app["password"] = args.password
+    app["backend_host"] = args.backend_host
+    app["backend_port"] = args.backend_port
+    app["backend_base"] = f"http://{args.backend_host}:{args.backend_port}"
+    app["backend_ws_base"] = f"ws://{args.backend_host}:{args.backend_port}"
+    app["session"] = ClientSession(timeout=timeout)
+    app.router.add_route("*", "/{path_info:.*}", _handle)
+
+    async def _cleanup(_app):
+        await _app["session"].close()
+
+    app.on_cleanup.append(_cleanup)
+    return app
+
+
+async def _main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--listen-host", required=True)
+    parser.add_argument("--listen-port", type=int, required=True)
+    parser.add_argument("--backend-host", required=True)
+    parser.add_argument("--backend-port", type=int, required=True)
+    parser.add_argument("--username", required=True)
+    parser.add_argument("--password", required=True)
+    parser.add_argument("--certfile", required=True)
+    parser.add_argument("--keyfile", required=True)
+    args = parser.parse_args()
+
+    app = await _create_app(args)
+    ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ssl_context.load_cert_chain(args.certfile, args.keyfile)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, args.listen_host, args.listen_port, ssl_context=ssl_context)
+    await site.start()
+    while True:
+        await asyncio.sleep(3600)
+
+
+if __name__ == "__main__":
+    asyncio.run(_main())
+'''
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text(script_text, encoding="utf-8")
+    return str(script_path)
+
+
 def _python_process_running(pid):
     try:
         pid_num = int(pid)
