@@ -64,6 +64,8 @@ PYTHON_STATE_FILE = PYTHON_STATE_DIR / "python-state.json"
 PYTHON_JUPYTER_STATE_FILE = PYTHON_STATE_DIR / "jupyter-state.json"
 PYTHON_IGNORED_FILE = PYTHON_STATE_DIR / "ignored-python.json"
 PYTHON_API_STATE_FILE = PYTHON_STATE_DIR / "python-api-state.json"
+WEBSITE_STATE_DIR = SERVER_INSTALLER_DATA / "websites"
+WEBSITE_STATE_FILE = WEBSITE_STATE_DIR / "websites-state.json"
 JUPYTER_SYSTEMD_SERVICE = "serverinstaller-jupyter.service"
 WINDOWS_LOCALS3_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "install-state.json"
 REPO_RAW_BASE = os.environ.get(
@@ -1488,6 +1490,282 @@ def _python_api_service_items():
     return items
 
 
+def _safe_website_name(value, default_name="ServerInstallerWebsite"):
+    text = re.sub(r"[^A-Za-z0-9 _.-]+", "", str(value or "").strip())
+    text = re.sub(r"\s+", " ", text).strip(" ._-")
+    return text or default_name
+
+
+def _website_state_key(value):
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return cleaned or "website"
+
+
+def _update_website_state(name, payload):
+    state = _read_json_file(WEBSITE_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        deployments = {}
+    deployments[_website_state_key(name)] = payload
+    state["deployments"] = deployments
+    _write_json_file(WEBSITE_STATE_FILE, state)
+
+
+def _cleanup_website_state_entry(site_name):
+    state = _read_json_file(WEBSITE_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        return
+    remove_keys = []
+    for key, payload in deployments.items():
+        if not isinstance(payload, dict):
+            remove_keys.append(key)
+            continue
+        if str(payload.get("name") or "").strip().lower() == str(site_name or "").strip().lower():
+            remove_keys.append(key)
+    for key in remove_keys:
+        deployments.pop(key, None)
+    state["deployments"] = deployments
+    _write_json_file(WEBSITE_STATE_FILE, state)
+
+
+def _website_state_payload(site_name):
+    state = _read_json_file(WEBSITE_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        return {}
+    target = str(site_name or "").strip().lower()
+    for payload in deployments.values():
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("name") or "").strip().lower() == target:
+            return payload
+    return {}
+
+
+def _detect_static_website_root(source_root: Path, website_kind="auto"):
+    root = Path(source_root).resolve()
+    kind = str(website_kind or "auto").strip().lower()
+    candidate_dirs = []
+
+    def add_candidate(path_obj):
+        try:
+            candidate = Path(path_obj).resolve()
+        except Exception:
+            return
+        if not candidate.exists() or not candidate.is_dir():
+            return
+        if candidate not in candidate_dirs:
+            candidate_dirs.append(candidate)
+
+    if kind == "flutter":
+        add_candidate(root / "build" / "web")
+    elif kind in ("static", "web", "next-export"):
+        add_candidate(root / "out")
+        add_candidate(root / "dist")
+        add_candidate(root / "build")
+
+    for rel in (
+        "build/web",
+        "out",
+        "dist",
+        "build",
+        "public",
+        ".next/static",
+        "",
+    ):
+        add_candidate(root / rel if rel else root)
+
+    for candidate in list(candidate_dirs):
+        index_file = candidate / "index.html"
+        if index_file.exists():
+            return candidate, str(candidate.relative_to(root)) if candidate != root else "."
+
+    for candidate in root.rglob("*"):
+        if not candidate.is_dir():
+            continue
+        if (candidate / "index.html").exists():
+            return candidate, str(candidate.relative_to(root))
+
+    raise RuntimeError("No publishable website folder found. Upload a built site that contains index.html, such as dist, out, build/web, or a plain static folder.")
+
+
+def _prepare_windows_static_website(form=None, live_cb=None):
+    form = form or {}
+    source_value = resolve_source_value(form, "WEBSITE_SOURCE", "WEBSITE_SOURCE_FILE", "WEBSITE_SOURCE_FOLDER")
+    if not source_value:
+        raise RuntimeError("Project path, uploaded archive, or uploaded folder is required.")
+    source_root = prepare_source_dir(source_value, live_cb=live_cb)
+    site_name = _safe_website_name((form.get("WEBSITE_SITE_NAME", ["ServerInstallerWebsite"])[0] or "").strip(), "ServerInstallerWebsite")
+    site_key = _website_state_key(site_name)
+    website_kind = (form.get("WEBSITE_KIND", ["auto"])[0] or "auto").strip().lower()
+    if website_kind not in ("auto", "static", "flutter", "next-export"):
+        website_kind = "auto"
+    bind_ip = (form.get("WEBSITE_BIND_IP", [""])[0] or "").strip() or "*"
+    host = bind_ip if bind_ip not in ("", "*", "0.0.0.0") else choose_service_host()
+    port_text = (form.get("WEBSITE_PORT", ["8088"])[0] or "8088").strip()
+    if not port_text.isdigit() or not (1 <= int(port_text) <= 65535):
+        raise RuntimeError("Website port must be a number between 1 and 65535.")
+    site_port = int(port_text)
+    publish_root, publish_rel = _detect_static_website_root(source_root, website_kind=website_kind)
+    deploy_root = WEBSITE_STATE_DIR / site_key
+    if deploy_root.exists():
+        shutil.rmtree(deploy_root, ignore_errors=True)
+    shutil.copytree(publish_root, deploy_root)
+    return {
+        "site_name": site_name,
+        "site_key": site_key,
+        "website_kind": website_kind,
+        "bind_ip": bind_ip,
+        "host": host,
+        "site_port": site_port,
+        "source_root": str(source_root),
+        "publish_root": str(publish_root),
+        "publish_rel": publish_rel,
+        "deploy_root": str(deploy_root),
+    }
+
+
+def _website_service_items():
+    state = _read_json_file(WEBSITE_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        return []
+    items = []
+    for payload in deployments.values():
+        if not isinstance(payload, dict):
+            continue
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            continue
+        port_text = str(payload.get("port") or "").strip()
+        url = str(payload.get("url") or "").strip()
+        bind_ip = str(payload.get("bind_ip") or "").strip()
+        running = False
+        sub_status = ""
+        autostart = False
+        if os.name == "nt":
+            rc, out = run_capture(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    f"Import-Module WebAdministration; $site=Get-Website -Name '{name}' -ErrorAction SilentlyContinue; if($site){{Write-Output ($site.State + '|' + [string]$site.serverAutoStart + '|' + [string]$site.PhysicalPath)}}",
+                ],
+                timeout=20,
+            )
+            physical_path = str(payload.get("deploy_root") or "")
+            if rc == 0 and out:
+                parts = str(out).strip().split("|", 2)
+                sub_status = parts[0] if parts else ""
+                running = sub_status.lower() == "started"
+                autostart = len(parts) > 1 and parts[1].strip().lower() == "true"
+                if len(parts) > 2 and parts[2].strip():
+                    physical_path = parts[2].strip()
+            else:
+                physical_path = str(payload.get("deploy_root") or "")
+        else:
+            physical_path = str(payload.get("deploy_root") or "")
+        ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
+        items.append({
+            "kind": "iis_site",
+            "name": name,
+            "display_name": f"{str(payload.get('stack_label') or 'Website').strip()} - {physical_path or '-'}",
+            "status": "running" if running else "stopped",
+            "sub_status": sub_status or ("running" if running else "stopped"),
+            "autostart": autostart,
+            "platform": "windows" if os.name == "nt" else "unknown",
+            "urls": [url] if url else [],
+            "ports": ports,
+            "manageable": True,
+            "deletable": True,
+            "website": True,
+            "target_page": "website",
+            "form_name": str(payload.get("form_name") or name),
+            "project_path": str(payload.get("source_root") or payload.get("deploy_root") or ""),
+            "deploy_root": str(payload.get("deploy_root") or ""),
+            "host": bind_ip if bind_ip and bind_ip != "*" else str(payload.get("host") or ""),
+            "port_value": port_text,
+            "stack_label": str(payload.get("stack_label") or "Static Website"),
+            "publish_rel": str(payload.get("publish_rel") or "."),
+            "kind_value": str(payload.get("website_kind") or "auto"),
+        })
+    return items
+
+
+def get_website_info():
+    items = _website_service_items()
+    return {
+        "installed": len(items) > 0,
+        "count": len(items),
+        "sites": items,
+    }
+
+
+def run_windows_website_iis(form=None, live_cb=None):
+    form = form or {}
+    if os.name != "nt":
+        return 1, "Website deployment is currently available on Windows hosts only."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    iis_info = get_iis_info()
+    if not iis_info.get("installed"):
+        return 1, "IIS is not installed. Use the DotNet IIS setup page first."
+    try:
+        deploy = _prepare_windows_static_website(form, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    usage = get_port_usage(deploy["site_port"], "tcp")
+    if usage.get("busy") and not usage.get("managed_owner"):
+        return 1, f"Requested website port {deploy['site_port']} is already in use. Choose another port."
+    if live_cb:
+        live_cb(f"Deploying IIS website '{deploy['site_name']}' from {deploy['publish_root']}\n")
+    ps = "\n".join([
+        "Import-Module WebAdministration",
+        f"$siteName = {_ps_single_quote(deploy['site_name'])}",
+        f"$appPool = {_ps_single_quote(deploy['site_name'])}",
+        f"$physicalPath = {_ps_single_quote(deploy['deploy_root'])}",
+        f"$ip = {_ps_single_quote(deploy['bind_ip'] if deploy['bind_ip'] != '*' else '*')}",
+        f"$port = {int(deploy['site_port'])}",
+        "if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) { Stop-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null; Remove-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null }",
+        "if (Test-Path ('IIS:\\AppPools\\' + $appPool)) { Stop-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null; Remove-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null }",
+        "New-WebAppPool -Name $appPool | Out-Null",
+        "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name managedRuntimeVersion -Value ''",
+        "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name processModel.identityType -Value 4",
+        "New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip -ApplicationPool $appPool | Out-Null",
+        "Start-Website -Name $siteName | Out-Null",
+    ])
+    rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
+    if rc != 0:
+        return 1, out or f"Failed to create IIS website '{deploy['site_name']}'."
+    manage_firewall_port("open", deploy["site_port"], "tcp")
+    url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
+    stack_label = {
+        "flutter": "Flutter / Static Website",
+        "next-export": "Next Export / Static Website",
+        "static": "Static Website",
+        "auto": "Static Website",
+    }.get(deploy["website_kind"], "Static Website")
+    _update_website_state(deploy["site_name"], {
+        "name": deploy["site_name"],
+        "form_name": deploy["site_name"],
+        "kind": "iis_site",
+        "website_kind": deploy["website_kind"],
+        "stack_label": stack_label,
+        "url": url,
+        "bind_ip": deploy["bind_ip"],
+        "host": deploy["host"],
+        "port": deploy["site_port"],
+        "deploy_root": deploy["deploy_root"],
+        "source_root": deploy["source_root"],
+        "publish_root": deploy["publish_root"],
+        "publish_rel": deploy["publish_rel"],
+    })
+    return 0, f"Website deployment completed.\nSite: {deploy['site_name']}\nURL: {url}\nContent: {deploy['publish_root']}\n"
+
+
 def _windows_service_state(service_name):
     rc, out = run_capture(
         [
@@ -1538,7 +1816,11 @@ def run_windows_python_api_service(form=None, live_cb=None):
         return code, output
     rc_post, out_post = run_capture([venv_python, "-m", "pywin32_postinstall", "-install"], timeout=180)
     if rc_post != 0 and live_cb:
-        live_cb((out_post or "pywin32 postinstall returned a non-zero exit code.") + "\n")
+        text = str(out_post or "").strip()
+        if "No module named pywin32_postinstall" in text:
+            live_cb("pywin32_postinstall is not available in this pywin32 build; continuing with direct service host setup.\n")
+        else:
+            live_cb((text or "pywin32 postinstall returned a non-zero exit code.") + "\n")
     _, runner_script = _write_python_api_runtime_files(
         deploy["deploy_root"],
         deploy["entry_rel"],
@@ -1605,7 +1887,12 @@ def run_windows_python_api_service(form=None, live_cb=None):
             "                raise RuntimeError(f'Python API process exited with code {self.proc.returncode}.')",
             "",
             "if __name__ == '__main__':",
-            "    win32serviceutil.HandleCommandLine(PythonApiService)",
+            "    if len(sys.argv) == 1:",
+            "        servicemanager.Initialize()",
+            "        servicemanager.PrepareToHostSingle(PythonApiService)",
+            "        servicemanager.StartServiceCtrlDispatcher()",
+            "    else:",
+            "        win32serviceutil.HandleCommandLine(PythonApiService)",
             "",
         ]),
         encoding="utf-8",
@@ -3071,6 +3358,9 @@ def get_port_usage(port, protocol="tcp"):
             elif os.name == "nt" and _windows_localmongo_owns_port(p):
                 managed_owner = True
                 owner_hint = "localmongo-managed"
+            elif os.name == "nt" and _windows_website_owns_port(p):
+                managed_owner = True
+                owner_hint = "website-managed"
             elif _linux_locals3_owns_port(p):
                 managed_owner = True
                 owner_hint = "locals3-managed"
@@ -3732,6 +4022,10 @@ def _is_locals3_name(name):
     return bool(re.search(r"locals3|minio", str(name or ""), re.IGNORECASE))
 
 
+def _is_website_name(name):
+    return bool(_website_state_payload(name))
+
+
 def _is_dotnet_name(name):
     return bool(re.search(r"dotnet|aspnet|kestrel|dotnetapp", str(name or ""), re.IGNORECASE))
 
@@ -3851,6 +4145,8 @@ def filter_service_items(scope):
     items = get_service_items()
     if scope == "all":
         return items
+    if scope == "website":
+        return _website_service_items()
     if scope == "docker":
         return [x for x in items if x.get("kind") == "docker" or _is_docker_name(x.get("name", "")) or _is_docker_name(x.get("display_name", ""))]
     if scope == "mongo":
@@ -4045,7 +4341,8 @@ def _windows_remove_iis_site_and_path(site_name):
         f"$s=Get-Website -Name '{site_name}' -ErrorAction SilentlyContinue; "
         "if($s){ $p=$s.physicalPath; Stop-Website -Name $s.Name -ErrorAction SilentlyContinue | Out-Null; "
         "Remove-Website -Name $s.Name -ErrorAction SilentlyContinue | Out-Null; "
-        "if($p -and (Test-Path $p)){ Remove-Item -Recurse -Force -Path $p -ErrorAction SilentlyContinue } }"
+        "if($p -and (Test-Path $p)){ Remove-Item -Recurse -Force -Path $p -ErrorAction SilentlyContinue } }; "
+        f"if (Test-Path ('IIS:\\AppPools\\{site_name}')) {{ Stop-WebAppPool -Name '{site_name}' -ErrorAction SilentlyContinue | Out-Null; Remove-WebAppPool -Name '{site_name}' -ErrorAction SilentlyContinue | Out-Null }}"
     )
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=60)
     return rc == 0, (out or f"IIS site '{site_name}' and files removed.")
@@ -4156,6 +4453,8 @@ def manage_service(action, name, kind, detail=""):
             ok, message = _windows_remove_iis_site_and_path(svc_name)
             if ok and _is_python_name(svc_name):
                 _cleanup_python_api_state_entry(svc_name, "iis_site")
+            if ok and _is_website_name(svc_name):
+                _cleanup_website_state_entry(svc_name)
             return ok, message
         if action in ("autostart_on", "autostart_off"):
             val = "$true" if action == "autostart_on" else "$false"
@@ -4329,6 +4628,10 @@ def get_system_status(scope="all"):
         software["proxy"] = get_proxy_info()
     if scope in ("all", "python"):
         software["python_service"] = get_python_info()
+    if scope in ("all", "website"):
+        software["website"] = get_website_info()
+        if os.name == "nt":
+            software["iis"] = get_iis_info()
 
     status = {
         "hostname": socket.gethostname(),
@@ -5013,6 +5316,47 @@ def _windows_localmongo_owns_port(port):
                     return True
     except Exception:
         return False
+    return False
+
+
+def _windows_website_owns_port(port):
+    if os.name != "nt":
+        return False
+    try:
+        target = int(str(port).strip())
+    except Exception:
+        return False
+    state = _read_json_file(WEBSITE_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        return False
+    site_names = []
+    for payload in deployments.values():
+        if not isinstance(payload, dict):
+            continue
+        site_name = str(payload.get("name") or "").strip()
+        if site_name:
+            site_names.append(site_name)
+    for site_name in site_names:
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            (
+                "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
+                f"Get-WebBinding -Name '{site_name}' -ErrorAction SilentlyContinue | "
+                "ForEach-Object { $_.bindingInformation }"
+            ),
+        ]
+        rc, out = run_capture(cmd, timeout=20)
+        if rc != 0 or not out:
+            continue
+        for line in out.splitlines():
+            parsed = parse_port_from_addr(line)
+            if parsed and str(parsed).isdigit() and int(parsed) == target:
+                return True
     return False
 
 
@@ -8062,6 +8406,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_windows_python_api_iis(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/website_iis":
+            title = "Website IIS"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_website_iis(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_website_iis(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/python_jupyter_start":

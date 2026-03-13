@@ -103,6 +103,12 @@ function defaultPythonApiDirForOs(osName) {
   return "/opt/serverinstaller/python-api";
 }
 
+function defaultWebsiteDirForOs(osName) {
+  const value = String(osName || "").toLowerCase();
+  if (value === "windows") return "C:\\ServerInstaller-Websites";
+  return "/var/www/site";
+}
+
 function MiniMetric({ label, valueText, percent, color }) {
   return (
     <Paper variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
@@ -216,8 +222,8 @@ function App() {
   const [portProtocol, setPortProtocol] = React.useState("tcp");
   const [portBusy, setPortBusy] = React.useState(false);
   const [serviceBusy, setServiceBusy] = React.useState(false);
-  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, docker: false, proxy: false, python: false });
-  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", docker: "", proxy: "", python: "" });
+  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, docker: false, proxy: false, python: false, website: false });
+  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", docker: "", proxy: "", python: "", website: "" });
   const [serviceFilter, setServiceFilter] = React.useState("");
   const [services, setServices] = React.useState([]);
   const [mongoPageServices, setMongoPageServices] = React.useState([]);
@@ -226,12 +232,18 @@ function App() {
   const [dockerPageServices, setDockerPageServices] = React.useState([]);
   const [proxyPageServices, setProxyPageServices] = React.useState([]);
   const [pythonPageServices, setPythonPageServices] = React.useState([]);
+  const [websitePageServices, setWebsitePageServices] = React.useState([]);
   const [mongoInfoState, setMongoInfoState] = React.useState(null);
   const [s3InfoState, setS3InfoState] = React.useState(null);
   const [dotnetInfoState, setDotnetInfoState] = React.useState(null);
   const [dockerInfoState, setDockerInfoState] = React.useState(null);
   const [proxyInfoState, setProxyInfoState] = React.useState(null);
   const [pythonInfoState, setPythonInfoState] = React.useState(null);
+  const [websiteInfoState, setWebsiteInfoState] = React.useState(null);
+  const [pythonApiEditor, setPythonApiEditor] = React.useState(null);
+  const [pythonApiEditorSeed, setPythonApiEditorSeed] = React.useState(0);
+  const [websiteEditor, setWebsiteEditor] = React.useState(null);
+  const [websiteEditorSeed, setWebsiteEditorSeed] = React.useState(0);
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
@@ -326,12 +338,14 @@ function App() {
   const loadDockerServices = React.useRef(async () => {});
   const loadProxyServices = React.useRef(async () => {});
   const loadPythonServices = React.useRef(async () => {});
+  const loadWebsiteServices = React.useRef(async () => {});
   const loadMongoInfo = React.useRef(async () => {});
   const loadS3Info = React.useRef(async () => {});
   const loadDotnetInfo = React.useRef(async () => {});
   const loadDockerInfo = React.useRef(async () => {});
   const loadProxyInfo = React.useRef(async () => {});
   const loadPythonInfo = React.useRef(async () => {});
+  const loadWebsiteInfo = React.useRef(async () => {});
 
   const loadServiceScope = React.useCallback(async (scope, setter) => {
     setScopeLoadingFlag(scope, true);
@@ -371,12 +385,14 @@ function App() {
   loadDockerServices.current = async () => loadServiceScope("docker", setDockerPageServices);
   loadProxyServices.current = async () => loadServiceScope("proxy", setProxyPageServices);
   loadPythonServices.current = async () => loadServiceScope("python", setPythonPageServices);
+  loadWebsiteServices.current = async () => loadServiceScope("website", setWebsitePageServices);
   loadMongoInfo.current = async () => loadScopedStatus("mongo", setMongoInfoState);
   loadS3Info.current = async () => loadScopedStatus("s3", setS3InfoState);
   loadDotnetInfo.current = async () => loadScopedStatus("dotnet", setDotnetInfoState);
   loadDockerInfo.current = async () => loadScopedStatus("docker", setDockerInfoState);
   loadProxyInfo.current = async () => loadScopedStatus("proxy", setProxyInfoState);
   loadPythonInfo.current = async () => loadScopedStatus("python", setPythonInfoState);
+  loadWebsiteInfo.current = async () => loadScopedStatus("website", setWebsiteInfoState);
 
   const refreshPageServices = React.useCallback((targetPage) => {
     if (targetPage === "services") return loadServices.current();
@@ -385,6 +401,7 @@ function App() {
     if (targetPage === "docker") return loadDockerServices.current();
     if (targetPage === "proxy") return loadProxyServices.current();
     if (targetPage === "python" || String(targetPage || "").startsWith("python-")) return loadPythonServices.current();
+    if (targetPage === "website") return loadWebsiteServices.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
     return Promise.resolve();
   }, []);
@@ -395,6 +412,7 @@ function App() {
     if (targetPage === "docker") return loadDockerInfo.current();
     if (targetPage === "proxy") return loadProxyInfo.current();
     if (targetPage === "python" || String(targetPage || "").startsWith("python-")) return loadPythonInfo.current();
+    if (targetPage === "website") return loadWebsiteInfo.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetInfo.current();
     if (targetPage === "home" || targetPage === "api" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
     return Promise.resolve();
@@ -405,13 +423,13 @@ function App() {
   }, [refreshPageServices, refreshPageStatus]);
 
   React.useEffect(() => {
-    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || String(page).startsWith("dotnet-") || String(page).startsWith("python-")) {
+    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-")) {
       refreshPageContext(page);
     }
   }, [page, refreshPageContext]);
 
   React.useEffect(() => {
-    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || String(page).startsWith("dotnet-") || String(page).startsWith("python-"))) {
+    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-"))) {
       return undefined;
     }
     const t = setInterval(() => {
@@ -634,7 +652,7 @@ function App() {
 
   const goBack = () => {
     if (page === "home") return;
-    if (page === "api" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
+    if (page === "api" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services" || page === "website") setPage("home");
     else if (page === "dotnet" || page === "python" || page === "python-api") setPage("api");
     else if (page.startsWith("dotnet-")) setPage("dotnet");
     else if (page === "python-system" || page === "python-docker" || page === "python-iis") setPage("python-api");
@@ -650,6 +668,7 @@ function App() {
     if (page === "docker") return "Docker";
     if (page === "proxy") return "Proxy";
     if (page === "python") return "Python";
+    if (page === "website") return "Websites";
     if (page === "python-api") return "Python > API";
     if (page === "python-system") return "Python > OS Service";
     if (page === "python-docker") return "Python > Docker";
@@ -767,6 +786,8 @@ function App() {
         loadProxyServices.current(),
         loadPythonInfo.current(),
         loadPythonServices.current(),
+        loadWebsiteInfo.current(),
+        loadWebsiteServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
         loadDockerInfo.current(),
@@ -829,6 +850,8 @@ function App() {
         loadProxyServices.current(),
         loadPythonInfo.current(),
         loadPythonServices.current(),
+        loadWebsiteInfo.current(),
+        loadWebsiteServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
         loadDockerInfo.current(),
@@ -889,6 +912,8 @@ function App() {
         loadProxyServices.current(),
         loadPythonInfo.current(),
         loadPythonServices.current(),
+        loadWebsiteInfo.current(),
+        loadWebsiteServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
         loadDockerInfo.current(),
@@ -938,17 +963,128 @@ function App() {
     return action.charAt(0).toUpperCase() + action.slice(1);
   };
 
+  const openPythonApiRun = React.useCallback((svc) => {
+    if (!svc) return;
+    const targetPage = svc.target_page || (svc.kind === "docker" ? "python-docker" : (svc.kind === "iis_site" ? "python-iis" : "python-system"));
+    setPythonApiEditor({
+      targetPage,
+      name: String(svc.form_name || svc.name || "").trim(),
+      host: String(svc.host || "").trim(),
+      port: String(svc.port_value || (Array.isArray(svc.ports) && svc.ports[0] ? svc.ports[0].port : "") || "").trim(),
+      source: String(svc.project_path || "").trim(),
+      mainFile: String(svc.main_file || svc.detail || "").trim(),
+      serviceLog: String(svc.service_log || "").trim(),
+    });
+    setPythonApiEditorSeed((prev) => prev + 1);
+    setPage(targetPage);
+  }, [cfg.os]);
+
+  const startNewPythonApiDeployment = React.useCallback((targetPage) => {
+    setPythonApiEditor(null);
+    setPythonApiEditorSeed((prev) => prev + 1);
+    setPage(targetPage);
+  }, []);
+
+  const openWebsiteRun = React.useCallback((svc) => {
+    if (!svc) return;
+    setWebsiteEditor({
+      name: String(svc.form_name || svc.name || "").trim(),
+      host: String(svc.host || "").trim(),
+      port: String(svc.port_value || (Array.isArray(svc.ports) && svc.ports[0] ? svc.ports[0].port : "") || "").trim(),
+      source: String(svc.project_path || svc.deploy_root || "").trim(),
+      kind: String(svc.kind_value || "auto").trim(),
+    });
+    setWebsiteEditorSeed((prev) => prev + 1);
+    setPage("website");
+  }, []);
+
+  const startNewWebsiteDeployment = React.useCallback(() => {
+    setWebsiteEditor(null);
+    setWebsiteEditorSeed((prev) => prev + 1);
+    setPage("website");
+  }, []);
+
+  const renderPythonApiRunsCard = React.useCallback(() => (
+    <Grid item xs={12}>
+      <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+        <CardContent>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+            <Typography variant="h6" fontWeight={800}>API Runs</Typography>
+            <Box sx={{ flexGrow: 1 }} />
+            <Button variant="outlined" disabled={isScopeLoading("python")} onClick={() => Promise.all([loadPythonInfo.current(), loadPythonServices.current()])} sx={{ textTransform: "none" }}>
+              Refresh
+            </Button>
+          </Stack>
+          <Box sx={{ mt: 1.2, maxHeight: 360, overflow: "auto" }}>
+            {pythonApiRuns.length === 0 && <Typography variant="body2">No Python API runs found yet.</Typography>}
+            {pythonApiRuns.map((svc) => (
+              <Paper key={`python-api-run-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Box sx={{ minWidth: 280 }}>
+                    <Typography variant="body2"><b>{svc.form_name || svc.name}</b> ({svc.kind})</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                      Project: {svc.project_path || "-"}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                      Main file: {svc.main_file || "-"}
+                    </Typography>
+                    {!!svc.service_log && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", wordBreak: "break-all" }}>
+                        Runtime log: {svc.service_log}
+                      </Typography>
+                    )}
+                    {renderServiceUrls(svc)}
+                    {renderServicePorts(svc)}
+                  </Box>
+                  <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => openPythonApiRun(svc)} sx={{ textTransform: "none" }}>
+                    Update Files
+                  </Button>
+                  {svc.manageable !== false && (
+                    <>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                        disabled={serviceBusy}
+                        onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                        sx={{ textTransform: "none" }}
+                      >
+                        {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                      </Button>
+                      <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>
+                        Restart
+                      </Button>
+                    </>
+                  )}
+                  {svc.deletable && (
+                    <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
+                      Delete
+                    </Button>
+                  )}
+                </Stack>
+              </Paper>
+            ))}
+          </Box>
+        </CardContent>
+      </Card>
+    </Grid>
+  ), [isScopeLoading, openPythonApiRun, onServiceAction, pythonApiRuns, renderServicePorts, renderServiceUrls, serviceBusy]);
+
   const software = systemInfo?.software || {};
   const mongoStatusInfo = mongoInfoState || systemInfo || {};
   const dotnetStatusInfo = dotnetInfoState || systemInfo || {};
   const dockerStatusInfo = dockerInfoState || systemInfo || {};
   const proxyStatusInfo = proxyInfoState || systemInfo || {};
   const pythonStatusInfo = pythonInfoState || systemInfo || {};
+  const websiteStatusInfo = websiteInfoState || systemInfo || {};
   const mongoSoftware = mongoStatusInfo?.software || {};
   const dotnetSoftware = dotnetStatusInfo?.software || {};
   const dockerSoftware = dockerStatusInfo?.software || {};
   const proxySoftware = proxyStatusInfo?.software || {};
   const pythonSoftware = pythonStatusInfo?.software || {};
+  const websiteSoftware = websiteStatusInfo?.software || {};
   const dotnet = dotnetSoftware.dotnet || software.dotnet || {};
   const docker = dockerSoftware.docker || software.docker || {};
   const mongoDocker = mongoSoftware.docker || software.docker || {};
@@ -956,6 +1092,7 @@ function App() {
   const mongo = mongoSoftware.mongo || software.mongo || {};
   const proxy = proxySoftware.proxy || software.proxy || {};
   const pythonService = pythonSoftware.python_service || software.python_service || {};
+  const websiteInfo = websiteSoftware.website || software.website || {};
   const listeningPorts = systemInfo?.listening_ports || [];
   const cpuPercent = clampPercent(systemInfo?.cpu_usage_percent ?? ((systemInfo?.load?.["1m"] && systemInfo?.cpu_count) ? (systemInfo.load["1m"] / systemInfo.cpu_count) * 100 : 0));
   const memoryPercent = clampPercent(systemInfo?.memory?.used_percent);
@@ -1020,12 +1157,18 @@ function App() {
   const pythonServices = React.useMemo(() => {
     return Array.isArray(pythonPageServices) ? pythonPageServices : [];
   }, [pythonPageServices]);
+  const websiteServices = React.useMemo(() => {
+    return Array.isArray(websitePageServices) ? websitePageServices : [];
+  }, [websitePageServices]);
   const pythonInstalledRuntimes = React.useMemo(() => {
     return pythonServices.filter((svc) => ["python_installation", "python_version"].includes(String(svc?.kind || "").toLowerCase()));
   }, [pythonServices]);
   const pythonRuntimeServices = React.useMemo(() => {
     return pythonServices.filter((svc) => !["python_installation", "python_version"].includes(String(svc?.kind || "").toLowerCase()));
   }, [pythonServices]);
+  const pythonApiRuns = React.useMemo(() => {
+    return pythonRuntimeServices.filter((svc) => !!svc?.python_api);
+  }, [pythonRuntimeServices]);
   const dockerServices = React.useMemo(() => {
     const patt = /(docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine)/i;
     return (dockerPageServices || []).filter((s) => {
@@ -1278,6 +1421,9 @@ function App() {
           </Grid>
           <Grid item xs={12} md={6}>
             <NavCard title="Python" text="Install Python and manage Jupyter notebooks, kernels, and runtime services." onClick={() => setPage("python")} outlined />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Websites" text="Deploy and manage exported static websites, Flutter web builds, and Next export output on IIS." onClick={() => startNewWebsiteDeployment()} outlined />
           </Grid>
         </Grid>
       );
@@ -2074,7 +2220,7 @@ function App() {
           <NavCard
             title="API as OS service"
             text={cfg.os === "windows" ? "Run a Python API app as a Windows service." : "Run a Python API app as an OS service."}
-            onClick={() => setPage("python-system")}
+            onClick={() => startNewPythonApiDeployment("python-system")}
           />
         </Grid>
       );
@@ -2083,7 +2229,7 @@ function App() {
           <NavCard
             title="Docker"
             text="Use the Docker target for a containerized Python API app."
-            onClick={() => setPage("python-docker")}
+            onClick={() => startNewPythonApiDeployment("python-docker")}
             outlined
           />
         </Grid>
@@ -2094,7 +2240,7 @@ function App() {
             <NavCard
               title="IIS"
               text="Use the IIS target for Python API hosting on Windows."
-              onClick={() => setPage("python-iis")}
+              onClick={() => startNewPythonApiDeployment("python-iis")}
               outlined
             />
           </Grid>
@@ -2102,39 +2248,37 @@ function App() {
       }
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <Alert severity="info">
-              Python API service deployment is separate from Jupyter. Use the main <b>Python</b> page for notebooks and Jupyter, and use this page for a Python web/API app running as a background service.
-            </Alert>
-          </Grid>
           {pythonApiTargets}
+          {renderPythonApiRunsCard()}
         </Grid>
       );
     }
 
     if (page === "python-system") {
+      const systemHost = selectableIps.includes(String(pythonApiEditor?.host || "").trim()) ? String(pythonApiEditor?.host || "").trim() : (selectableIps.length === 1 ? selectableIps[0] : "");
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
             <ActionCard
+              key={`python-system-${pythonApiEditorSeed}`}
               title="Deploy Python API as OS Service"
-              description="Upload or point to your Python API project, choose the entry file, and publish it as a managed HTTPS service."
+              description="Upload or point to your Python API project and publish it as a managed HTTPS service."
               action="/run/python_api_service"
               fields={[
-                { name: "PYTHON_API_SERVICE_NAME", label: "Service Name", defaultValue: "serverinstaller-python-api", required: true },
+                { name: "PYTHON_API_SERVICE_NAME", label: "Service Name", defaultValue: pythonApiEditor?.targetPage === "python-system" ? (pythonApiEditor?.name || "serverinstaller-python-api") : "serverinstaller-python-api", required: true },
                 {
                   name: "PYTHON_API_HOST_IP",
                   label: "Bind IP",
                   type: "select",
                   options: selectableIps,
-                  defaultValue: selectableIps.length === 1 ? selectableIps[0] : "",
+                  defaultValue: systemHost,
                   required: true,
                   disabled: selectableIps.length === 0,
                   placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
                 },
-                { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
-                { name: "PYTHON_API_SOURCE", label: "Project Path", defaultValue: defaultPythonApiDirForOs(cfg.os), placeholder: defaultPythonApiDirForOs(cfg.os), enableUpload: true },
-                { name: "PYTHON_API_MAIN_FILE", label: "Main File Name (optional)", placeholder: "main.py" },
+                { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: pythonApiEditor?.targetPage === "python-system" ? (pythonApiEditor?.port || "8443") : "8443", required: true, placeholder: "8443" },
+                { name: "PYTHON_API_SOURCE", label: "Project Path", defaultValue: pythonApiEditor?.targetPage === "python-system" ? (pythonApiEditor?.source || "") : "", placeholder: defaultPythonApiDirForOs(cfg.os), enableUpload: true },
+                { name: "PYTHON_API_MAIN_FILE", label: "Main File Name (optional)", defaultValue: pythonApiEditor?.targetPage === "python-system" ? (pythonApiEditor?.mainFile || "") : "", placeholder: "main.py" },
               ]}
               onRun={run}
               color="#0f766e"
@@ -2145,39 +2289,41 @@ function App() {
               <CardContent>
                 <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>OS Service Target</Typography>
                 <Typography variant="body2">Protocol: HTTPS</Typography>
-                <Typography variant="body2">Main file: uses your file name if provided, otherwise auto-detects <code>main.py</code>, <code>app.py</code>, and similar defaults.</Typography>
-                <Typography variant="body2">App object detection still supports <code>app</code>, <code>application</code>, <code>api</code>, or <code>create_app()</code>.</Typography>
-                <Typography variant="body2" sx={{ mt: 1 }}>Jupyter is separate and is not part of this page.</Typography>
+                <Typography variant="body2">Upload a folder or point to a folder path. If you leave Main File Name empty, the backend auto-detects <code>main.py</code>, <code>app.py</code>, and similar defaults.</Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>Redeploying the same service name replaces the app files, recreates the virtual environment, reinstalls requirements, and updates the service.</Typography>
               </CardContent>
             </Card>
           </Grid>
+          {renderPythonApiRunsCard()}
         </Grid>
       );
     }
 
     if (page === "python-docker") {
+      const dockerHost = selectableIps.includes(String(pythonApiEditor?.host || "").trim()) ? String(pythonApiEditor?.host || "").trim() : (selectableIps.length === 1 ? selectableIps[0] : "");
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
             <ActionCard
+              key={`python-docker-${pythonApiEditorSeed}`}
               title="Deploy Python API to Docker"
               description="Build a Docker image from your Python API source and publish it over HTTPS."
               action="/run/python_api_docker"
               fields={[
-                { name: "PYTHON_API_CONTAINER_NAME", label: "Container Name", defaultValue: "serverinstaller-python-api", required: true },
+                { name: "PYTHON_API_CONTAINER_NAME", label: "Container Name", defaultValue: pythonApiEditor?.targetPage === "python-docker" ? (pythonApiEditor?.name || "serverinstaller-python-api") : "serverinstaller-python-api", required: true },
                 {
                   name: "PYTHON_API_HOST_IP",
                   label: "Public IP",
                   type: "select",
                   options: selectableIps,
-                  defaultValue: selectableIps.length === 1 ? selectableIps[0] : "",
+                  defaultValue: dockerHost,
                   required: true,
                   disabled: selectableIps.length === 0,
                   placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
                 },
-                { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
-                { name: "PYTHON_API_SOURCE", label: "Project Path", defaultValue: defaultPythonApiDirForOs(cfg.os), placeholder: defaultPythonApiDirForOs(cfg.os), enableUpload: true },
-                { name: "PYTHON_API_MAIN_FILE", label: "Main File Name (optional)", placeholder: "main.py" },
+                { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: pythonApiEditor?.targetPage === "python-docker" ? (pythonApiEditor?.port || "8443") : "8443", required: true, placeholder: "8443" },
+                { name: "PYTHON_API_SOURCE", label: "Project Path", defaultValue: pythonApiEditor?.targetPage === "python-docker" ? (pythonApiEditor?.source || "") : "", placeholder: defaultPythonApiDirForOs(cfg.os), enableUpload: true },
+                { name: "PYTHON_API_MAIN_FILE", label: "Main File Name (optional)", defaultValue: pythonApiEditor?.targetPage === "python-docker" ? (pythonApiEditor?.mainFile || "") : "", placeholder: "main.py" },
               ]}
               onRun={run}
               color="#1f2937"
@@ -2193,6 +2339,7 @@ function App() {
               </CardContent>
             </Card>
           </Grid>
+          {renderPythonApiRunsCard()}
         </Grid>
       );
     }
@@ -2201,28 +2348,30 @@ function App() {
       if (cfg.os !== "windows") {
         return <Alert severity="info">Python IIS deployment is only available on Windows hosts.</Alert>;
       }
+      const iisHost = selectableIps.includes(String(pythonApiEditor?.host || "").trim()) ? String(pythonApiEditor?.host || "").trim() : (selectableIps.length === 1 ? selectableIps[0] : "");
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
             <ActionCard
+              key={`python-iis-${pythonApiEditorSeed}`}
               title="Deploy Python API to IIS"
               description="Create an IIS-backed HTTPS site for your Python API project."
               action="/run/python_api_iis"
               fields={[
-                { name: "PYTHON_API_SITE_NAME", label: "IIS Site Name", defaultValue: "ServerInstallerPythonApi", required: true },
+                { name: "PYTHON_API_SITE_NAME", label: "IIS Site Name", defaultValue: pythonApiEditor?.targetPage === "python-iis" ? (pythonApiEditor?.name || "ServerInstallerPythonApi") : "ServerInstallerPythonApi", required: true },
                 {
                   name: "PYTHON_API_HOST_IP",
                   label: "Bind IP",
                   type: "select",
                   options: selectableIps,
-                  defaultValue: selectableIps.length === 1 ? selectableIps[0] : "",
+                  defaultValue: iisHost,
                   required: true,
                   disabled: selectableIps.length === 0,
                   placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
                 },
-                { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
-                { name: "PYTHON_API_SOURCE", label: "Project Path", defaultValue: defaultPythonApiDirForOs(cfg.os), placeholder: defaultPythonApiDirForOs(cfg.os), enableUpload: true },
-                { name: "PYTHON_API_MAIN_FILE", label: "Main File Name (optional)", placeholder: "main.py" },
+                { name: "PYTHON_API_PORT", label: "HTTPS Port", defaultValue: pythonApiEditor?.targetPage === "python-iis" ? (pythonApiEditor?.port || "8443") : "8443", required: true, placeholder: "8443" },
+                { name: "PYTHON_API_SOURCE", label: "Project Path", defaultValue: pythonApiEditor?.targetPage === "python-iis" ? (pythonApiEditor?.source || "") : "", placeholder: defaultPythonApiDirForOs(cfg.os), enableUpload: true },
+                { name: "PYTHON_API_MAIN_FILE", label: "Main File Name (optional)", defaultValue: pythonApiEditor?.targetPage === "python-iis" ? (pythonApiEditor?.mainFile || "") : "", placeholder: "main.py" },
               ]}
               onRun={run}
               color="#1d4ed8"
@@ -2235,6 +2384,122 @@ function App() {
                 <Typography variant="body2">Protocol: HTTPS</Typography>
                 <Typography variant="body2">IIS terminates TLS and proxies to the managed Python process.</Typography>
                 <Typography variant="body2" sx={{ mt: 1 }}>Use this for Windows-hosted Python APIs that should sit behind an IIS site.</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          {renderPythonApiRunsCard()}
+        </Grid>
+      );
+    }
+
+    if (page === "website") {
+      if (cfg.os !== "windows") {
+        return <Alert severity="info">Website IIS deployment is only available on Windows hosts.</Alert>;
+      }
+      const websiteHost = selectableIps.includes(String(websiteEditor?.host || "").trim()) ? String(websiteEditor?.host || "").trim() : (selectableIps.length === 1 ? selectableIps[0] : "");
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={8}>
+            <ActionCard
+              key={`website-${websiteEditorSeed}`}
+              title="Deploy Website to IIS"
+              description="Upload or point to a built website folder and publish it as a managed IIS website."
+              action="/run/website_iis"
+              fields={[
+                { name: "WEBSITE_SITE_NAME", label: "Website Name", defaultValue: websiteEditor?.name || "ServerInstallerWebsite", required: true },
+                {
+                  name: "WEBSITE_KIND",
+                  label: "Website Type",
+                  type: "select",
+                  options: ["auto", "static", "next-export", "flutter"],
+                  defaultValue: websiteEditor?.kind || "auto",
+                  required: true,
+                },
+                {
+                  name: "WEBSITE_BIND_IP",
+                  label: "Bind IP",
+                  type: "select",
+                  options: selectableIps,
+                  defaultValue: websiteHost,
+                  required: true,
+                  disabled: selectableIps.length === 0,
+                  placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
+                },
+                { name: "WEBSITE_PORT", label: "HTTP Port", defaultValue: websiteEditor?.port || "8088", required: true, placeholder: "8088" },
+                { name: "WEBSITE_SOURCE", label: "Published Folder or Path", defaultValue: websiteEditor?.source || defaultWebsiteDirForOs(cfg.os), placeholder: defaultWebsiteDirForOs(cfg.os), enableUpload: true },
+              ]}
+              onRun={run}
+              color="#0f766e"
+            />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Supported Builds</Typography>
+                <Typography variant="body2">Use this page for static HTML sites, React/Vite dist folders, Flutter <code>build/web</code>, and Next.js export output such as <code>out</code>.</Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>The dashboard auto-detects common publish folders and recreates the IIS website when you deploy the same name again.</Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>Managed websites: {Number(websiteInfo?.count || websiteServices.length || 0)}</Typography>
+                <Typography variant="body2">IIS: {iis.installed ? "Installed" : "Not installed"}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Typography variant="h6" fontWeight={800}>Websites</Typography>
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button variant="outlined" disabled={isScopeLoading("website")} onClick={() => Promise.all([loadWebsiteInfo.current(), loadWebsiteServices.current()])} sx={{ textTransform: "none" }}>
+                    Refresh
+                  </Button>
+                </Stack>
+                {scopeErrors.website && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.website}</Alert>}
+                <Box sx={{ mt: 1.2, maxHeight: 360, overflow: "auto" }}>
+                  {websiteServices.length === 0 && <Typography variant="body2">No managed websites found yet.</Typography>}
+                  {websiteServices.map((svc) => (
+                    <Paper key={`website-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                        <Box sx={{ minWidth: 280 }}>
+                          <Typography variant="body2"><b>{svc.form_name || svc.name}</b> ({svc.stack_label || "website"})</Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                            Source: {svc.project_path || "-"}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                            Publish Folder: {svc.publish_rel || "."}
+                          </Typography>
+                          {renderServiceUrls(svc)}
+                          {renderServicePorts(svc)}
+                        </Box>
+                        <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                        <Box sx={{ flexGrow: 1 }} />
+                        {!!(svc.urls && svc.urls[0]) && (
+                          <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => window.open(svc.urls[0], "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
+                            Open
+                          </Button>
+                        )}
+                        <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => openWebsiteRun(svc)} sx={{ textTransform: "none" }}>
+                          Update Files
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                          disabled={serviceBusy}
+                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                          sx={{ textTransform: "none" }}
+                        >
+                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                        </Button>
+                        <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>
+                          Restart
+                        </Button>
+                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
+                          Delete
+                        </Button>
+                      </Stack>
+                    </Paper>
+                  ))}
+                </Box>
               </CardContent>
             </Card>
           </Grid>
