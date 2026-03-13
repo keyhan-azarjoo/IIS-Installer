@@ -150,7 +150,11 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
   const uploadInputRef = React.useRef(null);
   const formRef = React.useRef(null);
   const s3ValidationRunRef = React.useRef(0);
-  const sourcePathField = (fields || []).find((f) => f.name === "SourceValue" || f.name === "SOURCE_VALUE");
+  const sourcePathField = (fields || []).find((f) => (
+    f.name === "SourceValue" ||
+    f.name === "SOURCE_VALUE" ||
+    f.name === "PYTHON_API_SOURCE"
+  ));
   const sourcePathKey = sourcePathField ? sourcePathField.name : "";
 
   React.useEffect(() => {
@@ -383,14 +387,19 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
     const input = uploadInputRef.current;
     const hasSelectedUpload = !!(input && input.files && input.files.length > 0);
 
-    if (!sourcePathValue && hasSelectedUpload && !uploadedPath) {
-      emitTerminal(`Uploading for: ${title}`, "============================================================");
-      const autoPath = await doUpload();
-      if (!autoPath) {
-        return;
+    if (hasSelectedUpload) {
+      let effectiveUploadPath = uploadedPath;
+      if (!effectiveUploadPath) {
+        emitTerminal(`Uploading for: ${title}`, "============================================================");
+        effectiveUploadPath = await doUpload();
+        if (!effectiveUploadPath) {
+          return;
+        }
+      } else {
+        setSourcePathInForm(effectiveUploadPath);
       }
-      sourcePathValue = autoPath;
-      emitTerminal(`Starting: ${title}`, `[${new Date().toLocaleTimeString()}] Upload finished, continuing deployment...`);
+      sourcePathValue = effectiveUploadPath;
+      emitTerminal(`Starting: ${title}`, `[${new Date().toLocaleTimeString()}] Upload finished, using uploaded project path: ${effectiveUploadPath}`);
     }
 
     onRun(e, action, title);
