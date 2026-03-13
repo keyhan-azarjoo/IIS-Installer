@@ -377,7 +377,7 @@ function App() {
     if (targetPage === "s3") return loadS3Services.current();
     if (targetPage === "docker") return loadDockerServices.current();
     if (targetPage === "proxy") return loadProxyServices.current();
-    if (targetPage === "python") return loadPythonServices.current();
+    if (targetPage === "python" || String(targetPage || "").startsWith("python-")) return loadPythonServices.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
     return Promise.resolve();
   }, []);
@@ -387,9 +387,9 @@ function App() {
     if (targetPage === "s3") return loadS3Info.current();
     if (targetPage === "docker") return loadDockerInfo.current();
     if (targetPage === "proxy") return loadProxyInfo.current();
-    if (targetPage === "python") return loadPythonInfo.current();
+    if (targetPage === "python" || String(targetPage || "").startsWith("python-")) return loadPythonInfo.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetInfo.current();
-    if (targetPage === "home" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
+    if (targetPage === "home" || targetPage === "api" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
     return Promise.resolve();
   }, []);
 
@@ -398,13 +398,13 @@ function App() {
   }, [refreshPageServices, refreshPageStatus]);
 
   React.useEffect(() => {
-    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || String(page).startsWith("dotnet-")) {
+    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || String(page).startsWith("dotnet-") || String(page).startsWith("python-")) {
       refreshPageContext(page);
     }
   }, [page, refreshPageContext]);
 
   React.useEffect(() => {
-    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || String(page).startsWith("dotnet-"))) {
+    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || String(page).startsWith("dotnet-") || String(page).startsWith("python-"))) {
       return undefined;
     }
     const t = setInterval(() => {
@@ -583,19 +583,25 @@ function App() {
 
   const goBack = () => {
       if (page === "home") return;
-      if (page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
+      if (page === "api" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
+    else if (page === "dotnet" || page === "python") setPage("api");
     else if (page.startsWith("dotnet-")) setPage("dotnet");
+    else if (page.startsWith("python-")) setPage("python");
     else setPage("home");
   };
 
   const headerTitle = (() => {
     if (page === "home") return "Dashboard";
+    if (page === "api") return "API";
     if (page === "dotnet") return "DotNet";
     if (page === "s3") return "S3";
     if (page === "mongo") return "MongoDB";
     if (page === "docker") return "Docker";
     if (page === "proxy") return "Proxy";
     if (page === "python") return "Python";
+    if (page === "python-system") return "Python > System";
+    if (page === "python-docker") return "Python > Docker";
+    if (page === "python-iis") return "Python > IIS";
     if (page === "sysinfo") return "SysInfo";
     if (page === "ports") return "Port Management";
     if (page === "services") return "Service Manager";
@@ -1198,7 +1204,7 @@ function App() {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <NavCard title="DotNet" text="Open .NET installer/deployment pages." onClick={() => setPage("dotnet")} />
+            <NavCard title="API" text="Open DotNet and Python API installer/deployment pages." onClick={() => setPage("api")} />
           </Grid>
           <Grid item xs={12} md={6}>
             <NavCard title="Docker" text="Install Docker and manage Docker services/containers." onClick={() => setPage("docker")} outlined />
@@ -1210,10 +1216,20 @@ function App() {
             <NavCard title="MongoDB" text="Install MongoDB with a Compass-style web admin UI." onClick={() => setPage("mongo")} outlined />
           </Grid>
           <Grid item xs={12} md={6}>
-            <NavCard title="Python" text="Install Python, add Jupyter, and run Python-side cmd commands." onClick={() => setPage("python")} outlined />
+            <NavCard title="Proxy" text="Install and manage the multi-layer proxy stack." onClick={() => setPage("proxy")} outlined />
+          </Grid>
+        </Grid>
+      );
+    }
+
+    if (page === "api") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <NavCard title="DotNet" text="Open the existing .NET installer and deployment pages." onClick={() => setPage("dotnet")} />
           </Grid>
           <Grid item xs={12} md={6}>
-            <NavCard title="Proxy" text="Install and manage the multi-layer proxy stack." onClick={() => setPage("proxy")} outlined />
+            <NavCard title="Python" text="Configure Python runtime and Python service deployment targets." onClick={() => setPage("python")} outlined />
           </Grid>
         </Grid>
       );
@@ -1819,6 +1835,22 @@ function App() {
     }
 
     if (page === "python") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={4}>
+            <NavCard title="System" text="Run the Python service directly on the host with IP, port, and notebook/service settings." onClick={() => setPage("python-system")} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NavCard title="Docker" text="Open Python Docker deployment options." onClick={() => setPage("python-docker")} outlined />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NavCard title="IIS" text={cfg.os === "windows" ? "Open Python IIS deployment options." : "IIS deployment is only available on Windows hosts."} onClick={() => setPage("python-iis")} outlined />
+          </Grid>
+        </Grid>
+      );
+    }
+
+    if (page === "python-system") {
       const pythonUrl = String(pythonService.jupyter_url || "").trim();
       const pythonPort = String(pythonService.jupyter_port || "8888").trim() || "8888";
       const pythonHost = String(pythonService.host || "").trim();
@@ -1835,13 +1867,13 @@ function App() {
           <Grid item xs={12} md={8}>
             <ActionCard
               title={`Install Python (${installOsLabel})`}
-              description="Install the managed Python runtime and keep Jupyter running as a background service."
+              description="Install the managed Python runtime and keep the Python/Jupyter service running in the background."
               action="/run/python_install"
               fields={[
                 { name: "PYTHON_VERSION", label: "Python Version", type: "select", options: ["3.13", "3.12", "3.11", "3.10"], defaultValue: pythonService.requested_version || "3.12", required: true },
                 {
                   name: "PYTHON_HOST_IP",
-                  label: "Select IP",
+                  label: "Service IP",
                   type: "select",
                   options: selectableIps,
                   defaultValue: pythonHost,
@@ -1849,8 +1881,8 @@ function App() {
                   disabled: selectableIps.length === 0,
                   placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
                 },
-                { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
-                { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
+                { name: "PYTHON_JUPYTER_PORT", label: "Service Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
+                { name: "PYTHON_NOTEBOOK_DIR", label: "Working Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
               ]}
               onRun={run}
               color="#2563eb"
@@ -1863,8 +1895,10 @@ function App() {
                 <Typography variant="body2">Interpreter: {installState}</Typography>
                 <Typography variant="body2">Executable: {pythonService.python_executable || "-"}</Typography>
                 <Typography variant="body2">Scripts: {pythonService.scripts_dir || "-"}</Typography>
-                <Typography variant="body2">Notebook Directory: {pythonNotebookDir || "-"}</Typography>
+                <Typography variant="body2">Working Directory: {pythonNotebookDir || "-"}</Typography>
                 <Typography variant="body2">Jupyter: {pythonService.jupyter_installed ? "Installed" : "Not installed"}</Typography>
+                <Typography variant="body2">Service IP: {pythonHost || "-"}</Typography>
+                <Typography variant="body2">Service Port: {pythonPort || "-"}</Typography>
                 <Typography variant="body2">Jupyter Status: {pythonService.jupyter_running ? "Running" : "Stopped"}</Typography>
                 <Typography variant="body2">HTTPS: {pythonService.jupyter_https_enabled ? "Enabled" : "Disabled"}</Typography>
                 <Typography variant="body2">Auth User: {pythonService.jupyter_username || "-"}</Typography>
@@ -1939,6 +1973,45 @@ function App() {
                 </Box>
               </CardContent>
             </Card>
+          </Grid>
+        </Grid>
+      );
+    }
+
+    if (page === "python-docker") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <Alert severity="info">
+              Python Docker deployment is not wired in this dashboard yet. Use <b>API &gt; Python &gt; System</b> for the managed host service today.
+            </Alert>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Open System Mode" text="Configure the Python service directly on this machine." onClick={() => setPage("python-system")} />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Open Docker Page" text="Install Docker and manage existing Docker services from the main Docker page." onClick={() => setPage("docker")} outlined />
+          </Grid>
+        </Grid>
+      );
+    }
+
+    if (page === "python-iis") {
+      if (cfg.os !== "windows") {
+        return <Alert severity="info">Python IIS deployment is only available on Windows hosts.</Alert>;
+      }
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <Alert severity="info">
+              Python IIS deployment is not configured in this dashboard yet. The supported Python path right now is <b>System</b>, which runs the managed Python service with host IP and port settings.
+            </Alert>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Open System Mode" text="Use the current Python service installer and runtime controls." onClick={() => setPage("python-system")} />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Open DotNet IIS" text="Open the existing IIS deployment flow used for .NET apps." onClick={() => setPage("dotnet-iis")} outlined />
           </Grid>
         </Grid>
       );

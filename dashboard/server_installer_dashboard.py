@@ -813,6 +813,37 @@ def get_python_info():
                 info["jupyter_auth_enabled"] = bool(jupyter_state.get("auth_enabled") or state.get("jupyter_auth_enabled"))
                 info["jupyter_https_enabled"] = bool(jupyter_state.get("https_enabled") or state.get("jupyter_https_enabled"))
                 info["jupyter_pid"] = pid
+            elif os.name == "nt":
+                port = str(jupyter_state.get("port") or info["jupyter_port"] or "").strip()
+                listeners = []
+                if port.isdigit():
+                    for item in get_listening_ports(limit=5000):
+                        proto = str(item.get("proto", "")).lower()
+                        if proto.startswith("tcp") and int(item.get("port", 0)) == int(port):
+                            listeners.append(item)
+                if port.isdigit() and _windows_managed_python_owns_port(port, listeners):
+                    info["jupyter_running"] = True
+                    info["jupyter_port"] = port
+                    info["host"] = str(jupyter_state.get("host") or info["host"] or choose_service_host()).strip()
+                    scheme = "https" if (jupyter_state.get("https_enabled") or state.get("jupyter_https_enabled")) else "http"
+                    info["jupyter_url"] = str(jupyter_state.get("url") or f"{scheme}://{info['host']}:{port}/lab").strip()
+                    info["notebook_dir"] = _resolve_python_notebook_dir(
+                        jupyter_state.get("notebook_dir") or info["default_notebook_dir"]
+                    )
+                    info["jupyter_username"] = str(jupyter_state.get("username") or state.get("jupyter_username") or info["jupyter_username"] or "").strip()
+                    info["jupyter_auth_enabled"] = bool(jupyter_state.get("auth_enabled") or state.get("jupyter_auth_enabled"))
+                    info["jupyter_https_enabled"] = bool(jupyter_state.get("https_enabled") or state.get("jupyter_https_enabled"))
+                    for item in listeners:
+                        try:
+                            listener_pid = int(str(item.get("pid") or "0"))
+                        except Exception:
+                            continue
+                        if listener_pid > 0 and _windows_process_matches_managed_jupyter(listener_pid, port):
+                            jupyter_state["pid"] = listener_pid
+                            jupyter_state["running"] = True
+                            _write_json_file(PYTHON_JUPYTER_STATE_FILE, jupyter_state)
+                            info["jupyter_pid"] = listener_pid
+                            break
             else:
                 if jupyter_state:
                     jupyter_state["pid"] = None
