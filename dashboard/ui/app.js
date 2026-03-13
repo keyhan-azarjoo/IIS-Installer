@@ -581,12 +581,55 @@ function App() {
     }
   };
 
+  const runPythonInstallWithCurrentSettings = async () => {
+    const title = `Python Installer (${cfg.os === "windows" ? "Windows" : "Linux/macOS"})`;
+    const body = new FormData();
+    const selectedHost = String(pythonService.host || "").trim() || (selectableIps.length === 1 ? selectableIps[0] : "");
+    const selectedVersion = String(pythonService.requested_version || pythonService.python_version || "3.12").trim() || "3.12";
+    const selectedPort = String(pythonService.jupyter_port || "8888").trim() || "8888";
+    const selectedNotebookDir = String(
+      pythonService.notebook_dir || pythonService.default_notebook_dir || defaultNotebookDirForOs(cfg.os)
+    ).trim() || defaultNotebookDirForOs(cfg.os);
+    body.set("PYTHON_VERSION", selectedVersion);
+    body.set("PYTHON_INSTALL_JUPYTER", "1");
+    body.set("PYTHON_JUPYTER_PORT", selectedPort);
+    body.set("PYTHON_NOTEBOOK_DIR", selectedNotebookDir);
+    if (selectedHost) body.set("PYTHON_HOST_IP", selectedHost);
+
+    append("============================================================");
+    append(`[${new Date().toLocaleTimeString()}] ${title} started`);
+    setTermState(`Running: ${title}`);
+    setTermOpen(true);
+    setTermMin(false);
+    setRunError("");
+    try {
+      const r = await fetch("/run/python_install", { method: "POST", headers: { "X-Requested-With": "fetch" }, body });
+      const j = await r.json();
+      if (!j.job_id) {
+        append(j.output || "No output.");
+        append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code ?? 1})`);
+        if (Number(j.exit_code ?? 1) !== 0) {
+          setRunError(`${title} failed (exit ${j.exit_code ?? 1}). ${String(j.output || "").slice(0, 200)}`);
+        }
+        setTermState("Idle");
+        refreshPageContext(page);
+        loadSystem.current();
+        return;
+      }
+      poll(j.job_id, title, 0);
+    } catch (err) {
+      append(`Request failed: ${err}`);
+      setRunError(`${title} request failed: ${err}`);
+      setTermState("Error");
+    }
+  };
+
   const goBack = () => {
-      if (page === "home") return;
-      if (page === "api" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
-    else if (page === "dotnet" || page === "python") setPage("api");
+    if (page === "home") return;
+    if (page === "api" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
+    else if (page === "dotnet" || page === "python" || page === "python-api") setPage("api");
     else if (page.startsWith("dotnet-")) setPage("dotnet");
-    else if (page.startsWith("python-")) setPage("python");
+    else if (page === "python-system" || page === "python-docker" || page === "python-iis") setPage("python-api");
     else setPage("home");
   };
 
@@ -600,7 +643,7 @@ function App() {
     if (page === "proxy") return "Proxy";
     if (page === "python") return "Python";
     if (page === "python-api") return "Python > API";
-    if (page === "python-system") return "Python";
+    if (page === "python-system") return "Python > OS Service";
     if (page === "python-docker") return "Python > Docker";
     if (page === "python-iis") return "Python > IIS";
     if (page === "sysinfo") return "SysInfo";
@@ -969,6 +1012,12 @@ function App() {
   const pythonServices = React.useMemo(() => {
     return Array.isArray(pythonPageServices) ? pythonPageServices : [];
   }, [pythonPageServices]);
+  const pythonInstalledRuntimes = React.useMemo(() => {
+    return pythonServices.filter((svc) => ["python_installation", "python_version"].includes(String(svc?.kind || "").toLowerCase()));
+  }, [pythonServices]);
+  const pythonRuntimeServices = React.useMemo(() => {
+    return pythonServices.filter((svc) => !["python_installation", "python_version"].includes(String(svc?.kind || "").toLowerCase()));
+  }, [pythonServices]);
   const dockerServices = React.useMemo(() => {
     const patt = /(docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine)/i;
     return (dockerPageServices || []).filter((s) => {
@@ -1838,7 +1887,7 @@ function App() {
       return <Alert severity="info">Proxy installer is currently configured for Linux hosts and Windows via WSL.</Alert>;
     }
 
-    if (page === "python" || page === "python-system") {
+    if (page === "python") {
       const pythonUrl = String(pythonService.jupyter_url || "").trim();
       const pythonPort = String(pythonService.jupyter_port || "8888").trim() || "8888";
       const pythonHost = String(pythonService.host || "").trim();
@@ -1923,8 +1972,8 @@ function App() {
                 </Stack>
                 {scopeErrors.python && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.python}</Alert>}
                 <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
-                  {pythonServices.length === 0 && <Typography variant="body2">No managed Python runtime found yet.</Typography>}
-                  {pythonServices.map((svc) => (
+                  {pythonRuntimeServices.length === 0 && <Typography variant="body2">No managed Python runtime found yet.</Typography>}
+                  {pythonRuntimeServices.map((svc) => (
                     <Paper key={`python-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                       <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                         <Box sx={{ minWidth: 250 }}>
@@ -1962,11 +2011,87 @@ function App() {
               </CardContent>
             </Card>
           </Grid>
+          {cfg.os === "windows" && (
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                    <Typography variant="h6" fontWeight={800}>Installed Pythons</Typography>
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Button variant="outlined" disabled={isScopeLoading("python")} onClick={() => Promise.all([loadPythonInfo.current(), loadPythonServices.current()])} sx={{ textTransform: "none" }}>
+                      Refresh
+                    </Button>
+                  </Stack>
+                  <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
+                    {pythonInstalledRuntimes.length === 0 && <Typography variant="body2">No installed Python runtimes found.</Typography>}
+                    {pythonInstalledRuntimes.map((svc) => {
+                      const isManaged = String(svc.kind || "").toLowerCase() === "python_installation";
+                      return (
+                        <Paper key={`python-installed-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                            <Box sx={{ minWidth: 280 }}>
+                              <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
+                              {svc.display_name && <Typography variant="caption" color="text.secondary">{svc.display_name}</Typography>}
+                              <Typography variant="caption" sx={{ display: "block", color: "text.secondary", wordBreak: "break-all", mt: 0.5 }}>
+                                {svc.detail || svc.sub_status || "-"}
+                              </Typography>
+                            </Box>
+                            <Chip size="small" color="default" label="installed" />
+                            <Box sx={{ flexGrow: 1 }} />
+                            {isManaged && (
+                              <Button size="small" variant="outlined" disabled={serviceBusy} onClick={runPythonInstallWithCurrentSettings} sx={{ textTransform: "none" }}>
+                                Reinstall
+                              </Button>
+                            )}
+                            <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
+                              Delete
+                            </Button>
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          )}
         </Grid>
       );
     }
 
     if (page === "python-api") {
+      const pythonApiTargets = [];
+      pythonApiTargets.push(
+        <Grid item xs={12} md={6} key="python-system">
+          <NavCard
+            title="API as OS service"
+            text={cfg.os === "windows" ? "Run a Python API app as a Windows service." : "Run a Python API app as an OS service."}
+            onClick={() => setPage("python-system")}
+          />
+        </Grid>
+      );
+      pythonApiTargets.push(
+        <Grid item xs={12} md={6} key="python-docker">
+          <NavCard
+            title="Docker"
+            text="Use the Docker target for a containerized Python API app."
+            onClick={() => setPage("python-docker")}
+            outlined
+          />
+        </Grid>
+      );
+      if (cfg.os === "windows") {
+        pythonApiTargets.push(
+          <Grid item xs={12} md={6} key="python-iis">
+            <NavCard
+              title="IIS"
+              text="Use the IIS target for Python API hosting on Windows."
+              onClick={() => setPage("python-iis")}
+              outlined
+            />
+          </Grid>
+        );
+      }
       return (
         <Grid container spacing={2}>
           <Grid item xs={12}>
@@ -1974,11 +2099,38 @@ function App() {
               Python API service deployment is separate from Jupyter. Use the main <b>Python</b> page for notebooks and Jupyter, and use this page for a Python web/API app running as a background service.
             </Alert>
           </Grid>
-          <Grid item xs={12} md={6}>
-            <NavCard title="Python" text="Open the Python Jupyter page for notebooks, kernels, and runtime management." onClick={() => setPage("python")} />
+          {pythonApiTargets}
+        </Grid>
+      );
+    }
+
+    if (page === "python-system") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <Alert severity="info">
+              This page is for Python API apps that should run as an operating system service. Jupyter is on the separate <b>Python</b> page and is not part of this API flow.
+            </Alert>
           </Grid>
           <Grid item xs={12} md={6}>
-            <NavCard title="Open IIS Target" text="Use the IIS deployment flow for Python API hosting on Windows." onClick={() => setPage("python-iis")} outlined />
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>API as OS Service</Typography>
+                <Typography variant="body2">
+                  {cfg.os === "windows"
+                    ? "Configure your Python API app to run as a Windows service from this branch."
+                    : "Configure your Python API app to run as a native OS service from this branch."}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          {cfg.os === "windows" && (
+            <Grid item xs={12} md={6}>
+              <NavCard title="IIS" text="Open the IIS target for Windows-based Python API hosting." onClick={() => setPage("python-iis")} outlined />
+            </Grid>
+          )}
+          <Grid item xs={12} md={6}>
+            <NavCard title="Docker" text="Open the Docker target for a containerized Python API app." onClick={() => setPage("python-docker")} outlined />
           </Grid>
         </Grid>
       );
