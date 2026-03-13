@@ -1594,7 +1594,10 @@ def get_port_usage(port, protocol="tcp"):
     owner_hint = ""
     if proto == "tcp" and len(listeners) > 0:
         try:
-            if os.name == "nt" and _windows_locals3_owns_port(p):
+            if os.name == "nt" and _windows_managed_python_owns_port(p, listeners):
+                managed_owner = True
+                owner_hint = "python-jupyter-managed"
+            elif os.name == "nt" and _windows_locals3_owns_port(p):
                 managed_owner = True
                 owner_hint = "locals3-managed"
             elif os.name == "nt" and _windows_localmongo_owns_port(p):
@@ -1606,6 +1609,41 @@ def get_port_usage(port, protocol="tcp"):
         except Exception:
             pass
     return {"ok": True, "busy": len(listeners) > 0, "listeners": listeners, "managed_owner": managed_owner, "owner_hint": owner_hint}
+
+
+def _windows_managed_python_owns_port(port, listeners=None):
+    if os.name != "nt":
+        return False
+    try:
+        target = int(str(port).strip())
+    except Exception:
+        return False
+    state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
+    if not isinstance(state, dict) or not state:
+        return False
+    state_port = str(state.get("port") or "").strip()
+    if state_port.isdigit() and int(state_port) != target:
+        return False
+    pid = state.get("pid")
+    try:
+        pid_num = int(pid)
+    except Exception:
+        pid_num = 0
+    if pid_num <= 0 or not _python_process_running(pid_num):
+        return False
+    active_listeners = listeners if isinstance(listeners, list) else []
+    if not active_listeners:
+        for item in get_listening_ports(limit=5000):
+            proto = str(item.get("proto", "")).lower()
+            if proto.startswith("tcp") and int(item.get("port", 0)) == target:
+                active_listeners.append(item)
+    for item in active_listeners:
+        try:
+            if int(str(item.get("pid") or "0")) == pid_num:
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _safe_service_name(name):

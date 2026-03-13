@@ -1821,10 +1821,10 @@ function App() {
     if (page === "python") {
       const pythonUrl = String(pythonService.jupyter_url || "").trim();
       const pythonPort = String(pythonService.jupyter_port || "8888").trim() || "8888";
-      const pythonHost = String(pythonService.host || (selectableIps[0] || "127.0.0.1")).trim();
-        const pythonNotebookDir = String(
-          pythonService.notebook_dir || pythonService.default_notebook_dir || defaultNotebookDirForOs(cfg.os)
-        ).trim();
+      const pythonHost = String(pythonService.host || "").trim();
+      const pythonNotebookDir = String(
+        pythonService.notebook_dir || pythonService.default_notebook_dir || defaultNotebookDirForOs(cfg.os)
+      ).trim();
       const installState = pythonService.installed
         ? `${pythonService.python_version || "installed"}`
         : "Not installed yet";
@@ -1839,9 +1839,18 @@ function App() {
               action="/run/python_install"
               fields={[
                 { name: "PYTHON_VERSION", label: "Python Version", type: "select", options: ["3.13", "3.12", "3.11", "3.10"], defaultValue: pythonService.requested_version || "3.12", required: true },
-                ...(selectableIps.length > 0 ? [{ name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" }] : []),
+                {
+                  name: "PYTHON_HOST_IP",
+                  label: "Select IP",
+                  type: "select",
+                  options: selectableIps,
+                  defaultValue: pythonHost,
+                  required: true,
+                  disabled: selectableIps.length === 0,
+                  placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
+                },
                 { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
-                  { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
+                { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
               ]}
               onRun={run}
               color="#2563eb"

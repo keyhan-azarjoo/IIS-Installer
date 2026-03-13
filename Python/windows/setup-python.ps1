@@ -11,7 +11,11 @@ function Resolve-PythonFromLauncher {
         return $null
     }
 
-    $output = & $py.Source "-$Version" -c "import sys; print(sys.executable); print(sys.version.split()[0])" 2>$null
+    try {
+        $output = & $py.Source "-$Version" -c "import sys; print(sys.executable); print(sys.version.split()[0])" 2>$null
+    } catch {
+        return $null
+    }
     if (-not $output -or $LASTEXITCODE -ne 0) {
         return $null
     }

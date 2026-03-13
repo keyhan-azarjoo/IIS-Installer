@@ -29,7 +29,7 @@ function Field({ field, value, onChange, error, helperText, formHelperTextProps 
   }
   if (field.type === "select") {
     return (
-      <FormControl fullWidth size="small" required={!!field.required} sx={{ mb: 1.5 }}>
+      <FormControl fullWidth size="small" required={!!field.required} sx={{ mb: 1.5 }} disabled={!!field.disabled}>
         <InputLabel>{field.label}</InputLabel>
         <Select
           name={field.name}
@@ -39,7 +39,7 @@ function Field({ field, value, onChange, error, helperText, formHelperTextProps 
           onChange={onChange}
           error={!!error}
         >
-          {field.required && !field.defaultValue && (
+          {((field.required && !field.defaultValue) || !(field.options || []).length) && (
             <MenuItem value="" disabled>{field.placeholder || `Select ${field.label}`}</MenuItem>
           )}
           {(field.options || []).map((opt) => (
