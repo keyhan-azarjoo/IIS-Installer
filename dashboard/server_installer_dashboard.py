@@ -1249,6 +1249,7 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
     ipython_dir = PYTHON_STATE_DIR / "ipython"
     for path in (jupyter_config_dir, jupyter_data_dir, jupyter_runtime_dir, ipython_dir):
         path.mkdir(parents=True, exist_ok=True)
+    jupyter_config_file = jupyter_config_dir / "jupyter_server_config.py"
     if os.name == "nt":
         if host not in ("127.0.0.1", "localhost", "::1"):
             bind_host = "0.0.0.0"
@@ -1285,6 +1286,26 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
         if not backend_port_value:
             return 1, "Could not find a free internal port for Windows Jupyter."
         backend_port = str(backend_port_value)
+        config_text = (
+            "c = get_config()\n"
+            "c.ServerApp.allow_remote_access = True\n"
+            "c.ServerApp.open_browser = False\n"
+            "c.ServerApp.trust_xheaders = True\n"
+            f"c.ServerApp.allow_origin = {f'https://{host}:{public_port}'!r}\n"
+            f"c.ServerApp.local_hostnames = {[host, '127.0.0.1', 'localhost']!r}\n"
+            f"c.ServerApp.ip = {'127.0.0.1'!r}\n"
+            f"c.ServerApp.port = {int(backend_port)}\n"
+            f"c.ServerApp.root_dir = {notebook_dir!r}\n"
+            "c.ServerApp.token = ''\n"
+            "c.ServerApp.password = ''\n"
+            "c.ServerApp.terminals_enabled = True\n"
+            "c.ServerApp.jpserver_extensions = {\n"
+            "    'jupyterlab': True,\n"
+            "    'jupyter_server_terminals': True,\n"
+            "}\n"
+            "c.TerminalManager.shell_command = ['cmd.exe']\n"
+        )
+        jupyter_config_file.write_text(config_text, encoding="utf-8")
     args = [
         python_executable,
         "-m",
@@ -1300,6 +1321,8 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
         f"--ServerApp.local_hostnames={host},127.0.0.1,localhost",
         f"--ServerApp.root_dir={notebook_dir}",
     ]
+    if os.name == "nt":
+        args.append(f"--config={jupyter_config_file}")
     args.append("--ServerApp.token=")
     args.append("--ServerApp.password=")
     if certfile and keyfile and not is_windows_proxy_mode:
