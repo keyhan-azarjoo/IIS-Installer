@@ -1,0 +1,176 @@
+[CmdletBinding()]
+param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$DashboardArgs
+)
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$RepoBase = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
+$RequestedPythonVersion = "3.12"
+$PythonSetupRelativePath = "Python/windows/setup-python.ps1"
+$DashboardLauncherRelativePath = "dashboard/start-server-dashboard.py"
+
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Restart-Elevated {
+    $argList = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", ('"' + $PSCommandPath + '"')
+    ) + $DashboardArgs
+
+    $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -Verb RunAs -Wait -PassThru
+    exit $proc.ExitCode
+}
+
+function Get-PythonInfoFromPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable
+    )
+
+    if (-not (Test-Path -LiteralPath $Executable)) {
+        return $null
+    }
+
+    try {
+        $output = & $Executable -c "import sys; print(sys.executable); print(sys.version.split()[0])" 2>$null
+    } catch {
+        return $null
+    }
+
+    if (-not $output -or $LASTEXITCODE -ne 0) {
+        return $null
+    }
+
+    $lines = @($output | Where-Object { $_ -and $_.Trim() })
+    if ($lines.Count -lt 2) {
+        return $null
+    }
+
+    return [PSCustomObject]@{
+        Executable = $lines[0].Trim()
+        Version = $lines[1].Trim()
+    }
+}
+
+function Get-PythonInfo {
+    $versionPrefix = "$RequestedPythonVersion."
+
+    $py = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($py) {
+        try {
+            $output = & $py.Source "-$RequestedPythonVersion" -c "import sys; print(sys.executable); print(sys.version.split()[0])" 2>$null
+            if ($output -and $LASTEXITCODE -eq 0) {
+                $lines = @($output | Where-Object { $_ -and $_.Trim() })
+                if ($lines.Count -ge 2) {
+                    $info = [PSCustomObject]@{
+                        Executable = $lines[0].Trim()
+                        Version = $lines[1].Trim()
+                    }
+                    if ($info.Version -eq $RequestedPythonVersion -or $info.Version.StartsWith($versionPrefix)) {
+                        return $info
+                    }
+                }
+            }
+        } catch {
+        }
+    }
+
+    $candidates = @()
+    foreach ($commandName in @("python.exe", "python3.exe")) {
+        $cmd = Get-Command $commandName -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) {
+            $candidates += $cmd.Source
+        }
+    }
+
+    $roots = @(
+        $env:ProgramFiles,
+        $env:ProgramW6432,
+        ${env:ProgramFiles(x86)},
+        $env:LocalAppData,
+        "C:\Program Files",
+        "C:\Program Files (x86)"
+    ) | Where-Object { $_ } | Select-Object -Unique
+
+    foreach ($root in $roots) {
+        foreach ($pattern in @("Python312\python.exe", "Programs\Python\Python312\python.exe")) {
+            $candidates += (Join-Path $root $pattern)
+        }
+    }
+
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        $info = Get-PythonInfoFromPath -Executable $candidate
+        if (-not $info) {
+            continue
+        }
+        if ($info.Version -eq $RequestedPythonVersion -or $info.Version.StartsWith($versionPrefix)) {
+            return $info
+        }
+    }
+
+    return $null
+}
+
+function Get-OrDownloadFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath
+    )
+
+    $localPath = Join-Path $PSScriptRoot ($RelativePath -replace '/', '\')
+    if (Test-Path -LiteralPath $localPath) {
+        return $localPath
+    }
+
+    $cacheRoot = Join-Path $env:TEMP "server-installer-bootstrap"
+    $targetPath = Join-Path $cacheRoot ($RelativePath -replace '/', '\')
+    $targetDir = Split-Path -Parent $targetPath
+    New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+    Invoke-WebRequest -Uri "$RepoBase/$RelativePath" -OutFile $targetPath
+    return $targetPath
+}
+
+function Ensure-Python {
+    $pythonInfo = Get-PythonInfo
+    if ($pythonInfo) {
+        return $pythonInfo
+    }
+
+    Write-Host "Python $RequestedPythonVersion not found. Installing the minimum required runtime..."
+    $pythonSetupScript = Get-OrDownloadFile -RelativePath $PythonSetupRelativePath
+    $env:PYTHON_VERSION = $RequestedPythonVersion
+    $env:PYTHON_INSTALL_JUPYTER = "0"
+
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pythonSetupScript
+    if ($LASTEXITCODE -ne 0) {
+        throw "Python setup failed."
+    }
+
+    $pythonInfo = Get-PythonInfo
+    if (-not $pythonInfo) {
+        throw "Python $RequestedPythonVersion was not found after install."
+    }
+
+    return $pythonInfo
+}
+
+if (-not (Test-IsAdministrator)) {
+    Restart-Elevated
+}
+
+$pythonInfo = Ensure-Python
+$launcherPath = Get-OrDownloadFile -RelativePath $DashboardLauncherRelativePath
+$env:DASHBOARD_HTTPS = "1"
+
+Write-Host "Starting dashboard with $($pythonInfo.Executable)"
+& $pythonInfo.Executable $launcherPath @DashboardArgs
+exit $LASTEXITCODE

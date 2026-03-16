@@ -16,28 +16,10 @@ These installers deploy only from prebuilt published output.
 
 ## Windows
 
-Run higher-level dashboard mode from GitHub raw:
+Run the dashboard with one PowerShell bootstrap script:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; $u='https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard-bootstrap.ps1'; $f=Join-Path $env:TEMP 'start-server-dashboard-bootstrap.ps1'; Invoke-WebRequest -Uri $u -OutFile $f; Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',(\"`\"$f`\"\")"
-```
-
-Repair or reinstall the Windows background dashboard service from this local repo copy:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\KeyhanAzarjoo\Downloads\IISForDotNetInstaller\IIS-Installer\start-dashboard.ps1"
-```
-
-Run in the current PowerShell window without opening a new PowerShell window:
-
-```powershell
-$ProgressPreference='SilentlyContinue'; $f="$env:TEMP\sid.py"; iwr "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -OutFile $f; & "C:\Program Files\Python312\python.exe" $f
-```
-
-If `python.exe` is not installed at `C:\Program Files\Python312\python.exe`, use:
-
-```powershell
-$ProgressPreference='SilentlyContinue'; $f="$env:TEMP\sid.py"; iwr "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -OutFile $f; py $f
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; $u='https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/run-dashboard.ps1'; $f=Join-Path $env:TEMP 'run-dashboard.ps1'; Invoke-WebRequest -Uri $u -OutFile $f; & $f"
 ```
 
 Dashboard URLs:
@@ -46,14 +28,10 @@ Dashboard URLs:
 
 Notes for Windows dashboard startup:
 
-- Start the dashboard from an elevated PowerShell session, or use the `Start-Process ... -Verb RunAs` command above.
-- The command above downloads the latest dashboard bootstrap script from GitHub raw and re-launches it elevated.
-- If the installed dashboard service needs repair, run the local `start-dashboard.ps1` command above so the fixed repo files are copied into `C:\ProgramData\Server-Installer`.
-- The `start-server-dashboard.py` commands above run in the current PowerShell window and install or update the background `ServerInstallerDashboard` startup task, then exit.
+- The command above downloads `run-dashboard.ps1`, elevates if needed, installs Python `3.12` only when it is missing, then runs the dashboard launcher.
+- The dashboard launcher installs or updates the background `ServerInstallerDashboard` startup task, then exits.
 - The dashboard startup task is installed as `ServerInstallerDashboard` and is intended to start automatically after reboot.
-- If you use the raw downloaded bootstrap script directly, it may fail unless it is already running elevated.
-
-If you download only the main Windows script, it will automatically download its required module files into a local `modules` folder the first time it runs.
+- `run-dashboard.ps1` works both from this repo and from GitHub raw.
 
 Repository folder:
 
