@@ -758,7 +758,8 @@ def resolve_windows_python() -> str:
     embedded = program_data / "Server-Installer" / "python" / "python.exe"
     if embedded.exists():
         return str(embedded)
-    state = _read_json_file(PYTHON_STATE_FILE)
+    python_state_file = cache_root() / "python" / "python-state.json"
+    state = _read_json_file(python_state_file)
     managed = str(state.get("python_executable") or "").strip()
     if managed and Path(managed).exists():
         return managed
