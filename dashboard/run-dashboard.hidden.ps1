@@ -14,7 +14,13 @@ $dashboardArgs = @(
   '--key',
   'C:\ProgramData\Server-Installer\certs\dashboard.key'
 )
-$proc = Start-Process -FilePath $pythonExe -ArgumentList $dashboardArgs -WorkingDirectory $root -WindowStyle Hidden -PassThru
+$safeDashboardArgs = @()
+foreach ($arg in @($dashboardArgs)) {
+  if (-not [string]::IsNullOrWhiteSpace([string]$arg)) {
+    $safeDashboardArgs += [string]$arg
+  }
+}
+$proc = Start-Process -FilePath $pythonExe -ArgumentList $safeDashboardArgs -WorkingDirectory $root -WindowStyle Hidden -PassThru
 if (-not $proc) {
   throw 'Dashboard process did not start.'
 }

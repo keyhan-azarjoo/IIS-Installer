@@ -12,13 +12,19 @@ function Test-IsAdministrator {
 }
 
 if ($IsWindows -and -not (Test-IsAdministrator)) {
-  $argList = @(
+  $argParts = @(
     "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-File", ('"' + $PSCommandPath + '"')
-  ) + $args
-
-  $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -Verb RunAs -Wait -PassThru
+    "-ExecutionPolicy Bypass",
+    ('-File "' + $PSCommandPath + '"')
+  )
+  foreach ($arg in @($args)) {
+    if (-not [string]::IsNullOrWhiteSpace($arg)) {
+      $escapedArg = $arg.Replace('"', '\"')
+      $argParts += ('"' + $escapedArg + '"')
+    }
+  }
+  $argLine = $argParts -join " "
+  $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argLine -Verb RunAs -Wait -PassThru
   exit $proc.ExitCode
 }
 
