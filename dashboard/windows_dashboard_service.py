@@ -202,6 +202,7 @@ class ServerInstallerDashboardService(win32serviceutil.ServiceFramework):
             servicemanager.PYS_SERVICE_STARTED,
             (self._svc_name_, ""),
         )
+        self.ReportServiceStatus(win32service.SERVICE_RUNNING)
         self.main()
 
     def stop_dashboard(self) -> None:
