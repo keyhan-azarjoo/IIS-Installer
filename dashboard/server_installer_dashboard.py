@@ -7567,23 +7567,26 @@ def run_dashboard_update(live_cb=None):
 
     def _restart():
         time.sleep(2)
-        script_path = ROOT / "dashboard" / "start-server-dashboard.py"
+        # Read service name from service-state.json written by start-server-dashboard.py
+        state_file = ROOT / "dashboard" / "service-state.json"
+        service_name = ""
+        try:
+            sdata = json.loads(state_file.read_text(encoding="utf-8"))
+            service_name = str(sdata.get("service") or "").strip()
+        except Exception:
+            pass
         try:
             if os.name == "nt":
-                python_exe = resolve_windows_python()
-                subprocess.Popen(
-                    [python_exe, str(script_path)],
-                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                    close_fds=True,
-                )
+                if not service_name:
+                    service_name = "ServerInstallerDashboard"
+                run_capture(["sc.exe", "stop", service_name], timeout=20)
+                time.sleep(3)
+                run_capture(["sc.exe", "start", service_name], timeout=30)
             else:
-                python_bin = "python3" if shutil.which("python3") else "python"
-                subprocess.Popen(
-                    [python_bin, str(script_path)],
-                    start_new_session=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+                if not service_name:
+                    service_name = "server-installer-dashboard.service"
+                prefix = _sudo_prefix()
+                run_capture(prefix + ["systemctl", "restart", service_name], timeout=40)
         except Exception:
             pass
 
