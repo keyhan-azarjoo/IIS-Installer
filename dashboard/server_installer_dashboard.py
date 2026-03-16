@@ -2884,14 +2884,17 @@ def run_python_api_docker(form=None, live_cb=None):
     shutil.copy2(host_certfile, runtime_dir / "tls-cert.pem")
     shutil.copy2(host_keyfile, runtime_dir / "tls-key.pem")
     # Rewrite run_api.py to use container-internal paths (not host paths)
+    _entry_rel = deploy["entry_rel"]
+    _app_object = str(deploy["app_object"] or "").strip()
+    _https_port = str(deploy["https_port"]).strip()
     runner_script.write_text(
         "\n".join([
             "import os",
             "import runpy",
-            f"os.environ['SERVER_INSTALLER_APP_FILE'] = '/app/app/{deploy[\"entry_rel\"]}'",
-            f"os.environ['SERVER_INSTALLER_APP_OBJECT'] = r'''{str(deploy['app_object'] or '').strip()}'''",
+            f"os.environ['SERVER_INSTALLER_APP_FILE'] = '/app/app/{_entry_rel}'",
+            f"os.environ['SERVER_INSTALLER_APP_OBJECT'] = r'''{_app_object}'''",
             "os.environ['SERVER_INSTALLER_HOST'] = '0.0.0.0'",
-            f"os.environ['SERVER_INSTALLER_PORT'] = r'''{str(deploy['https_port']).strip()}'''",
+            f"os.environ['SERVER_INSTALLER_PORT'] = r'''{_https_port}'''",
             "os.environ['SERVER_INSTALLER_CERTFILE'] = '/app/.serverinstaller/tls-cert.pem'",
             "os.environ['SERVER_INSTALLER_KEYFILE'] = '/app/.serverinstaller/tls-key.pem'",
             "runpy.run_path('/app/.serverinstaller/serverinstaller_python_api_host.py', run_name='__main__')",
