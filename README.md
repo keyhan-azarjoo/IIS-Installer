@@ -19,7 +19,7 @@ These installers deploy only from prebuilt published output.
 Run the dashboard with one PowerShell bootstrap script:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; $u='https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/run-dashboard.ps1'; $f=Join-Path $env:TEMP 'run-dashboard.ps1'; Invoke-WebRequest -Uri $u -OutFile $f; & $f"
+powershell -NoProfile -ExecutionPolicy Bypass -Command '$ProgressPreference="SilentlyContinue"; $u="https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/run-dashboard.ps1"; $f=Join-Path $env:TEMP "run-dashboard.ps1"; Invoke-WebRequest -Uri $u -OutFile $f; & $f'
 ```
 
 Dashboard URLs:
