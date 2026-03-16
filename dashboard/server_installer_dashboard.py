@@ -7427,36 +7427,82 @@ echo "[INFO] LocalS3 API/Console services stopped."
 
 
 def run_dashboard_update(live_cb=None):
-    script_url = f"{REPO_RAW_BASE}/dashboard/start-server-dashboard.py"
-    if live_cb:
-        live_cb("[INFO] Updating dashboard files and restarting service...\n")
-    if os.name == "nt":
-        python_exe = resolve_windows_python().replace("'", "''")
-        ps = (
-            "$ProgressPreference='SilentlyContinue'; "
-            f"Set-Location -Path '{(ROOT / 'dashboard')}' ; "
-            f"Invoke-WebRequest -Uri '{script_url}' -OutFile './start-server-dashboard.py'; "
-            "$log = Join-Path $env:TEMP 'server-installer-dashboard-update.log'; "
-            f"Start-Process -FilePath '{python_exe}' -ArgumentList '.\\start-server-dashboard.py' "
-            "-WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $log;"
-            "Write-Host \"[INFO] Update launched in background. Log: $log\""
-        )
-        cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]
-        rc, out = run_capture(cmd, timeout=30)
-        return (0 if rc == 0 else 1), (out or "")
+    repo_base = REPO_RAW_BASE
 
-    python_bin = "python3" if command_exists("python3") else "python"
-    log_path = "/tmp/server-installer-dashboard-update.log"
-    shell_cmd = (
-        f"cd '{(ROOT / 'dashboard')}' && "
-        f"curl -fsSL '{script_url}' -o ./start-server-dashboard.py && "
-        f"({python_bin} ./start-server-dashboard.py > '{log_path}' 2>&1 &)"
-    )
-    cmd = ["bash", "-lc", shell_cmd]
-    rc, out = run_capture(cmd, timeout=30)
+    manifest_path = ROOT / "dashboard" / "download-manifest.txt"
+    try:
+        lines = manifest_path.read_text(encoding="utf-8").splitlines()
+        files = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
+    except Exception:
+        files = [
+            "dashboard/download-manifest.txt",
+            "dashboard/start-server-dashboard.py",
+            "dashboard/server_installer_dashboard.py",
+            "dashboard/windows_dashboard_service.py",
+            "dashboard/file_manager.py",
+            "dashboard/ui_assets.py",
+            "dashboard/ui/core.js",
+            "dashboard/ui/utils.js",
+            "dashboard/ui/actions.js",
+            "dashboard/ui/components.js",
+            "dashboard/ui/app.js",
+        ]
+
+    total = len(files)
     if live_cb:
-        live_cb(f"[INFO] Update launched in background. Log: {log_path}\n")
-    return (0 if rc == 0 else 1), (out or "")
+        live_cb(f"[INFO] Downloading {total} files from repository...\n")
+
+    failed = []
+    for i, rel in enumerate(files, 1):
+        url = f"{repo_base}/{rel}"
+        target = ROOT / rel.replace("/", os.sep)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(str(target) + ".download")
+        if live_cb:
+            live_cb(f"[{i}/{total}] {rel}\n")
+        try:
+            urllib.request.urlretrieve(url, str(tmp))
+            os.replace(str(tmp), str(target))
+        except Exception as ex:
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+            if live_cb:
+                live_cb(f"  WARNING: failed to download {rel}: {ex}\n")
+            failed.append(rel)
+
+    if failed:
+        if live_cb:
+            live_cb(f"[WARN] {len(failed)} file(s) could not be downloaded; using cached versions.\n")
+
+    if live_cb:
+        live_cb("[INFO] All files synced. Restarting dashboard service...\n")
+
+    def _restart():
+        time.sleep(2)
+        script_path = ROOT / "dashboard" / "start-server-dashboard.py"
+        try:
+            if os.name == "nt":
+                python_exe = resolve_windows_python()
+                subprocess.Popen(
+                    [python_exe, str(script_path)],
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                    close_fds=True,
+                )
+            else:
+                python_bin = "python3" if shutil.which("python3") else "python"
+                subprocess.Popen(
+                    [python_bin, str(script_path)],
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+        except Exception:
+            pass
+
+    threading.Thread(target=_restart, daemon=True).start()
+    return 0, ""
 
 def run_windows_s3_stop(live_cb=None):
     if os.name != "nt":

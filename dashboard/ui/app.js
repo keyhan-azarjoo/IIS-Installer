@@ -321,6 +321,18 @@ function App() {
       const next = j.next_offset || offset;
       if (j.done) {
         append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code})`);
+        if (title === "Dashboard Update") {
+          if (Number(j.exit_code) === 0) {
+            append("[INFO] Dashboard is restarting. Page will reload automatically...");
+            setInfoMessage("Dashboard updated. Reloading in a few seconds...");
+          } else {
+            setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
+            setInfoMessage("Dashboard update failed. Check the terminal for details.");
+          }
+          setTermState("Idle");
+          setTimeout(() => window.location.reload(), 5000);
+          return;
+        }
         if (Number(j.exit_code) !== 0) {
           setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
         }
@@ -335,7 +347,7 @@ function App() {
         append(`Update triggered. Dashboard is restarting... (${err})`);
         setInfoMessage("Dashboard update started. If the page disconnects, refresh in a few seconds.");
         setTermState("Idle");
-        setTimeout(() => window.location.reload(), 4000);
+        setTimeout(() => window.location.reload(), 5000);
         return;
       }
       append(`Polling failed: ${err}`);

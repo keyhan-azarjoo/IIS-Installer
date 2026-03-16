@@ -162,8 +162,8 @@ function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot
     $percent = if ($totalFiles -gt 0) { [int](($index / $totalFiles) * 100) } else { 0 }
     Write-Progress -Activity "Downloading Server Installer files" -Status "[$index/$totalFiles] $relativePath" -PercentComplete $percent
     $displayUrl = "$repoDisplayBase/$relativePath"
-    Write-Output ("Syncing required file: {0}" -f $relativePath)
-    Write-Output ("Downloading: {0}" -f $displayUrl)
+    Write-Host ("Syncing required file: {0}" -f $relativePath)
+    Write-Host ("Downloading: {0}" -f $displayUrl)
     $targetPath = Join-Path $DestinationRoot ($relativePath -replace '/', '\')
     $targetDirectory = Split-Path -Path $targetPath -Parent
     New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
@@ -181,9 +181,9 @@ function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot
       Move-Item -Path $tempPath -Destination $targetPath -Force
     } catch {
       Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
-      Write-Output ("Failed file: {0}" -f $relativePath)
-      Write-Output ("Failed URL: {0}" -f $displayUrl)
-      Write-Output ("           ERROR: {0}" -f $_.Exception.Message)
+      Write-Host ("Failed file: {0}" -f $relativePath)
+      Write-Host ("Failed URL: {0}" -f $displayUrl)
+      Write-Host ("           ERROR: {0}" -f $_.Exception.Message)
       Write-Progress -Activity "Downloading Server Installer files" -Completed
       throw
     }
@@ -432,7 +432,7 @@ $repo = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 $localSourceRoot = $env:SERVER_INSTALLER_LOCAL_ROOT
 $dashboard = Join-Path $root "dashboard\start-server-dashboard.py"
 
-Write-Output "[INFO] Downloading dashboard launcher..."
+Write-Host "[INFO] Downloading dashboard launcher..."
 Stop-ExistingDashboardProcesses
 Sync-ServerInstallerFiles -SourceRoot $localSourceRoot -DestinationRoot $root -RepoBase $repo
 Repair-DashboardLauncher -Path $dashboard
@@ -441,7 +441,7 @@ $python = Get-CommandPath "python"
 if (-not $python) { $python = Get-CommandPath "py" }
 
 if (-not $python) {
-  Write-Output "[INFO] Python not found. Bootstrapping embeddable Python..."
+  Write-Host "[INFO] Python not found. Bootstrapping embeddable Python..."
   $pyVer = "3.14.2"
   $pyZip = Join-Path $root "python-embed.zip"
   $pyUrl = "https://www.python.org/ftp/python/$pyVer/python-$pyVer-embeddable-amd64.zip"
@@ -469,13 +469,13 @@ if (-not $pythonConsoleless) {
   $pythonConsoleless = $python
 }
 
-Write-Output "[INFO] Starting dashboard..."
+Write-Host "[INFO] Starting dashboard..."
 $certDir = Join-Path $root "certs"
 New-Item -ItemType Directory -Force -Path $certDir | Out-Null
 $certPath = Join-Path $certDir "dashboard.crt"
 $keyPath = Join-Path $certDir "dashboard.key"
 
-Write-Output "[INFO] Generating HTTPS certificate chain..."
+Write-Host "[INFO] Generating HTTPS certificate chain..."
 Ensure-DashboardCaCertificate -CertPath $CertPath -KeyPath $KeyPath
 
 $env:DASHBOARD_HTTPS = "1"
