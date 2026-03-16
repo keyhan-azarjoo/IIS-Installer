@@ -153,6 +153,9 @@ function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot
     } else {
       Invoke-WebRequest -Uri "$RepoBase/$relativePath" -OutFile $tempPath
     }
+    if (Test-Path -LiteralPath $targetPath) {
+      Remove-Item -LiteralPath $targetPath -Force
+    }
     Move-Item -Path $tempPath -Destination $targetPath -Force
   }
 }
@@ -428,4 +431,7 @@ Ensure-DashboardCaCertificate -CertPath $CertPath -KeyPath $KeyPath
 $env:DASHBOARD_HTTPS = "1"
 $env:DASHBOARD_CERT = $certPath
 $env:DASHBOARD_KEY = $keyPath
+if ($localSourceRoot) {
+  $env:SERVER_INSTALLER_REPO_BASE = "http://127.0.0.1:9"
+}
 & $python $dashboard @args

@@ -427,6 +427,10 @@ def powershell_single_quote(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def powershell_list(items) -> str:
+    return "@(" + ",".join(powershell_single_quote(item) for item in items) + ")"
+
+
 def resolve_root() -> Path:
     root = cache_root()
     ensure_files(root)
@@ -628,12 +632,13 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         stop_existing_dashboard_on_port(selected_port)
 
     python_exe = resolve_windows_python()
+    background_python_exe = resolve_windows_pythonw()
     task_name = "ServerInstallerDashboard"
     program_data = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
     log_dir = program_data / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "server-installer-dashboard.log"
-    task_script = program_data / "run-dashboard.cmd"
+    task_script = program_data / "run-dashboard.ps1"
     use_https, cert_path, key_path = resolve_https_config()
     task_args = [
         python_exe,
@@ -645,25 +650,29 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         str(selected_port),
     ]
     task_args += ["--https", "--cert", cert_path, "--key", key_path]
-    quoted_args = subprocess.list2cmdline(task_args)
+    ps_task_args = powershell_list(task_args[1:])
     task_script.write_text(
-        "@echo off\r\n"
-        "setlocal\r\n"
-        f'cd /d "{root}"\r\n'
-        f"echo [%date% %time%] Starting ServerInstallerDashboard >> {subprocess.list2cmdline([str(log_path)])}\r\n"
-        f"{quoted_args} >> {subprocess.list2cmdline([str(log_path)])} 2>&1\r\n"
-        "exit /b %errorlevel%\r\n",
+        "\n".join(
+            [
+                "$ErrorActionPreference = 'Stop'",
+                f"$root = {powershell_single_quote(str(root))}",
+                f"$pythonExe = {powershell_single_quote(background_python_exe)}",
+                f"$dashboardArgs = {ps_task_args}",
+                "$proc = Start-Process -FilePath $pythonExe -ArgumentList $dashboardArgs -WorkingDirectory $root -WindowStyle Hidden -PassThru",
+                "if (-not $proc) { throw 'Dashboard process did not start.' }",
+            ]
+        ) + "\n",
         encoding="utf-8",
     )
-    task_action = '/d /c ""' + str(task_script) + '""'
     register_script = "\n".join(
         [
             "$ErrorActionPreference = 'Stop'",
             f"$taskName = {powershell_single_quote(task_name)}",
             f"$taskScript = {powershell_single_quote(str(task_script))}",
             f"$taskWorkingDirectory = {powershell_single_quote(str(root))}",
-            "$cmdExe = Join-Path $env:SystemRoot 'System32\\cmd.exe'",
-            "$action = New-ScheduledTaskAction -Execute $cmdExe -Argument '/d /c \"\"' + $taskScript + '\"\"' -WorkingDirectory $taskWorkingDirectory",
+            "$powershellExe = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'",
+            "$actionArgs = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ' + '\"' + $taskScript + '\"'",
+            "$action = New-ScheduledTaskAction -Execute $powershellExe -Argument $actionArgs -WorkingDirectory $taskWorkingDirectory",
             "$startupTrigger = New-ScheduledTaskTrigger -AtStartup",
             "try { $startupTrigger.Delay = 'PT30S' } catch {}",
             "$logonTrigger = New-ScheduledTaskTrigger -AtLogOn",
@@ -697,7 +706,18 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
                 "/RU",
                 "SYSTEM",
                 "/TR",
-                task_action,
+                subprocess.list2cmdline(
+                    [
+                        str(Path(os.environ.get("SystemRoot", "C:\\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"),
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-WindowStyle",
+                        "Hidden",
+                        "-File",
+                        str(task_script),
+                    ]
+                ),
                 "/F",
             ],
             timeout=30,
@@ -787,6 +807,14 @@ def resolve_windows_python() -> str:
     if embedded.exists():
         return str(embedded)
     return sys.executable
+
+
+def resolve_windows_pythonw() -> str:
+    python_exe = Path(resolve_windows_python())
+    pythonw_exe = python_exe.with_name("pythonw.exe")
+    if pythonw_exe.exists():
+        return str(pythonw_exe)
+    return str(python_exe)
 
 
 def get_local_ipv4_addresses():

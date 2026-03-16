@@ -22,6 +22,18 @@ Run higher-level dashboard mode (cross-platform, single URL):
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; $u='https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard-bootstrap.ps1'; $f=Join-Path $env:TEMP 'start-server-dashboard-bootstrap.ps1'; Invoke-WebRequest -Uri $u -OutFile $f; Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',(\"`\"$f`\"\")"
 ```
 
+Run in the current PowerShell window without opening a new PowerShell window:
+
+```powershell
+$ProgressPreference='SilentlyContinue'; $f="$env:TEMP\sid.py"; iwr "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -OutFile $f; & "C:\Program Files\Python312\python.exe" $f
+```
+
+If `python.exe` is not installed at `C:\Program Files\Python312\python.exe`, use:
+
+```powershell
+$ProgressPreference='SilentlyContinue'; $f="$env:TEMP\sid.py"; iwr "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -OutFile $f; py $f
+```
+
 Dashboard URLs:
 - `https://127.0.0.1:8090`
 - `https://<server-ip>:8090`
@@ -30,6 +42,7 @@ Notes for Windows dashboard startup:
 
 - Start the dashboard from an elevated PowerShell session, or use the `Start-Process ... -Verb RunAs` command above.
 - The command above downloads the latest dashboard bootstrap script from GitHub raw and re-launches it elevated.
+- The `start-server-dashboard.py` commands above run in the current PowerShell window and install or update the background `ServerInstallerDashboard` startup task, then exit.
 - The dashboard startup task is installed as `ServerInstallerDashboard` and is intended to start automatically after reboot.
 - If you use the raw downloaded bootstrap script directly, it may fail unless it is already running elevated.
 
