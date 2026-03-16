@@ -24,7 +24,7 @@ if ($IsWindows -and -not (Test-IsAdministrator)) {
     }
   }
   $argLine = $argParts -join " "
-  $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argLine -Verb RunAs -WindowStyle Hidden -Wait -PassThru
+  $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argLine -Verb RunAs -Wait -PassThru
   exit $proc.ExitCode
 }
 
@@ -161,7 +161,8 @@ function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot
     $percent = if ($totalFiles -gt 0) { [int](($index / $totalFiles) * 100) } else { 0 }
     Write-Progress -Activity "Downloading Server Installer files" -Status "[$index/$totalFiles] $relativePath" -PercentComplete $percent
     $displayUrl = "$repoDisplayBase/$relativePath"
-    Write-Output ("[{0}/{1}] DOWNLOADING {2}" -f $index, $totalFiles, $displayUrl)
+    Write-Output ("Syncing required file: {0}" -f $relativePath)
+    Write-Output ("Downloading: {0}" -f $displayUrl)
     $targetPath = Join-Path $DestinationRoot ($relativePath -replace '/', '\')
     $targetDirectory = Split-Path -Path $targetPath -Parent
     New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
@@ -177,10 +178,10 @@ function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot
         Remove-Item -LiteralPath $targetPath -Force
       }
       Move-Item -Path $tempPath -Destination $targetPath -Force
-      Write-Output ("[{0}/{1}] OK          {2}" -f $index, $totalFiles, $displayUrl)
     } catch {
       Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
-      Write-Output ("[{0}/{1}] FAILED      {2}" -f $index, $totalFiles, $displayUrl)
+      Write-Output ("Failed file: {0}" -f $relativePath)
+      Write-Output ("Failed URL: {0}" -f $displayUrl)
       Write-Output ("           ERROR: {0}" -f $_.Exception.Message)
       Write-Progress -Activity "Downloading Server Installer files" -Completed
       throw
