@@ -120,6 +120,13 @@ SYNC_UNIX_FILES = [
 LINUX_SERVICE_NAME = "server-installer-dashboard.service"
 
 
+def _read_json_file(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def sync_files_for_current_os():
     files = list(SYNC_DASHBOARD_FILES)
     if os.name == "nt":
@@ -718,8 +725,18 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
 
     print(f"OS detected: {platform.system()}")
     print(f"Service: {service_name}")
-    print(f"Dashboard URL: https://{display_host}:{selected_port}")
-    print(f"Local URL: https://127.0.0.1:{selected_port}")
+    urls = [f"https://127.0.0.1:{selected_port}"]
+    for ip in get_local_ipv4_addresses():
+        candidate = f"https://{ip}:{selected_port}"
+        if candidate not in urls:
+            urls.append(candidate)
+    if display_host and display_host not in ("127.0.0.1", "localhost"):
+        candidate = f"https://{display_host}:{selected_port}"
+        if candidate not in urls:
+            urls.insert(0, candidate)
+    print("Dashboard URLs:")
+    for url in urls:
+        print(f"- {url}")
     print(f"Log file: {log_path}")
     if ok:
         print(f"Local HTTP check: PASS (HTTP {detail})")

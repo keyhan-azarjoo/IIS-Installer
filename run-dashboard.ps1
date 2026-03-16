@@ -231,6 +231,7 @@ function Ensure-Python {
 
 function Get-LocalIPv4Addresses {
     $ips = @()
+
     try {
         $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
             Where-Object {
@@ -243,6 +244,38 @@ function Get-LocalIPv4Addresses {
     } catch {
         $ips = @()
     }
+
+    if (-not $ips -or $ips.Count -eq 0) {
+        try {
+            $ips = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+                ForEach-Object { $_.GetIPProperties().UnicastAddresses } |
+                Where-Object {
+                    $_ -and $_.Address -and
+                    $_.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork
+                } |
+                ForEach-Object { $_.Address.IPAddressToString } |
+                Where-Object { $_ -and $_ -ne "127.0.0.1" -and $_ -notlike "169.254.*" } |
+                Select-Object -Unique
+        } catch {
+            $ips = @()
+        }
+    }
+
+    if (-not $ips -or $ips.Count -eq 0) {
+        try {
+            $ips = ipconfig |
+                Select-String -Pattern 'IPv4 Address' |
+                ForEach-Object {
+                    $m = [regex]::Match($_.Line, '(\d{1,3}(\.\d{1,3}){3})')
+                    if ($m.Success) { $m.Groups[1].Value } else { $null }
+                } |
+                Where-Object { $_ -and $_ -ne "127.0.0.1" -and $_ -notlike "169.254.*" } |
+                Select-Object -Unique
+        } catch {
+            $ips = @()
+        }
+    }
+
     return @($ips)
 }
 
