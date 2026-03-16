@@ -206,6 +206,25 @@ function Get-LocalIPv4Addresses {
     return @($ips)
 }
 
+function Get-PublicIPv4Address {
+    foreach ($endpoint in @(
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://checkip.amazonaws.com"
+    )) {
+        try {
+            $value = (Invoke-WebRequest -Uri $endpoint -UseBasicParsing -TimeoutSec 5).Content
+            $value = [string]$value
+            $value = $value.Trim()
+            if ($value -match '^\d{1,3}(\.\d{1,3}){3}$') {
+                return $value
+            }
+        } catch {
+        }
+    }
+    return $null
+}
+
 function Show-DashboardUrls {
     $port = 8090
     $serviceName = "ServerInstallerDashboard"
@@ -221,10 +240,15 @@ function Show-DashboardUrls {
     }
 
     $url = "https://127.0.0.1:$port"
+    $publicIp = Get-PublicIPv4Address
 
     Write-Host ""
     Write-Host "Dashboard URL:"
     Write-Host "- $url"
+    if ($publicIp) {
+        Write-Host "Public IP:"
+        Write-Host "- $publicIp"
+    }
     Write-Host "Service name:"
     Write-Host "- $serviceName"
 }
