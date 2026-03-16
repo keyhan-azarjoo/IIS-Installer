@@ -231,8 +231,6 @@ function Show-DashboardUrls {
 
 function Invoke-DashboardBootstrap {
     $bootstrapPath = Get-OrDownloadFile -RelativePath $DashboardBootstrapRelativePath
-    $capturePath = Join-Path $env:TEMP "server-installer-dashboard-bootstrap.log"
-    $runnerPath = Join-Path $env:TEMP "server-installer-dashboard-bootstrap-runner.ps1"
 
     if (Test-Path -LiteralPath (Join-Path $PSScriptRoot "dashboard\start-server-dashboard-bootstrap.ps1")) {
         $env:SERVER_INSTALLER_LOCAL_ROOT = $PSScriptRoot
@@ -243,48 +241,8 @@ function Invoke-DashboardBootstrap {
     $env:DASHBOARD_HTTPS = "1"
     $env:SERVER_INSTALLER_FORCE_DOWNLOAD = "1"
     Write-Host "Repairing dashboard startup and launching the dashboard..."
-    $runnerLines = @(
-        '$ErrorActionPreference = ''Stop''',
-        ('$env:DASHBOARD_HTTPS = ' + (Quote-PowerShellArgument -Value "1")),
-        ('$env:SERVER_INSTALLER_FORCE_DOWNLOAD = ' + (Quote-PowerShellArgument -Value "1"))
-    )
-    if ($env:SERVER_INSTALLER_LOCAL_ROOT) {
-        $runnerLines += ('$env:SERVER_INSTALLER_LOCAL_ROOT = ' + (Quote-PowerShellArgument -Value $env:SERVER_INSTALLER_LOCAL_ROOT))
-    }
-    $runnerLines += @(
-        ('$bootstrapPath = ' + (Quote-PowerShellArgument -Value $bootstrapPath)),
-        ('$capturePath = ' + (Quote-PowerShellArgument -Value $capturePath)),
-        '$argsList = @()'
-    )
-    foreach ($arg in @($DashboardArgs)) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$arg)) {
-            $runnerLines += ('$argsList += ' + (Quote-PowerShellArgument -Value ([string]$arg)))
-        }
-    }
-    $runnerLines += '& $bootstrapPath @argsList *> $capturePath'
-    Set-Content -LiteralPath $runnerPath -Value ($runnerLines -join [Environment]::NewLine) -Encoding UTF8
-
-    if (Test-Path -LiteralPath $capturePath) {
-        Remove-Item -LiteralPath $capturePath -Force -ErrorAction SilentlyContinue
-    }
-
-    if (Test-IsAdministrator) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runnerPath
-        $exitCode = $LASTEXITCODE
-    } else {
-        $argLine = Get-InvocationArgumentLine -ScriptPath $runnerPath -Arguments @()
-        $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argLine -Verb RunAs -Wait -PassThru
-        $exitCode = $proc.ExitCode
-    }
-
-    if (Test-Path -LiteralPath $capturePath) {
-        Get-Content -LiteralPath $capturePath
-    }
-
-    if ($exitCode -eq 0) {
-        return 0
-    }
-    return $exitCode
+    & $bootstrapPath @DashboardArgs
+    return $LASTEXITCODE
 }
 
 if (-not (Test-IsAdministrator)) {

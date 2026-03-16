@@ -70,7 +70,28 @@ function Stop-ExistingDashboardProcesses {
 }
 
 function Get-RequiredServerInstallerFiles {
-  $files = @(
+  $manifestCandidates = @(
+    (Join-Path $PSScriptRoot "download-manifest.txt")
+  )
+  if ($env:SERVER_INSTALLER_LOCAL_ROOT) {
+    $manifestCandidates += (Join-Path $env:SERVER_INSTALLER_LOCAL_ROOT "dashboard\download-manifest.txt")
+  }
+
+  foreach ($manifestPath in ($manifestCandidates | Select-Object -Unique)) {
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+      continue
+    }
+
+    $files = Get-Content -LiteralPath $manifestPath | Where-Object {
+      $_ -and $_.Trim() -and -not $_.Trim().StartsWith("#")
+    } | ForEach-Object { $_.Trim() }
+    if ($files.Count -gt 0) {
+      return @($files)
+    }
+  }
+
+  return @(
+    "dashboard/download-manifest.txt",
     "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
     "dashboard/windows_dashboard_service.py",
@@ -80,99 +101,52 @@ function Get-RequiredServerInstallerFiles {
     "dashboard/ui/utils.js",
     "dashboard/ui/actions.js",
     "dashboard/ui/components.js",
-    "dashboard/ui/app.js"
+    "dashboard/ui/app.js",
+    "Python/windows/setup-python.ps1",
+    "Mongo/windows/setup-mongodb.ps1",
+    "DotNet/windows/install-windows-dotnet-host.ps1",
+    "DotNet/windows/modules/common.ps1",
+    "DotNet/windows/modules/iis-mode.ps1",
+    "DotNet/windows/modules/docker-mode.ps1",
+    "S3/windows/setup-storage.ps1",
+    "S3/windows/modules/common.ps1",
+    "S3/windows/modules/minio.ps1",
+    "S3/windows/modules/cleanup.ps1",
+    "S3/windows/modules/iis.ps1",
+    "S3/windows/modules/docker.ps1",
+    "S3/windows/modules/main.ps1",
+    "Proxy/linux-macos/setup-proxy.sh",
+    "Proxy/windows/setup-proxy.ps1",
+    "Proxy/common/add-user.sh",
+    "Proxy/common/backup-config.sh",
+    "Proxy/common/delete-user.sh",
+    "Proxy/common/list-users.sh",
+    "Proxy/common/status.sh",
+    "Proxy/common/uninstall.sh",
+    "Proxy/common/view-users.sh",
+    "Proxy/panel/install-panel.sh",
+    "Proxy/panel/proxy-panel.py",
+    "Proxy/panel/proxy-panel.service",
+    "Proxy/panel/static/app.js",
+    "Proxy/panel/static/style.css",
+    "Proxy/panel/templates/dashboard.html",
+    "Proxy/panel/templates/login.html",
+    "Proxy/layers/layer3-basic/install.sh",
+    "Proxy/layers/layer4-nginx/install.sh",
+    "Proxy/layers/layer6-stunnel/install.sh",
+    "Proxy/layers/layer7-iran-optimized/add-user.sh",
+    "Proxy/layers/layer7-iran-optimized/delete-user.sh",
+    "Proxy/layers/layer7-iran-optimized/install.sh",
+    "Proxy/layers/layer7-real-domain/add-user.sh",
+    "Proxy/layers/layer7-real-domain/delete-user.sh",
+    "Proxy/layers/layer7-real-domain/install.sh",
+    "Proxy/layers/layer7-v2ray-vless/add-user.sh",
+    "Proxy/layers/layer7-v2ray-vless/delete-user.sh",
+    "Proxy/layers/layer7-v2ray-vless/install.sh",
+    "Proxy/layers/layer7-v2ray-vmess/add-user.sh",
+    "Proxy/layers/layer7-v2ray-vmess/delete-user.sh",
+    "Proxy/layers/layer7-v2ray-vmess/install.sh"
   )
-
-  if ($IsWindows) {
-    $files += @(
-      "Python/windows/setup-python.ps1",
-      "Mongo/windows/setup-mongodb.ps1",
-      "DotNet/windows/install-windows-dotnet-host.ps1",
-      "DotNet/windows/modules/common.ps1",
-      "DotNet/windows/modules/iis-mode.ps1",
-      "DotNet/windows/modules/docker-mode.ps1",
-      "S3/windows/setup-storage.ps1",
-      "S3/windows/modules/common.ps1",
-      "S3/windows/modules/minio.ps1",
-      "S3/windows/modules/cleanup.ps1",
-      "S3/windows/modules/iis.ps1",
-      "S3/windows/modules/docker.ps1",
-      "S3/windows/modules/main.ps1",
-      "Proxy/linux-macos/setup-proxy.sh",
-      "Proxy/windows/setup-proxy.ps1",
-      "Proxy/common/add-user.sh",
-      "Proxy/common/backup-config.sh",
-      "Proxy/common/delete-user.sh",
-      "Proxy/common/list-users.sh",
-      "Proxy/common/status.sh",
-      "Proxy/common/uninstall.sh",
-      "Proxy/common/view-users.sh",
-      "Proxy/panel/install-panel.sh",
-      "Proxy/panel/proxy-panel.py",
-      "Proxy/panel/proxy-panel.service",
-      "Proxy/panel/static/app.js",
-      "Proxy/panel/static/style.css",
-      "Proxy/panel/templates/dashboard.html",
-      "Proxy/panel/templates/login.html",
-      "Proxy/layers/layer3-basic/install.sh",
-      "Proxy/layers/layer4-nginx/install.sh",
-      "Proxy/layers/layer6-stunnel/install.sh",
-      "Proxy/layers/layer7-iran-optimized/add-user.sh",
-      "Proxy/layers/layer7-iran-optimized/delete-user.sh",
-      "Proxy/layers/layer7-iran-optimized/install.sh",
-      "Proxy/layers/layer7-real-domain/add-user.sh",
-      "Proxy/layers/layer7-real-domain/delete-user.sh",
-      "Proxy/layers/layer7-real-domain/install.sh",
-      "Proxy/layers/layer7-v2ray-vless/add-user.sh",
-      "Proxy/layers/layer7-v2ray-vless/delete-user.sh",
-      "Proxy/layers/layer7-v2ray-vless/install.sh",
-      "Proxy/layers/layer7-v2ray-vmess/add-user.sh",
-      "Proxy/layers/layer7-v2ray-vmess/delete-user.sh",
-      "Proxy/layers/layer7-v2ray-vmess/install.sh"
-    )
-  } else {
-    $files += @(
-      "Python/linux-macos/setup-python.sh",
-      "Mongo/linux-macos/setup-mongodb.sh",
-      "DotNet/linux/install-linux-dotnet-runner.sh",
-      "S3/linux-macos/setup-storage.sh",
-      "S3/linux-macos/modules/core.sh",
-      "S3/linux-macos/modules/cleanup.sh",
-      "S3/linux-macos/modules/platform.sh",
-      "Proxy/linux-macos/setup-proxy.sh",
-      "Proxy/common/add-user.sh",
-      "Proxy/common/backup-config.sh",
-      "Proxy/common/delete-user.sh",
-      "Proxy/common/list-users.sh",
-      "Proxy/common/status.sh",
-      "Proxy/common/uninstall.sh",
-      "Proxy/common/view-users.sh",
-      "Proxy/panel/install-panel.sh",
-      "Proxy/panel/proxy-panel.py",
-      "Proxy/panel/proxy-panel.service",
-      "Proxy/panel/static/app.js",
-      "Proxy/panel/static/style.css",
-      "Proxy/panel/templates/dashboard.html",
-      "Proxy/panel/templates/login.html",
-      "Proxy/layers/layer3-basic/install.sh",
-      "Proxy/layers/layer4-nginx/install.sh",
-      "Proxy/layers/layer6-stunnel/install.sh",
-      "Proxy/layers/layer7-iran-optimized/add-user.sh",
-      "Proxy/layers/layer7-iran-optimized/delete-user.sh",
-      "Proxy/layers/layer7-iran-optimized/install.sh",
-      "Proxy/layers/layer7-real-domain/add-user.sh",
-      "Proxy/layers/layer7-real-domain/delete-user.sh",
-      "Proxy/layers/layer7-real-domain/install.sh",
-      "Proxy/layers/layer7-v2ray-vless/add-user.sh",
-      "Proxy/layers/layer7-v2ray-vless/delete-user.sh",
-      "Proxy/layers/layer7-v2ray-vless/install.sh",
-      "Proxy/layers/layer7-v2ray-vmess/add-user.sh",
-      "Proxy/layers/layer7-v2ray-vmess/delete-user.sh",
-      "Proxy/layers/layer7-v2ray-vmess/install.sh"
-    )
-  }
-
-  return $files
 }
 
 function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot, [string]$RepoBase) {
