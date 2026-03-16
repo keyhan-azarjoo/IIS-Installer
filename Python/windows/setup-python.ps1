@@ -160,8 +160,7 @@ function Ensure-WindowsServiceDependencies {
     $targetServiceExe = Join-Path $pythonDir "pythonservice.exe"
     if (-not (Test-Path -LiteralPath $targetServiceExe)) {
         $candidatePaths = @(
-            (Join-Path $env:APPDATA "Python\Python312\site-packages\win32\pythonservice.exe"),
-            (Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\Lib\site-packages\win32\pythonservice.exe"),
+            (Join-Path $pythonDir "Lib\site-packages\pywin32_system32\pythonservice.exe"),
             (Join-Path $pythonDir "Lib\site-packages\win32\pythonservice.exe")
         ) | Select-Object -Unique
 
@@ -171,6 +170,13 @@ function Ensure-WindowsServiceDependencies {
         }
 
         Copy-Item -LiteralPath $sourceServiceExe -Destination $targetServiceExe -Force
+    }
+
+    # pywin32_postinstall has changed over time (sometimes shipped as a script, not as -m module).
+    # The service executable is the critical piece; postinstall is best-effort.
+    $postInstallScript = Join-Path $pythonDir "Scripts\pywin32_postinstall.py"
+    if (Test-Path -LiteralPath $postInstallScript) {
+        & $PythonExe $postInstallScript -install 2>$null | Out-Null
     }
 }
 

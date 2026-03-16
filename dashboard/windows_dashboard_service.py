@@ -96,13 +96,15 @@ def resolve_pythonservice_exe() -> str:
             search_roots = []
         search_roots.append(exe_dir / "Lib" / "site-packages")
         for root in search_roots:
-            src = root / "win32" / "pythonservice.exe"
-            if src.exists():
+            for rel in (("pywin32_system32", "pythonservice.exe"), ("win32", "pythonservice.exe")):
+                src = root.joinpath(*rel)
+                if not src.exists():
+                    continue
                 try:
                     shutil.copyfile(src, candidate)
                     return str(candidate)
                 except Exception:
-                    break
+                    return str(exe_dir / "python.exe")
     except Exception:
         pass
 
