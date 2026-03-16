@@ -239,10 +239,12 @@ function Invoke-DashboardBootstrap {
     }
 
     $env:DASHBOARD_HTTPS = "1"
+    $env:SERVER_INSTALLER_FORCE_DOWNLOAD = "1"
     Write-Host "Repairing dashboard startup and launching the dashboard..."
     $runnerLines = @(
         '$ErrorActionPreference = ''Stop''',
-        ('$env:DASHBOARD_HTTPS = ' + (Quote-PowerShellArgument -Value "1"))
+        ('$env:DASHBOARD_HTTPS = ' + (Quote-PowerShellArgument -Value "1")),
+        ('$env:SERVER_INSTALLER_FORCE_DOWNLOAD = ' + (Quote-PowerShellArgument -Value "1"))
     )
     if ($env:SERVER_INSTALLER_LOCAL_ROOT) {
         $runnerLines += ('$env:SERVER_INSTALLER_LOCAL_ROOT = ' + (Quote-PowerShellArgument -Value $env:SERVER_INSTALLER_LOCAL_ROOT))

@@ -179,26 +179,36 @@ function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot
   $requiredFiles = Get-RequiredServerInstallerFiles
   $totalFiles = $requiredFiles.Count
   $index = 0
+  $forceDownload = (($env:SERVER_INSTALLER_FORCE_DOWNLOAD | ForEach-Object { $_.Trim().ToLowerInvariant() }) -in @("1", "true", "yes", "y", "on"))
 
   foreach ($relativePath in $requiredFiles) {
     $index++
     $percent = if ($totalFiles -gt 0) { [int](($index / $totalFiles) * 100) } else { 0 }
     Write-Progress -Activity "Downloading Server Installer files" -Status "[$index/$totalFiles] $relativePath" -PercentComplete $percent
-    Write-Output ("[{0}/{1}] {2}" -f $index, $totalFiles, $relativePath)
+    Write-Output ("[{0}/{1}] DOWNLOADING {2}" -f $index, $totalFiles, $relativePath)
     $targetPath = Join-Path $DestinationRoot ($relativePath -replace '/', '\')
     $targetDirectory = Split-Path -Path $targetPath -Parent
     New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
     $tempPath = "$targetPath.download"
-    if ($SourceRoot -and (Test-Path -LiteralPath (Join-Path $SourceRoot ($relativePath -replace '/', '\')))) {
-      $sourcePath = Join-Path $SourceRoot ($relativePath -replace '/', '\')
-      Copy-Item -LiteralPath $sourcePath -Destination $tempPath -Force
-    } else {
-      Invoke-WebRequest -Uri "$RepoBase/$relativePath" -OutFile $tempPath
+    try {
+      if ((-not $forceDownload) -and $SourceRoot -and (Test-Path -LiteralPath (Join-Path $SourceRoot ($relativePath -replace '/', '\')))) {
+        $sourcePath = Join-Path $SourceRoot ($relativePath -replace '/', '\')
+        Copy-Item -LiteralPath $sourcePath -Destination $tempPath -Force
+      } else {
+        Invoke-WebRequest -Uri "$RepoBase/$relativePath" -OutFile $tempPath -ErrorAction Stop
+      }
+      if (Test-Path -LiteralPath $targetPath) {
+        Remove-Item -LiteralPath $targetPath -Force
+      }
+      Move-Item -Path $tempPath -Destination $targetPath -Force
+      Write-Output ("[{0}/{1}] OK          {2}" -f $index, $totalFiles, $relativePath)
+    } catch {
+      Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+      Write-Output ("[{0}/{1}] FAILED      {2}" -f $index, $totalFiles, $relativePath)
+      Write-Output ("           ERROR: {0}" -f $_.Exception.Message)
+      Write-Progress -Activity "Downloading Server Installer files" -Completed
+      throw
     }
-    if (Test-Path -LiteralPath $targetPath) {
-      Remove-Item -LiteralPath $targetPath -Force
-    }
-    Move-Item -Path $tempPath -Destination $targetPath -Force
   }
 
   Write-Progress -Activity "Downloading Server Installer files" -Completed
