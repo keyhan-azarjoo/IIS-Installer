@@ -11,7 +11,7 @@ $ProgressPreference = "SilentlyContinue"
 $RepoBase = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 $RequestedPythonVersion = "3.12"
 $PythonSetupRelativePath = "Python/windows/setup-python.ps1"
-$DashboardLauncherRelativePath = "dashboard/start-server-dashboard.py"
+$DashboardBootstrapRelativePath = "dashboard/start-server-dashboard-bootstrap.ps1"
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -163,14 +163,33 @@ function Ensure-Python {
     return $pythonInfo
 }
 
+function Invoke-DashboardBootstrap {
+    $bootstrapPath = Get-OrDownloadFile -RelativePath $DashboardBootstrapRelativePath
+
+    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot "dashboard\start-server-dashboard-bootstrap.ps1")) {
+        $env:SERVER_INSTALLER_LOCAL_ROOT = $PSScriptRoot
+    } else {
+        Remove-Item Env:SERVER_INSTALLER_LOCAL_ROOT -ErrorAction SilentlyContinue
+    }
+
+    $env:DASHBOARD_HTTPS = "1"
+    Write-Host "Repairing dashboard startup and launching the dashboard..."
+    $argList = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-WindowStyle", "Hidden",
+        "-File", ('"' + $bootstrapPath + '"')
+    ) + $DashboardArgs
+    $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -WindowStyle Hidden -Wait -PassThru
+    if (-not $proc) {
+        throw "Dashboard bootstrap did not start."
+    }
+    return $proc.ExitCode
+}
+
 if (-not (Test-IsAdministrator)) {
     Restart-Elevated
 }
 
-$pythonInfo = Ensure-Python
-$launcherPath = Get-OrDownloadFile -RelativePath $DashboardLauncherRelativePath
-$env:DASHBOARD_HTTPS = "1"
-
-Write-Host "Starting dashboard with $($pythonInfo.Executable)"
-& $pythonInfo.Executable $launcherPath @DashboardArgs
-exit $LASTEXITCODE
+$null = Ensure-Python
+exit (Invoke-DashboardBootstrap)
