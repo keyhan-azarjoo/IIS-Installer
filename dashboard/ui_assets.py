@@ -7,6 +7,7 @@ DASHBOARD_UI_SCRIPTS = [
     "/static/ui/utils.js",
     "/static/ui/actions.js",
     "/static/ui/components.js",
+    "/static/ui/file-manager.js",
     "/static/ui/app.js",
 ]
 

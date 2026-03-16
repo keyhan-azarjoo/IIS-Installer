@@ -2659,6 +2659,22 @@ def run_windows_python_api_service(form=None, live_cb=None):
             live_cb("pywin32_postinstall is not available in this pywin32 build; continuing with direct service host setup.\n")
         else:
             live_cb((text or "pywin32 postinstall returned a non-zero exit code.") + "\n")
+    # Copy pywintypes DLLs to the venv root so pythonservice.exe can load them.
+    # pywin32_postinstall normally does this to the system Python dir; for a venv
+    # we replicate the DLLs next to pythonservice.exe (the venv root).
+    venv_root = Path(venv_python).resolve().parent
+    pywin32_sys32 = venv_root / "Lib" / "site-packages" / "pywin32_system32"
+    if pywin32_sys32.is_dir():
+        for dll in pywin32_sys32.glob("pywintypes*.dll"):
+            dst = venv_root / dll.name
+            if not dst.exists():
+                try:
+                    shutil.copy2(str(dll), str(dst))
+                    if live_cb:
+                        live_cb(f"Copied {dll.name} to venv root for service DLL resolution.\n")
+                except Exception as exc:
+                    if live_cb:
+                        live_cb(f"Warning: could not copy {dll.name}: {exc}\n")
     _, runner_script = _write_python_api_runtime_files(
         deploy["deploy_root"],
         deploy["entry_rel"],
@@ -2676,6 +2692,27 @@ def run_windows_python_api_service(form=None, live_cb=None):
             "import subprocess",
             "import sys",
             "import time",
+            "# Bootstrap pywin32 DLL dirs before importing pywin32 modules.",
+            "# Required in venvs where pywin32_postinstall has not been run.",
+            "def _bootstrap_pywin32():",
+            "    venv_root = os.path.dirname(os.path.abspath(sys.executable))",
+            "    try:",
+            "        import site",
+            "        bases = list(site.getsitepackages())",
+            "    except Exception:",
+            "        bases = []",
+            "    bases.append(os.path.join(venv_root, 'Lib', 'site-packages'))",
+            "    for base in bases:",
+            "        dll_dir = os.path.join(base, 'pywin32_system32')",
+            "        if os.path.isdir(dll_dir):",
+            "            if hasattr(os, 'add_dll_directory'):",
+            "                try: os.add_dll_directory(dll_dir)",
+            "                except Exception: pass",
+            "            if dll_dir not in sys.path: sys.path.insert(0, dll_dir)",
+            "        for rel in ('win32', os.path.join('win32', 'lib'), 'pythonwin'):",
+            "            p = os.path.join(base, rel)",
+            "            if os.path.isdir(p) and p not in sys.path: sys.path.insert(0, p)",
+            "_bootstrap_pywin32()",
             "import win32event",
             "import servicemanager",
             "import win32service",
@@ -2711,7 +2748,7 @@ def run_windows_python_api_service(form=None, live_cb=None):
             "        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)",
             "        self.log_handle = open(LOG_PATH, 'a', encoding='utf-8', buffering=1)",
             "        self.log_handle.write(f'[{time.strftime(\"%Y-%m-%d %H:%M:%S\")}] Service starting\\n')",
-            f"        self.proc = subprocess.Popen([r'''{venv_python}''', RUNNER], cwd=r'''{str(deploy['deploy_root'].resolve())}''', stdout=self.log_handle, stderr=subprocess.STDOUT)",
+            f"        self.proc = subprocess.Popen([r'''{venv_python}''', RUNNER], cwd=r'''{str(deploy['deploy_root'].resolve())}''', stdout=self.log_handle, stderr=subprocess.STDOUT, creationflags=0x08000000)",
             "        self.ReportServiceStatus(win32service.SERVICE_RUNNING)",
             "        servicemanager.LogInfoMsg(f'{SERVICE_NAME} started')",
             "        while True:",

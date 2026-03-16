@@ -1537,111 +1537,32 @@ function App() {
     }
 
     if (page === "files") {
-      const entries = Array.isArray(fileManagerData?.entries) ? fileManagerData.entries : [];
+      const { FileManagerPage } = window.ServerInstallerUI || {};
+      if (!FileManagerPage) return <Typography color="error">FileManagerPage component not loaded.</Typography>;
       return (
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={7}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-              <CardContent>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>File Manager</Typography>
-                  <TextField
-                    size="small"
-                    label="Path"
-                    value={fileManagerPath}
-                    onChange={(e) => setFileManagerPath(e.target.value)}
-                    placeholder={cfg.os === "windows" ? "C:\\" : "/"}
-                    sx={{ flexGrow: 1 }}
-                  />
-                  <Button variant="outlined" disabled={fileManagerLoading} onClick={() => loadFileManager(fileManagerPath)} sx={{ textTransform: "none" }}>
-                    {fileManagerLoading ? "Loading..." : "Open"}
-                  </Button>
-                  <Button variant="outlined" disabled={fileOpBusy} onClick={() => loadFileManager(fileManagerData?.parent || "")} sx={{ textTransform: "none" }}>
-                    Up
-                  </Button>
-                </Stack>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} sx={{ mt: 1.2 }}>
-                  <Button variant="outlined" disabled={fileOpBusy || !fileManagerPath} onClick={createFolderInCurrentPath} sx={{ textTransform: "none" }}>New Folder</Button>
-                  <Button variant="outlined" disabled={fileOpBusy || !fileManagerPath} onClick={createFileInCurrentPath} sx={{ textTransform: "none" }}>New File</Button>
-                  <Button variant="outlined" disabled={fileManagerLoading} onClick={() => loadFileManager(fileManagerPath)} sx={{ textTransform: "none" }}>Refresh</Button>
-                  <Button variant="outlined" onClick={() => loadFileManager("")} sx={{ textTransform: "none" }}>Roots</Button>
-                  <Button component="label" variant="outlined" disabled={fileOpBusy || !fileManagerPath} sx={{ textTransform: "none" }}>
-                    Upload
-                    <input hidden multiple type="file" onChange={uploadIntoCurrentPath} />
-                  </Button>
-                  <Button component="label" variant="outlined" disabled={fileOpBusy || !fileManagerPath} sx={{ textTransform: "none" }}>
-                    Upload Folder
-                    <input hidden multiple type="file" webkitdirectory="" directory="" onChange={uploadIntoCurrentPath} />
-                  </Button>
-                </Stack>
-                {fileManagerError && <Alert severity="error" sx={{ mt: 1.2 }}>{fileManagerError}</Alert>}
-                <Typography variant="body2" sx={{ mt: 1.2 }}>Current: {fileManagerData?.path || (cfg.os === "windows" ? "Computer" : "/")}</Typography>
-                <Box sx={{ mt: 1.2, maxHeight: 540, overflow: "auto" }}>
-                  {entries.length === 0 && <Typography variant="body2">No items found.</Typography>}
-                  {entries.map((entry) => (
-                    <Paper key={entry.path} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                        <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                          <Typography variant="body2" fontWeight={700} sx={{ wordBreak: "break-all" }}>{entry.name}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {entry.is_dir ? "Folder" : "File"} | {entry.path} {!entry.is_dir ? `| ${formatBytes(entry.size)}` : ""}
-                          </Typography>
-                        </Box>
-                        <Chip size="small" label={entry.is_dir ? "folder" : "file"} />
-                        <Button size="small" variant="outlined" onClick={() => entry.is_dir ? loadFileManager(entry.path) : openFileInEditor(entry.path)} sx={{ textTransform: "none" }}>
-                          {entry.is_dir ? "Open" : "Edit"}
-                        </Button>
-                        {!entry.is_dir && (
-                          <Button size="small" variant="outlined" onClick={() => window.open(`/api/files/download?path=${encodeURIComponent(entry.path)}`, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
-                            Download
-                          </Button>
-                        )}
-                        <Button size="small" variant="outlined" disabled={fileOpBusy} onClick={() => renameFileManagerPath(entry.path)} sx={{ textTransform: "none" }}>Rename</Button>
-                        <Button size="small" variant="outlined" color="error" disabled={fileOpBusy} onClick={() => deleteFileManagerPath(entry.path, entry.is_dir)} sx={{ textTransform: "none" }}>Delete</Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={5}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-              <CardContent>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>Editor</Typography>
-                  <Box sx={{ flexGrow: 1 }} />
-                  <Button variant="contained" disabled={fileOpBusy || !fileEditorPath || !fileEditorDirty} onClick={saveFileEditor} sx={{ textTransform: "none" }}>Save</Button>
-                </Stack>
-                {!fileEditorPath && (
-                  <Typography variant="body2" sx={{ mt: 2 }}>
-                    Open a text file from the left side to edit it here. Binary files can still be downloaded from the list.
-                  </Typography>
-                )}
-                {!!fileEditorPath && (
-                  <Box sx={{ mt: 1.2 }}>
-                    <Typography variant="body2" sx={{ wordBreak: "break-all" }}>{fileEditorPath}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {fileEditorMeta?.encoding || "utf-8"} {fileEditorMeta?.size ? `| ${formatBytes(fileEditorMeta.size)}` : ""} {fileEditorDirty ? "| unsaved changes" : ""}
-                    </Typography>
-                    <TextField
-                      multiline
-                      minRows={24}
-                      maxRows={24}
-                      fullWidth
-                      value={fileEditorContent}
-                      onChange={(e) => {
-                        setFileEditorContent(e.target.value);
-                        setFileEditorDirty(true);
-                      }}
-                      sx={{ mt: 1.2 }}
-                    />
-                  </Box>
-                )}
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+        <FileManagerPage
+          cfg={cfg}
+          fileManagerPath={fileManagerPath}
+          setFileManagerPath={setFileManagerPath}
+          fileManagerData={fileManagerData}
+          fileManagerLoading={fileManagerLoading}
+          fileManagerError={fileManagerError}
+          fileEditorPath={fileEditorPath}
+          fileEditorContent={fileEditorContent}
+          fileEditorMeta={fileEditorMeta}
+          fileEditorDirty={fileEditorDirty}
+          fileOpBusy={fileOpBusy}
+          loadFileManager={loadFileManager}
+          openFileInEditor={openFileInEditor}
+          saveFileEditor={saveFileEditor}
+          setFileEditorContent={setFileEditorContent}
+          setFileEditorDirty={setFileEditorDirty}
+          createFolderInCurrentPath={createFolderInCurrentPath}
+          createFileInCurrentPath={createFileInCurrentPath}
+          renameFileManagerPath={renameFileManagerPath}
+          deleteFileManagerPath={deleteFileManagerPath}
+          uploadIntoCurrentPath={uploadIntoCurrentPath}
+        />
       );
     }
 
