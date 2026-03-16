@@ -23,6 +23,7 @@ DASHBOARD_KEY = os.environ.get("DASHBOARD_KEY", "").strip()
 SYNC_DASHBOARD_FILES = [
     "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
+    "dashboard/windows_dashboard_service.py",
     "dashboard/file_manager.py",
     "dashboard/ui_assets.py",
     "dashboard/ui/core.js",
@@ -632,81 +633,56 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         stop_existing_dashboard_on_port(selected_port)
 
     python_exe = resolve_windows_python()
-    task_python_exe = resolve_windows_background_python()
-    task_name = "ServerInstallerDashboard"
+    service_name = "ServerInstallerDashboard"
     program_data = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
     log_dir = program_data / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "server-installer-dashboard.log"
+    service_script = (root / "dashboard" / "windows_dashboard_service.py").resolve()
     use_https, cert_path, key_path = resolve_https_config()
-    task_args = [
-        task_python_exe,
-        str(script_path),
-        "--run-server",
-        "--host",
-        bind_host,
-        "--port",
-        str(selected_port),
-    ]
-    task_args += ["--https", "--cert", cert_path, "--key", key_path]
-    python_args = subprocess.list2cmdline(task_args[1:])
-    register_script = "\n".join(
-        [
-            "$ErrorActionPreference = 'Stop'",
-            f"$taskName = {powershell_single_quote(task_name)}",
-            f"$taskWorkingDirectory = {powershell_single_quote(str(root))}",
-            f"$pythonExe = {powershell_single_quote(task_python_exe)}",
-            f"$pythonArgs = {powershell_single_quote(python_args)}",
-            "$action = New-ScheduledTaskAction -Execute $pythonExe -Argument $pythonArgs -WorkingDirectory $taskWorkingDirectory",
-            "$startupTrigger = New-ScheduledTaskTrigger -AtStartup",
-            "try { $startupTrigger.Delay = 'PT30S' } catch {}",
-            "$logonTrigger = New-ScheduledTaskTrigger -AtLogOn",
-            "try { $logonTrigger.Delay = 'PT30S' } catch {}",
-            "$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest",
-            "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew",
-            "try { $settings.ExecutionTimeLimit = 'PT0S' } catch {}",
-            "try { $settings.RestartCount = 3; $settings.RestartInterval = 'PT1M' } catch {}",
-            "$task = New-ScheduledTask -Action $action -Principal $principal -Trigger @($startupTrigger, $logonTrigger) -Settings $settings",
-            "Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null",
-            "Start-ScheduledTask -TaskName $taskName",
-        ]
-    )
-    rc, out = run_capture(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", register_script],
-        timeout=60,
-    )
-    if rc != 0:
-        rc, out = run_capture(
-            [
-                "schtasks",
-                "/Create",
-                "/TN",
-                task_name,
-                "/SC",
-                "ONSTART",
-                "/DELAY",
-                "0000:30",
-                "/RL",
-                "HIGHEST",
-                "/RU",
-                "SYSTEM",
-                "/TR",
-                subprocess.list2cmdline([task_python_exe] + task_args[1:]),
-                "/F",
-            ],
-            timeout=30,
-        )
-        if rc == 0:
-            run_capture(["schtasks", "/Run", "/TN", task_name], timeout=20)
-    if rc != 0:
-        print(f"Windows dashboard task registration failed:\n{out}", file=sys.stderr)
+    if not service_script.exists():
+        print("Windows dashboard service script is missing after sync.", file=sys.stderr)
         return 1
 
-    # Give the scheduled task a brief chance to come online before using the fallback.
+    state_file = root / "dashboard" / "service-state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "service": service_name,
+                "root": str(root),
+                "host": bind_host,
+                "port": selected_port,
+                "updated_at": int(time.time()),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    rc, out = run_capture(["sc.exe", "stop", service_name], timeout=30)
+    if rc != 0 and "1060" not in out and "1062" not in out:
+        out = out.strip()
+
+    rc, out = run_capture(["sc.exe", "query", service_name], timeout=20)
+    if rc != 0:
+        rc, out = run_capture(
+            [python_exe, str(service_script), "--startup", "auto", "install"],
+            timeout=60,
+        )
+    else:
+        rc, out = run_capture([python_exe, str(service_script), "update"], timeout=60)
+
+    if rc == 0:
+        rc, out = run_capture([python_exe, str(service_script), "restart"], timeout=60)
+        if rc != 0:
+            rc, out = run_capture([python_exe, str(service_script), "start"], timeout=60)
+    if rc != 0:
+        print(f"Windows dashboard service registration failed:\n{out}", file=sys.stderr)
+        return 1
+
     ok, detail = wait_for_local_http(selected_port, seconds=8, use_https=use_https)
 
     if not ok:
-        # Fallback: run a detached process so the dashboard still starts even if schtasks is queued.
         try:
             fallback_log_path = log_dir / "server-installer-dashboard-fallback.log"
             log_fp = try_open_append_log(log_path, fallback_log_path)
@@ -736,28 +712,12 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
             finally:
                 if log_fp is not None:
                     log_fp.close()
-            # Re-check after fallback.
             ok, detail = wait_for_local_http(selected_port, seconds=12, use_https=use_https)
         except Exception as ex:
             detail = f"Fallback launch failed: {ex}"
 
-    state_file = root / "dashboard" / "service-state.json"
-    state_file.write_text(
-        json.dumps(
-            {
-                "service": task_name,
-                "root": str(root),
-                "host": bind_host,
-                "port": selected_port,
-                "updated_at": int(time.time()),
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
     print(f"OS detected: {platform.system()}")
-    print(f"Service: {task_name} (scheduled task, enabled)")
+    print(f"Service: {service_name}")
     print(f"Dashboard URL: https://{display_host}:{selected_port}")
     print(f"Local URL: https://127.0.0.1:{selected_port}")
     print(f"Log file: {log_path}")
@@ -768,6 +728,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         print(f"Inspect log: {log_path}")
     print("")
     print(f"Dashboard ready: https://{display_host}:{selected_port}")
+    print(f"Service name in Windows Services: {service_name}")
     print("Re-running this same command will update files and restart the service.")
     return 0
 
@@ -780,16 +741,11 @@ def resolve_windows_python() -> str:
     embedded = program_data / "Server-Installer" / "python" / "python.exe"
     if embedded.exists():
         return str(embedded)
+    state = _read_json_file(PYTHON_STATE_FILE)
+    managed = str(state.get("python_executable") or "").strip()
+    if managed and Path(managed).exists():
+        return managed
     return sys.executable
-
-
-def resolve_windows_background_python() -> str:
-    python_exe = Path(resolve_windows_python())
-    if python_exe.name.lower() == "python.exe":
-        candidate = python_exe.with_name("pythonw.exe")
-        if candidate.exists():
-            return str(candidate)
-    return str(python_exe)
 
 
 def get_local_ipv4_addresses():

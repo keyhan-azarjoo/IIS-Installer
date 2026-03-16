@@ -208,6 +208,7 @@ function Get-LocalIPv4Addresses {
 
 function Show-DashboardUrls {
     $port = 8090
+    $serverName = $env:COMPUTERNAME
 
     if (Test-Path -LiteralPath $DashboardStatePath) {
         try {
@@ -223,7 +224,7 @@ function Show-DashboardUrls {
 
     Write-Host ""
     Write-Host "Dashboard URL:"
-    Write-Host "- $url"
+    Write-Host "- $url (Server: $serverName)"
 }
 
 function Invoke-DashboardBootstrap {

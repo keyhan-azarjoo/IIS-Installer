@@ -19,7 +19,7 @@ These installers deploy only from prebuilt published output.
 Run the dashboard with one PowerShell bootstrap script:
 
 ```powershell
-$ProgressPreference = 'SilentlyContinue'; $u = 'https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/run-dashboard.ps1'; $f = Join-Path $env:TEMP 'run-dashboard.ps1'; Invoke-WebRequest -Uri $u -OutFile $f; powershell -NoProfile -ExecutionPolicy Bypass -File $f
+$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $u='https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/run-dashboard.ps1'; $f=Join-Path $env:TEMP 'run-dashboard.ps1'; try { Invoke-WebRequest -Uri $u -OutFile $f -ErrorAction Stop | Out-Null } catch {}; if (Test-Path $f) { powershell -NoProfile -ExecutionPolicy Bypass -File $f } else { Write-Host 'Download failed and no local cached script was found.' -ForegroundColor Red }
 ```
 
 Dashboard URLs:
@@ -31,7 +31,7 @@ Notes for Windows dashboard startup:
 - The dashboard launcher installs or updates the background `ServerInstallerDashboard` startup task, then exits.
 - The dashboard startup task is installed as `ServerInstallerDashboard` and is intended to start automatically after reboot.
 - `run-dashboard.ps1` works both from this repo and from GitHub raw.
-- The stable local dashboard URL is `https://127.0.0.1:8090`.
+- The stable local dashboard URL is `https://127.0.0.1:8090`, and the launcher also prints the Windows server/computer name beside it.
 
 Repository folder:
 
