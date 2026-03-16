@@ -632,15 +632,15 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         stop_existing_dashboard_on_port(selected_port)
 
     python_exe = resolve_windows_python()
+    task_python_exe = resolve_windows_background_python()
     task_name = "ServerInstallerDashboard"
     program_data = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
     log_dir = program_data / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "server-installer-dashboard.log"
-    task_script = program_data / "run-dashboard.ps1"
     use_https, cert_path, key_path = resolve_https_config()
     task_args = [
-        python_exe,
+        task_python_exe,
         str(script_path),
         "--run-server",
         "--host",
@@ -649,37 +649,15 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         str(selected_port),
     ]
     task_args += ["--https", "--cert", cert_path, "--key", key_path]
-    ps_task_args = powershell_list(task_args[1:])
-    task_script.write_text(
-        "\n".join(
-            [
-                "$ErrorActionPreference = 'Stop'",
-                f"$root = {powershell_single_quote(str(root))}",
-                f"$pythonExe = {powershell_single_quote(python_exe)}",
-                f"$logPath = {powershell_single_quote(str(log_path))}",
-                f"$dashboardArgs = {ps_task_args}",
-                "New-Item -ItemType Directory -Force -Path (Split-Path -Path $logPath -Parent) | Out-Null",
-                "$safeDashboardArgs = @()",
-                "foreach ($arg in @($dashboardArgs)) {",
-                "  if (-not [string]::IsNullOrWhiteSpace([string]$arg)) {",
-                "    $safeDashboardArgs += [string]$arg",
-                "  }",
-                "}",
-                "$proc = Start-Process -FilePath $pythonExe -ArgumentList $safeDashboardArgs -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $logPath -PassThru",
-                "if (-not $proc) { throw 'Dashboard process did not start.' }",
-            ]
-        ) + "\n",
-        encoding="utf-8",
-    )
+    python_args = subprocess.list2cmdline(task_args[1:])
     register_script = "\n".join(
         [
             "$ErrorActionPreference = 'Stop'",
             f"$taskName = {powershell_single_quote(task_name)}",
-            f"$taskScript = {powershell_single_quote(str(task_script))}",
             f"$taskWorkingDirectory = {powershell_single_quote(str(root))}",
-            "$powershellExe = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'",
-            "$actionArgs = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ' + '\"' + $taskScript + '\"'",
-            "$action = New-ScheduledTaskAction -Execute $powershellExe -Argument $actionArgs -WorkingDirectory $taskWorkingDirectory",
+            f"$pythonExe = {powershell_single_quote(task_python_exe)}",
+            f"$pythonArgs = {powershell_single_quote(python_args)}",
+            "$action = New-ScheduledTaskAction -Execute $pythonExe -Argument $pythonArgs -WorkingDirectory $taskWorkingDirectory",
             "$startupTrigger = New-ScheduledTaskTrigger -AtStartup",
             "try { $startupTrigger.Delay = 'PT30S' } catch {}",
             "$logonTrigger = New-ScheduledTaskTrigger -AtLogOn",
@@ -713,18 +691,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
                 "/RU",
                 "SYSTEM",
                 "/TR",
-                subprocess.list2cmdline(
-                    [
-                        str(Path(os.environ.get("SystemRoot", "C:\\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"),
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-WindowStyle",
-                        "Hidden",
-                        "-File",
-                        str(task_script),
-                    ]
-                ),
+                subprocess.list2cmdline([task_python_exe] + task_args[1:]),
                 "/F",
             ],
             timeout=30,
@@ -814,6 +781,15 @@ def resolve_windows_python() -> str:
     if embedded.exists():
         return str(embedded)
     return sys.executable
+
+
+def resolve_windows_background_python() -> str:
+    python_exe = Path(resolve_windows_python())
+    if python_exe.name.lower() == "python.exe":
+        candidate = python_exe.with_name("pythonw.exe")
+        if candidate.exists():
+            return str(candidate)
+    return str(python_exe)
 
 
 def get_local_ipv4_addresses():
