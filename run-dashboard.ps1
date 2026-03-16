@@ -207,14 +207,14 @@ function Get-LocalIPv4Addresses {
 }
 
 function Show-DashboardUrls {
-    $host = "0.0.0.0"
+    $dashboardHost = "0.0.0.0"
     $port = 8090
 
     if (Test-Path -LiteralPath $DashboardStatePath) {
         try {
             $state = Get-Content -LiteralPath $DashboardStatePath -Raw | ConvertFrom-Json
             if ($state.host) {
-                $host = [string]$state.host
+                $dashboardHost = [string]$state.host
             }
             if ($state.port) {
                 $port = [int]$state.port
@@ -226,8 +226,8 @@ function Show-DashboardUrls {
     $urls = [System.Collections.Generic.List[string]]::new()
     $urls.Add("https://127.0.0.1:$port")
 
-    if ($host -and $host -notin @("0.0.0.0", "127.0.0.1", "localhost")) {
-        $urls.Add("https://$host`:$port")
+    if ($dashboardHost -and $dashboardHost -notin @("0.0.0.0", "127.0.0.1", "localhost")) {
+        $urls.Add("https://$dashboardHost`:$port")
     } else {
         foreach ($ip in (Get-LocalIPv4Addresses)) {
             $url = "https://$ip`:$port"
