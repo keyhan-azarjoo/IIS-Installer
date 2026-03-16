@@ -85,6 +85,27 @@ def resolve_pythonservice_exe() -> str:
     candidate = exe_dir / "pythonservice.exe"
     if candidate.exists():
         return str(candidate)
+
+    # Best-effort: locate and copy pythonservice.exe from pywin32 if installed.
+    try:
+        try:
+            import site
+
+            search_roots = [Path(p) for p in site.getsitepackages()]
+        except Exception:
+            search_roots = []
+        search_roots.append(exe_dir / "Lib" / "site-packages")
+        for root in search_roots:
+            src = root / "win32" / "pythonservice.exe"
+            if src.exists():
+                try:
+                    shutil.copyfile(src, candidate)
+                    return str(candidate)
+                except Exception:
+                    break
+    except Exception:
+        pass
+
     return str(exe_dir / "python.exe")
 
 

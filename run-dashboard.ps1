@@ -355,7 +355,8 @@ if (-not (Test-IsAdministrator)) {
     Restart-Elevated
 }
 
-$null = Ensure-Python
+$pythonInfo = Ensure-Python
+$env:SERVER_INSTALLER_PYTHON = $pythonInfo.Executable
 $exitCode = Invoke-DashboardBootstrap
 Show-DashboardUrls
 exit $exitCode
