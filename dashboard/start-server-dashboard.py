@@ -679,13 +679,14 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     else:
         rc, out = run_capture([python_exe, str(service_script), "update"], timeout=60)
 
+    _service_start_ok = False
     if rc == 0:
         rc, out = run_capture([python_exe, str(service_script), "restart"], timeout=60)
         if rc != 0:
             rc, out = run_capture([python_exe, str(service_script), "start"], timeout=60)
-    if rc != 0:
-        print(f"Windows dashboard service registration failed:\n{out}", file=sys.stderr)
-        return 1
+        _service_start_ok = rc == 0
+    if not _service_start_ok:
+        print(f"[WARN] Windows service start failed (falling back to direct process):\n{out.strip()}", file=sys.stderr)
 
     ok, detail = wait_for_local_http(selected_port, seconds=8, use_https=use_https)
 
@@ -719,6 +720,32 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
             finally:
                 if log_fp is not None:
                     log_fp.close()
+            # If Windows service failed, register a Task Scheduler task for reboot persistence.
+            if not _service_start_ok:
+                try:
+                    pythonw = Path(python_exe).with_name("pythonw.exe")
+                    if not pythonw.exists():
+                        pythonw = Path(python_exe)
+                    tr_cmd = (
+                        f'"{pythonw}" "{script_path}" --run-server'
+                        f" --host {bind_host} --port {selected_port}"
+                        f' --https --cert "{cert_path}" --key "{key_path}"'
+                    )
+                    run_capture(
+                        [
+                            "schtasks", "/Create", "/F",
+                            "/TN", service_name,
+                            "/SC", "ONSTART",
+                            "/DELAY", "0000:30",
+                            "/TR", tr_cmd,
+                            "/RU", "SYSTEM",
+                            "/RL", "HIGHEST",
+                        ],
+                        timeout=30,
+                    )
+                    print("[INFO] Registered startup task via Task Scheduler (service fallback).")
+                except Exception:
+                    pass
             ok, detail = wait_for_local_http(selected_port, seconds=12, use_https=use_https)
         except Exception as ex:
             detail = f"Fallback launch failed: {ex}"

@@ -7571,7 +7571,10 @@ def run_dashboard_update(live_cb=None):
     def _restart():
         time.sleep(2)
         if os.name == "nt":
-            # Windows: restart the service via sc.exe
+            # Windows: we cannot stop-then-start the service from within this process
+            # because sc.exe stop causes SvcStop()->stop_dashboard() to kill THIS process
+            # before sc.exe start can run.  Spawn a fully detached PowerShell process
+            # that outlives us and restarts the service (or the scheduled task).
             state_file = ROOT / "dashboard" / "service-state.json"
             service_name = "ServerInstallerDashboard"
             try:
@@ -7580,9 +7583,23 @@ def run_dashboard_update(live_cb=None):
             except Exception:
                 pass
             try:
-                run_capture(["sc.exe", "stop", service_name], timeout=20)
-                time.sleep(3)
-                run_capture(["sc.exe", "start", service_name], timeout=30)
+                ps_cmd = (
+                    f"Start-Sleep 3; "
+                    f"$svc = Get-Service -Name '{service_name}' -ErrorAction SilentlyContinue; "
+                    f"if ($svc) {{ Restart-Service -Name '{service_name}' -Force -ErrorAction SilentlyContinue }} "
+                    f"else {{ schtasks /Run /TN '{service_name}' 2>$null | Out-Null }}"
+                )
+                subprocess.Popen(
+                    [
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-ExecutionPolicy", "Bypass",
+                        "-Command", ps_cmd,
+                    ],
+                    creationflags=0x00000008 | 0x00000200,  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
             except Exception:
                 pass
         else:
