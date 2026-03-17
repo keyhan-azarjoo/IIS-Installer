@@ -29,11 +29,11 @@
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent>
+        <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
               <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Open/Listening Ports</Typography>
-              <Box sx={{ maxHeight: 340, overflow: "auto" }}>
+              <Box sx={{ flexGrow: 1, minHeight: "calc(100vh - 380px)", overflow: "auto" }}>
                 {listeningPorts.length === 0 && <Typography variant="body2">No listening ports found.</Typography>}
                 {listeningPorts.slice(0, 500).map((p, idx) => (
                   <Typography key={`${p.proto}-${p.port}-${idx}`} variant="body2">

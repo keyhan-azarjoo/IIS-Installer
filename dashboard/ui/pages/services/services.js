@@ -12,9 +12,9 @@
     } = p;
     return (
       <Grid container spacing={2}>
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent>
+        <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                 <Typography variant="h6" fontWeight={800}>Managed Services</Typography>
                 <Box sx={{ flexGrow: 1 }} />
@@ -24,7 +24,7 @@
                 </Button>
               </Stack>
               {scopeErrors.all && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.all}</Alert>}
-              <Box sx={{ mt: 1.5, maxHeight: 520, overflow: "auto" }}>
+              <Box sx={{ mt: 1.5, flexGrow: 1, minHeight: "calc(100vh - 380px)", overflow: "auto" }}>
                 {filteredServices.length === 0 && <Typography variant="body2">No services found.</Typography>}
                 {filteredServices.map((svc) => {
                   const status = String(svc.status || "");

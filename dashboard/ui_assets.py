@@ -16,6 +16,8 @@ DASHBOARD_UI_SCRIPTS = [
     "/static/ui/pages/services/services.js",
     "/static/ui/pages/s3/s3.js",
     "/static/ui/pages/mongo/mongo.js",
+    "/static/ui/pages/mongo/mongo-native.js",
+    "/static/ui/pages/mongo/mongo-docker.js",
     "/static/ui/pages/docker/docker.js",
     "/static/ui/pages/proxy/proxy.js",
     "/static/ui/pages/dotnet/dotnet.js",

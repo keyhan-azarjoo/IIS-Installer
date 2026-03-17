@@ -76,7 +76,15 @@ def file_manager_list(path_value=""):
         raise RuntimeError("Selected path is not a directory.")
 
     entries = []
-    for child in sorted(target.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
+    try:
+        children = sorted(target.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))
+    except PermissionError:
+        raise RuntimeError(
+            f"Access denied to '{normalized}'. "
+            "On Windows, some drives (optical, network, system) require elevated privileges. "
+            "Try running the dashboard as Administrator, or choose a different folder."
+        )
+    for child in children:
         try:
             entries.append(file_manager_entry(child))
         except Exception:

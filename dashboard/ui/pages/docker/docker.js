@@ -52,9 +52,9 @@
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent>
+        <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                 <Typography variant="h6" fontWeight={800}>Docker Management</Typography>
                 <Box sx={{ flexGrow: 1 }} />
@@ -100,7 +100,7 @@
                   ))}
                 </Box>
               )}
-              <Box sx={{ mt: 1.5, maxHeight: 460, overflow: "auto" }}>
+              <Box sx={{ mt: 1.5, flexGrow: 1, minHeight: "calc(100vh - 420px)", overflow: "auto" }}>
                 {dockerServices.length === 0 && <Typography variant="body2">No Docker services or containers found.</Typography>}
                 {dockerServices.map((svc) => {
                   const running = isServiceRunningStatus(svc.status, svc.sub_status);

@@ -16,8 +16,6 @@
       DownloadCompassIcon, CopyCompassIcon, TryOpenCompassIcon, OpenCompassStyleIcon,
     } = p;
 
-    if (cfg.os !== "linux" && cfg.os !== "darwin") return null;
-
     const dockerServices = (mongoDisplayServices || []).filter(
       (s) => String(s.kind || "").toLowerCase() === "docker"
     );
@@ -41,7 +39,9 @@
         <Grid item xs={12} md={8}>
           <ActionCard
             title="Deploy MongoDB (Docker)"
-            description="Run MongoDB and mongo-express web UI in Docker containers. Leave HTTP or HTTPS Port empty to skip that protocol."
+            description={cfg.os === "windows"
+              ? "Run MongoDB and mongo-express web UI in Docker containers on Windows. HTTPS/nginx setup is skipped on Windows — use the Web UI port directly."
+              : "Run MongoDB and mongo-express web UI in Docker containers. Leave HTTP or HTTPS Port empty to skip that protocol."}
             action="/run/mongo_docker"
             fields={[
               { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
@@ -67,9 +67,9 @@
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent>
+        <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                 <Typography variant="h6" fontWeight={800}>Docker MongoDB Containers</Typography>
                 <Box sx={{ flexGrow: 1 }} />
@@ -89,7 +89,7 @@
                   </Button>
                 )}
               </Stack>
-              <Box sx={{ mt: 1.2, maxHeight: 400, overflow: "auto" }}>
+              <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
                 {dockerServices.length === 0 && (
                   <Typography variant="body2" color="text.secondary">No Docker MongoDB containers found. Deploy above to see containers here.</Typography>
                 )}

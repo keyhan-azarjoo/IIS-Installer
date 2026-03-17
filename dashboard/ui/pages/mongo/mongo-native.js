@@ -67,9 +67,9 @@
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent>
+        <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                 <Typography variant="h6" fontWeight={800}>Native MongoDB Services</Typography>
                 <Box sx={{ flexGrow: 1 }} />
@@ -94,7 +94,7 @@
                   </Button>
                 )}
               </Stack>
-              <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
+              <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
                 {nativeServices.length === 0 && (
                   <Typography variant="body2" color="text.secondary">No native MongoDB services found. Install above to see services here.</Typography>
                 )}

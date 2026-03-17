@@ -1706,7 +1706,7 @@ function App() {
         {sidebar}
       </Drawer>
 
-      <Box component="main" sx={{ flexGrow: 1, mt: "64px", p: { xs: 2, md: 3 }, ml: `${mainMargin}px`, transition: "margin .2s ease" }}>
+      <Box component="main" sx={{ flexGrow: 1, mt: "64px", p: { xs: 2, md: 3 }, ml: `${mainMargin}px`, transition: "margin .2s ease", display: "flex", flexDirection: "column", minHeight: "calc(100vh - 64px)" }}>
         {cfg.message && <Alert severity="success" sx={{ mb: 2 }}>{cfg.message}</Alert>}
         {infoMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfoMessage("")}>{infoMessage}</Alert>}
         {runError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setRunError("")}>{runError}</Alert>}
@@ -1724,13 +1724,15 @@ function App() {
           </Grid>
         </Grid>
 
-        <Stack spacing={2}>
+        <Stack spacing={2} sx={{ flexGrow: 1, display: "flex", flexDirection: "column" }}>
           {page !== "home" && (
             <Stack direction="row" justifyContent="flex-start">
               <Button variant="outlined" sx={{ textTransform: "none" }} onClick={goBack}>Back</Button>
             </Stack>
           )}
-          {renderPage()}
+          <Box sx={{ flexGrow: 1, display: "flex", flexDirection: "column" }}>
+            {renderPage()}
+          </Box>
         </Stack>
       </Box>
 

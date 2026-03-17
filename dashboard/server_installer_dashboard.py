@@ -6934,10 +6934,9 @@ def run_unix_mongo_installer(form=None, live_cb=None):
 
 
 def run_mongo_docker(form=None, live_cb=None):
-    """Deploy MongoDB + mongo-express in Docker containers with optional nginx HTTPS."""
-    if os.name == "nt":
-        return 1, "Docker MongoDB deploy can only run on Linux hosts via this route."
+    """Deploy MongoDB + mongo-express in Docker containers with optional nginx HTTPS (Linux only)."""
     form = form or {}
+    is_windows = os.name == "nt"
 
     admin_user = (form.get("LOCALMONGO_ADMIN_USER", [""])[0] or "admin").strip()
     admin_pass = (form.get("LOCALMONGO_ADMIN_PASSWORD", [""])[0] or "StrongPassword123").strip()
@@ -6956,24 +6955,44 @@ def run_mongo_docker(form=None, live_cb=None):
     if http_port and not http_port.isdigit():
         return 1, "HTTP port must be numeric."
 
-    if not https_port and not http_port:
+    # On Windows, skip nginx (no HTTPS proxy); on Linux default to HTTPS if nothing set
+    if not is_windows and not https_port and not http_port:
         https_port = "9445"
 
     docker_prefix = []
-    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-        docker_prefix = ["sudo"]
+    if not is_windows:
+        try:
+            if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                docker_prefix = ["sudo"]
+        except AttributeError:
+            pass
 
     # Ensure Docker is available
     code, out = run_process(docker_prefix + ["docker", "info"], live_cb=None)
     if code != 0:
-        if live_cb:
-            live_cb("Docker not running. Installing/starting Docker...\n")
-        install_code, install_out = run_process(
-            ["bash", "-c", "curl -fsSL https://get.docker.com | sh && systemctl enable --now docker"],
-            live_cb=live_cb
-        )
-        if install_code != 0:
-            return install_code, install_out or "Docker install failed."
+        if is_windows:
+            if live_cb:
+                live_cb("Docker not running. Attempting to start Docker Desktop...\n")
+            # Try starting Docker Desktop on Windows
+            _code, _out = run_process(
+                ["powershell", "-Command",
+                 "Start-Process 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe' -WindowStyle Hidden; "
+                 "Start-Sleep 30; docker context use desktop-linux 2>$null; "
+                 "$i=0; while ($i -lt 12) { if ((docker info 2>$null)) { break }; Start-Sleep 10; $i++ }"],
+                live_cb=live_cb
+            )
+            code2, out2 = run_process(docker_prefix + ["docker", "info"], live_cb=None)
+            if code2 != 0:
+                return 1, "Docker is not running and could not be started automatically. Please start Docker Desktop manually."
+        else:
+            if live_cb:
+                live_cb("Docker not running. Installing/starting Docker...\n")
+            install_code, install_out = run_process(
+                ["bash", "-c", "curl -fsSL https://get.docker.com | sh && systemctl enable --now docker"],
+                live_cb=live_cb
+            )
+            if install_code != 0:
+                return install_code, install_out or "Docker install failed."
 
     # Remove old containers if they exist
     for cname in ["localmongo-db", "localmongo-web"]:
@@ -7017,10 +7036,12 @@ def run_mongo_docker(form=None, live_cb=None):
         live_cb(f"[WARN] mongo-express failed to start: {out}\n")
 
     resolved_ip = choose_service_host()
-    extra = f"\nMongoDB Docker deploy complete.\nMongoDB port: {mongo_port}\nWeb UI (internal): http://127.0.0.1:{internal_web_port}\n"
+    extra = f"\nMongoDB Docker deploy complete.\nMongoDB port: {mongo_port}\nWeb UI: http://127.0.0.1:{internal_web_port}\n"
+    if is_windows:
+        extra += f"Web UI accessible at: http://localhost:{internal_web_port}\nNote: HTTPS/nginx proxy is not configured on Windows. Access directly via the port above.\n"
 
-    # Set up nginx HTTPS for the web UI if requested
-    if https_port:
+    # Set up nginx HTTPS for the web UI if requested (Linux/macOS only)
+    if https_port and not is_windows:
         service_name = "localmongo"
         cert_dir = f"/etc/nginx/ssl/{service_name}"
         nginx_script = f"""

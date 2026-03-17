@@ -95,9 +95,9 @@
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent>
+        <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                 <Typography variant="h6" fontWeight={800}>Websites</Typography>
                 <Box sx={{ flexGrow: 1 }} />
@@ -106,7 +106,7 @@
                 </Button>
               </Stack>
               {scopeErrors.website && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.website}</Alert>}
-              <Box sx={{ mt: 1.2, maxHeight: 360, overflow: "auto" }}>
+              <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
                 {websiteServices.length === 0 && <Typography variant="body2">No managed websites found yet.</Typography>}
                 {websiteServices.map((svc) => (
                   <Paper key={`website-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>

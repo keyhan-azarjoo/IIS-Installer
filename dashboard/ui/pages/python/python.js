@@ -84,9 +84,9 @@
             color="#0f766e"
           />
         </Grid>
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent>
+        <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                 <Typography variant="h6" fontWeight={800}>Python Services</Typography>
                 <Box sx={{ flexGrow: 1 }} />
@@ -100,7 +100,7 @@
                 </Button>
               </Stack>
               {scopeErrors.python && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.python}</Alert>}
-              <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
+              <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
                 {pythonRuntimeServices.length === 0 && <Typography variant="body2">No managed Python runtime found yet.</Typography>}
                 {pythonRuntimeServices.map((svc) => (
                   <Paper key={`python-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
@@ -141,9 +141,9 @@
           </Card>
         </Grid>
         {cfg.os === "windows" && (
-          <Grid item xs={12}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-              <CardContent>
+          <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+              <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
                 <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                   <Typography variant="h6" fontWeight={800}>Installed Pythons</Typography>
                   <Box sx={{ flexGrow: 1 }} />
@@ -151,7 +151,7 @@
                     Refresh
                   </Button>
                 </Stack>
-                <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
+                <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
                   {pythonInstalledRuntimes.length === 0 && <Typography variant="body2">No installed Python runtimes found.</Typography>}
                   {pythonInstalledRuntimes.map((svc) => {
                     const isManaged = String(svc.kind || "").toLowerCase() === "python_installation";
