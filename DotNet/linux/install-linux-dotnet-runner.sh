@@ -217,7 +217,7 @@ prompt_for_github_token() {
 
   if [[ "${source_value}" =~ ^https://(github\.com|api\.github\.com|objects\.githubusercontent\.com|raw\.githubusercontent\.com)/ ]]; then
     if [[ -z "${GITHUB_TOKEN}" ]]; then
-      read -r -s -p "Enter GitHub token for private artifact access (leave blank for public download): " GITHUB_TOKEN
+      read -r -s -p "Enter GitHub token for private artifact access (leave blank for public download): " GITHUB_TOKEN || true
       echo
     fi
   fi
@@ -782,7 +782,7 @@ main() {
 
   local domain_name="${DOMAIN_NAME}"
   if [[ -z "${domain_name}" ]]; then
-    read -r -p "Enter a domain name for the site (leave blank to auto-detect the best IP address): " domain_name
+    read -r -p "Enter a domain name for the site (leave blank to auto-detect the best IP address): " domain_name || true
   fi
   local resolved_host
   resolved_host="$(resolve_host_name "${domain_name}")"
