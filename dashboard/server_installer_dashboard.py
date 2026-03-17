@@ -7824,11 +7824,25 @@ def run_linux_docker_deploy(form, live_cb=None):
     if not source_value:
         return 1, "Source path/URL, uploaded file, or uploaded folder is required."
 
-    host_port = (form.get("DOCKER_HOST_PORT", ["8080"])[0] or "8080").strip()
-    if not host_port.isdigit():
-        return 1, "Docker host port must be numeric."
     http_port = (form.get("HTTP_PORT", [""])[0] or "").strip()
     https_port = (form.get("HTTPS_PORT", [""])[0] or "").strip()
+    if not http_port and not https_port:
+        return 1, "At least one of HTTP Port or HTTPS Port must be specified."
+    if http_port and not http_port.isdigit():
+        return 1, "HTTP Port must be numeric."
+    if https_port and not https_port.isdigit():
+        return 1, "HTTPS Port must be numeric."
+
+    # Determine the Docker host-to-container port binding.
+    # HTTP_PORT → expose container directly on that host port.
+    # HTTPS-only → bind container to localhost-only internal port; nginx terminates TLS.
+    if http_port:
+        docker_host_port = http_port
+        docker_bind = f"{http_port}:8080"
+    else:
+        internal_port = str(min(int(https_port) + 10000, 60000))
+        docker_host_port = internal_port
+        docker_bind = f"127.0.0.1:{internal_port}:8080"
 
     source_dir = prepare_source_dir(source_value, live_cb=live_cb)
     app_dir, dll_name = find_app_dll_dir(source_dir)
@@ -7871,21 +7885,30 @@ def run_linux_docker_deploy(form, live_cb=None):
     run_process(docker_prefix + ["docker", "rm", "-f", container_name], live_cb=live_cb)
 
     if live_cb:
-        live_cb(f"Starting container '{container_name}' on host port {host_port}\n")
+        live_cb(f"Starting container '{container_name}' mapped to host port {docker_host_port}\n")
     code, output = run_process(
-        docker_prefix + ["docker", "run", "-d", "--restart", "unless-stopped", "--name", container_name, "-p", f"{host_port}:8080", image_name],
+        docker_prefix + ["docker", "run", "-d", "--restart", "unless-stopped", "--name", container_name, "-p", docker_bind, image_name],
         live_cb=live_cb,
     )
     if code != 0:
         return code, output or "docker run failed."
 
-    extra = f"\nDocker deploy complete.\nContainer: {container_name}\nHost port: {host_port}\n"
+    extra = f"\nDocker deploy complete.\nContainer: {container_name}\n"
+    if http_port:
+        extra += f"HTTP port: {http_port}\n"
+    if https_port:
+        extra += f"HTTPS port: {https_port}\n"
 
-    if http_port or https_port:
-        nginx_http = http_port or "80"
-        nginx_https = https_port or "443"
+    if https_port:
         service_name = container_name
         cert_dir = f"/etc/nginx/ssl/{service_name}"
+        http_redirect_block = (
+            f"server {{\n"
+            f"    listen {http_port};\n"
+            f"    server_name _;\n"
+            f"    return 308 https://$host:{https_port}$request_uri;\n"
+            f"}}\n\n"
+        ) if http_port else ""
         nginx_script = f"""
 set -euo pipefail
 command -v nginx >/dev/null 2>&1 || {{ echo "nginx not found; skipping nginx setup."; exit 0; }}
@@ -7899,19 +7922,14 @@ if [[ ! -f "{cert_dir}/server.crt" || ! -f "{cert_dir}/server.key" ]]; then
   chmod 600 "{cert_dir}/server.key"
 fi
 cat > "/etc/nginx/conf.d/{service_name}.conf" <<'NGINX'
-server {{
-    listen {nginx_http};
-    server_name _;
-    return 308 https://$host:{nginx_https}$request_uri;
-}}
-server {{
-    listen {nginx_https} ssl;
+{http_redirect_block}server {{
+    listen {https_port} ssl;
     server_name _;
     ssl_certificate {cert_dir}/server.crt;
     ssl_certificate_key {cert_dir}/server.key;
     ssl_protocols TLSv1.2 TLSv1.3;
     location / {{
-        proxy_pass http://127.0.0.1:{host_port};
+        proxy_pass http://127.0.0.1:{docker_host_port};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -7923,17 +7941,16 @@ server {{
 }}
 NGINX
 nginx -t && (systemctl is-active --quiet nginx && systemctl reload nginx || systemctl restart nginx)
-echo "Nginx configured: HTTP={nginx_http} -> HTTPS={nginx_https} -> container port {host_port}"
+echo "Nginx configured: HTTPS={https_port} -> container port {docker_host_port}"
 """
         sudo_prefix = []
         if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
             sudo_prefix = ["sudo"]
         nginx_code, nginx_out = run_process(sudo_prefix + ["bash", "-c", nginx_script], live_cb=live_cb)
         if nginx_code != 0 and live_cb:
-            live_cb(f"[WARN] nginx setup returned non-zero; container is still running on port {host_port}.\n")
+            live_cb(f"[WARN] nginx setup returned non-zero; container is still running on port {docker_host_port}.\n")
         if nginx_code == 0:
-            extra += f"HTTP URL:  http://$(hostname -I | awk '{{print $1}}'):{nginx_http}\n"
-            extra += f"HTTPS URL: https://$(hostname -I | awk '{{print $1}}'):{nginx_https}\n"
+            extra += f"HTTPS URL: https://$(hostname -I | awk '{{print $1}}'):{https_port}\n"
 
     return 0, (output or "") + extra
 
