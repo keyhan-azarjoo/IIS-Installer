@@ -30,6 +30,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
 from file_manager import (
+    file_manager_copy_path,
     file_manager_delete_path,
     file_manager_list,
     file_manager_make_directory,
@@ -9140,6 +9141,17 @@ class Handler(BaseHTTPRequestHandler):
                 payload = file_manager_rename_path(
                     (form.get("source", [""])[0] or "").strip(),
                     (form.get("target", [""])[0] or "").strip(),
+                )
+                self.write_json({"ok": True, **payload}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            return
+        if self.path == "/api/files/copy":
+            form = self.parse_request_form()
+            try:
+                payload = file_manager_copy_path(
+                    (form.get("source", [""])[0] or "").strip(),
+                    (form.get("target_dir", [""])[0] or "").strip(),
                 )
                 self.write_json({"ok": True, **payload}, HTTPStatus.OK)
             except Exception as ex:

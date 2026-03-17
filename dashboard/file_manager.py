@@ -175,6 +175,34 @@ def file_manager_rename_path(source_value, target_value):
     return {"path": str(target_path)}
 
 
+def file_manager_copy_path(source_value, target_dir_value):
+    source = normalize_file_manager_path(source_value)
+    target_dir = normalize_file_manager_path(target_dir_value)
+    if not source or not target_dir:
+        raise RuntimeError("Both source and target_dir paths are required.")
+    if is_file_manager_root(source):
+        raise RuntimeError("Copying the filesystem root is not allowed.")
+    source_path = Path(source)
+    target_dir_path = Path(target_dir)
+    if not source_path.exists():
+        raise RuntimeError(f"Path not found: {source}")
+    target_dir_path.mkdir(parents=True, exist_ok=True)
+    dest = target_dir_path / source_path.name
+    # Avoid overwriting by appending _copy suffix if destination already exists
+    if dest.exists():
+        stem = source_path.stem
+        suffix = source_path.suffix
+        i = 1
+        while dest.exists():
+            dest = target_dir_path / f"{stem}_copy{i}{suffix}"
+            i += 1
+    if source_path.is_dir():
+        shutil.copytree(str(source_path), str(dest))
+    else:
+        shutil.copy2(str(source_path), str(dest))
+    return {"path": str(dest)}
+
+
 def file_manager_save_uploads(parts, target_dir):
     base_dir = Path(normalize_file_manager_path(target_dir))
     if not base_dir.exists() or not base_dir.is_dir():
