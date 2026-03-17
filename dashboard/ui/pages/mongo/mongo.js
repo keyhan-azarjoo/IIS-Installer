@@ -126,6 +126,9 @@
           <Grid item xs={12} md={6}>
             <NavCard title="Native" text="Install MongoDB as a Windows service." onClick={() => setPage("mongo-native")} />
           </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Docker" text="Deploy MongoDB and web UI in Docker containers." onClick={() => setPage("mongo-docker")} outlined />
+          </Grid>
           {servicePanel}
         </Grid>
       );

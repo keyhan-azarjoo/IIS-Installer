@@ -9,8 +9,12 @@ def file_manager_roots():
         roots = []
         for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
             drive = f"{letter}:\\"
-            if Path(drive).exists():
-                roots.append(drive)
+            try:
+                if Path(drive).exists():
+                    roots.append(drive)
+            except (PermissionError, OSError):
+                # Drive exists but is not accessible (e.g. empty card reader, locked CD-ROM)
+                pass
         return roots or ["C:\\"]
     return ["/"]
 
@@ -53,13 +57,17 @@ def file_manager_list(path_value=""):
         roots = []
         for root in file_manager_roots():
             root_path = Path(root)
+            try:
+                readonly = not os.access(str(root_path), os.W_OK)
+            except OSError:
+                readonly = True
             roots.append({
                 "name": str(root_path),
                 "path": str(root_path),
                 "is_dir": True,
                 "size": 0,
                 "modified_ts": 0,
-                "readonly": not os.access(str(root_path), os.W_OK),
+                "readonly": readonly,
             })
         return {
             "path": "",
@@ -87,7 +95,7 @@ def file_manager_list(path_value=""):
     for child in children:
         try:
             entries.append(file_manager_entry(child))
-        except Exception:
+        except (PermissionError, OSError):
             continue
 
     parent = ""
