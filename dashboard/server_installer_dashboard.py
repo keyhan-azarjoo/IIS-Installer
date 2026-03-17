@@ -1336,6 +1336,9 @@ def _prepare_python_api_deployment(form, deployment_name, live_cb=None):
     https_port = (form.get("PYTHON_API_PORT", ["8443"])[0] or "8443").strip()
     if not https_port.isdigit():
         raise RuntimeError("HTTPS port must be numeric.")
+    http_port = (form.get("PYTHON_API_HTTP_PORT", [""])[0] or "").strip()
+    if http_port and not http_port.isdigit():
+        raise RuntimeError("HTTP port must be numeric.")
     app_object = (form.get("PYTHON_API_APP_OBJECT", [""])[0] or "").strip()
     deploy_key = _safe_python_api_name(deployment_name)
     deploy_root = PYTHON_STATE_DIR / "api" / deploy_key
@@ -1344,6 +1347,7 @@ def _prepare_python_api_deployment(form, deployment_name, live_cb=None):
     return {
         "python_executable": python_executable,
         "host": host,
+        "http_port": http_port,
         "https_port": https_port,
         "app_object": app_object,
         "deploy_key": deploy_key,
@@ -2876,6 +2880,10 @@ def run_unix_python_api_service(form=None, live_cb=None):
     if rc_enable != 0:
         return 1, out_enable or f"Failed to enable and start {unit_name}."
     manage_firewall_port("open", deploy["https_port"], "tcp")
+    http_port = deploy.get("http_port", "")
+    if http_port:
+        manage_firewall_port("open", http_port, "tcp")
+        _setup_nginx_http_redirect(service_name, http_port, deploy["https_port"], live_cb=live_cb)
     url = f"https://{deploy['host']}:{deploy['https_port']}"
     _update_python_api_state(service_name, {
         "kind": "service",
@@ -2889,7 +2897,8 @@ def run_unix_python_api_service(form=None, live_cb=None):
         "host": deploy["host"],
         "port": deploy["https_port"],
     })
-    return 0, f"Python API OS service deployed.\nService: {unit_name}\nURL: {url}\nEntry file: {deploy['entry_rel']}\n"
+    extra_urls = f"\nHTTP URL:  http://{deploy['host']}:{http_port}" if http_port else ""
+    return 0, f"Python API OS service deployed.\nService: {unit_name}\nURL: {url}{extra_urls}\nEntry file: {deploy['entry_rel']}\n"
 
 
 def run_python_api_docker(form=None, live_cb=None):
@@ -2974,6 +2983,10 @@ def run_python_api_docker(form=None, live_cb=None):
     if code != 0:
         return code, output or "docker run failed."
     manage_firewall_port("open", deploy["https_port"], "tcp")
+    http_port = deploy.get("http_port", "")
+    if http_port:
+        manage_firewall_port("open", http_port, "tcp")
+        _setup_nginx_http_redirect(deployment_name, http_port, deploy["https_port"], live_cb=live_cb)
     url = f"https://{deploy['host']}:{deploy['https_port']}"
     _update_python_api_state(deployment_name, {
         "kind": "docker",
@@ -2987,7 +3000,8 @@ def run_python_api_docker(form=None, live_cb=None):
         "host": deploy["host"],
         "port": deploy["https_port"],
     })
-    return 0, f"Python API Docker deployment completed.\nContainer: {deployment_name}\nURL: {url}\nEntry file: {deploy['entry_rel']}\n"
+    extra_urls = f"\nHTTP URL:  http://{deploy['host']}:{http_port}" if http_port else ""
+    return 0, f"Python API Docker deployment completed.\nContainer: {deployment_name}\nURL: {url}{extra_urls}\nEntry file: {deploy['entry_rel']}\n"
 
 
 def run_python_api_update_source(service_name, source_path, live_cb=None):
@@ -3107,6 +3121,10 @@ def run_windows_python_api_iis(form=None, live_cb=None):
     )
     bind_ip = (form.get("PYTHON_API_HOST_IP", [""])[0] or "").strip() or "*"
     dns_name = deploy["host"] if re.match(r"^[A-Za-z0-9.-]+$", deploy["host"]) else "localhost"
+    http_port = deploy.get("http_port", "")
+    http_binding_ps = []
+    if http_port and http_port.isdigit():
+        http_binding_ps = [f"New-WebBinding -Name $siteName -Protocol 'http' -Port {int(http_port)} -IPAddress $ip -ErrorAction SilentlyContinue | Out-Null"]
     ps = "\n".join([
         "Import-Module WebAdministration",
         f"$siteName = {_ps_single_quote(site_name)}",
@@ -3120,6 +3138,7 @@ def run_windows_python_api_iis(form=None, live_cb=None):
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name managedRuntimeVersion -Value ''",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name processModel.identityType -Value 4",
         "New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip -Ssl -ApplicationPool $appPool | Out-Null",
+        *http_binding_ps,
         "$cert = New-SelfSignedCertificate -DnsName @($dnsName,'localhost','127.0.0.1') -CertStoreLocation 'cert:\\LocalMachine\\My' -FriendlyName ('ServerInstaller Python API ' + $siteName)",
         "$bindingPath = ($ip -eq '*' ? '0.0.0.0' : $ip) + '!' + $port",
         "if (Test-Path ('IIS:\\SslBindings\\' + $bindingPath)) { Remove-Item ('IIS:\\SslBindings\\' + $bindingPath) -Force -ErrorAction SilentlyContinue }",
@@ -3130,6 +3149,8 @@ def run_windows_python_api_iis(form=None, live_cb=None):
     if rc != 0:
         return 1, out or f"Failed to create IIS site '{site_name}'."
     manage_firewall_port("open", https_port, "tcp")
+    if http_port:
+        manage_firewall_port("open", http_port, "tcp")
     url = f"https://{deploy['host']}:{https_port}"
     _update_python_api_state(site_key, {
         "kind": "iis_site",
@@ -3143,7 +3164,8 @@ def run_windows_python_api_iis(form=None, live_cb=None):
         "host": deploy["host"],
         "port": https_port,
     })
-    return 0, f"Python API IIS deployment completed.\nSite: {site_name}\nURL: {url}\nEntry file: {deploy['entry_rel']}\n"
+    extra_urls = f"\nHTTP URL:  http://{deploy['host']}:{http_port}" if http_port else ""
+    return 0, f"Python API IIS deployment completed.\nSite: {site_name}\nURL: {url}{extra_urls}\nEntry file: {deploy['entry_rel']}\n"
 
 
 def run_windows_python_installer(form=None, live_cb=None):
@@ -4218,6 +4240,38 @@ def _sudo_prefix():
     if command_exists("sudo"):
         return ["sudo"]
     return []
+
+
+def _setup_nginx_http_redirect(service_name, http_port, https_port, live_cb=None):
+    """Add/update an nginx config that redirects HTTP→HTTPS for the given service."""
+    cert_dir = f"/etc/nginx/ssl/{service_name}"
+    nginx_script = f"""
+set -euo pipefail
+command -v nginx >/dev/null 2>&1 || {{ echo "nginx not found; skipping HTTP redirect setup."; exit 0; }}
+mkdir -p "{cert_dir}"
+CONF="/etc/nginx/conf.d/{service_name}.conf"
+if [[ -f "$CONF" ]]; then
+  if grep -q "listen {http_port};" "$CONF" 2>/dev/null; then
+    echo "nginx HTTP redirect for {service_name} on port {http_port} already configured."
+    exit 0
+  fi
+fi
+cat >> "$CONF" <<'NGINX'
+server {{
+    listen {http_port};
+    server_name _;
+    return 308 https://$host:{https_port}$request_uri;
+}}
+NGINX
+nginx -t && (systemctl is-active --quiet nginx && systemctl reload nginx || systemctl restart nginx)
+echo "nginx HTTP redirect configured: port {http_port} -> HTTPS {https_port}"
+"""
+    sudo_prefix = []
+    if os.name != "nt" and os.geteuid() != 0 and subprocess.run(
+        ["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    ).returncode == 0:
+        sudo_prefix = ["sudo"]
+    run_process(sudo_prefix + ["bash", "-c", nginx_script], live_cb=live_cb)
 
 
 def manage_firewall_port(action, port, protocol):
@@ -6494,14 +6548,25 @@ def run_windows_installer(form, live_cb=None):
         "SourceValue",
         "DomainName",
         "SiteName",
-        "SitePort",
-        "HttpsPort",
-        "DockerHostPort",
     ]
     for key in keys:
         value = (form.get(key, [""])[0] or "").strip()
         if value:
             cmd.extend([f"-{key}", value])
+
+    deployment_mode = (form.get("DeploymentMode", ["IIS"])[0] or "IIS").strip()
+    http_port = (form.get("HTTP_PORT", [""])[0] or form.get("SitePort", [""])[0] or "").strip()
+    https_port = (form.get("HTTPS_PORT", [""])[0] or form.get("HttpsPort", [""])[0] or "").strip()
+    if deployment_mode == "Docker":
+        # Docker mode: HTTP_PORT maps to the host-side container port
+        if http_port and http_port.isdigit():
+            cmd.extend(["-DockerHostPort", http_port])
+    else:
+        # IIS mode: separate HTTP and HTTPS bindings
+        if http_port and http_port.isdigit():
+            cmd.extend(["-SitePort", http_port])
+        if https_port and https_port.isdigit():
+            cmd.extend(["-HttpsPort", https_port])
 
     env = os.environ.copy()
     env["SERVER_INSTALLER_NONINTERACTIVE"] = "1"
