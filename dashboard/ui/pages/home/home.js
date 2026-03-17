@@ -3,7 +3,7 @@
   ns.pages = ns.pages || {};
 
   ns.pages.home = function renderHomePage(p) {
-    const { NavCard, setPage, startNewWebsiteDeployment, setFileManagerData } = p;
+    const { Grid, NavCard, setPage, startNewWebsiteDeployment, setFileManagerData } = p;
     return (
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>

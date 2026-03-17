@@ -3,7 +3,7 @@
   ns.pages = ns.pages || {};
 
   ns.pages.api = function renderApiPage(p) {
-    const { NavCard, setPage } = p;
+    const { Grid, NavCard, setPage } = p;
     return (
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
