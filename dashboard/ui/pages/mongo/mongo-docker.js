@@ -2,10 +2,27 @@
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
-  ns.pages["mongo-docker"] = function renderMongoDockerPage(p) {
+  function makeDefaultDockerInstance(index) {
+    const base = index * 10;
+    return {
+      id: Date.now() + index,
+      instanceName: index === 0 ? "localmongo" : `localmongo${index + 1}`,
+      mongoPort: String(27017 + base),
+      httpsPort: String(9445 + base),
+      httpPort: "",
+      webPort: String(8081 + base),
+      adminUser: "admin",
+      adminPassword: "StrongPassword123",
+      uiUser: "admin",
+      uiPassword: "StrongPassword123",
+    };
+  }
+
+  function MongoDockerInner(p) {
     const {
       Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
-      ActionCard, ActionIcon,
+      TextField, Alert,
+      ActionIcon,
       cfg, run, serviceBusy,
       mongo, mongoWebsiteUrl, mongoDisplayServices,
       mongoCompassDownloadUrl, mongoCompassUri,
@@ -34,29 +51,128 @@
 
     const groups = groupDockerServices(dockerServices);
 
+    const [instances, setInstances] = React.useState(() => [makeDefaultDockerInstance(0)]);
+
+    function updateInstance(id, field, value) {
+      setInstances((prev) => prev.map((inst) => inst.id === id ? { ...inst, [field]: value } : inst));
+    }
+
+    function addInstance() {
+      setInstances((prev) => [...prev, makeDefaultDockerInstance(prev.length)]);
+    }
+
+    function removeInstance(id) {
+      setInstances((prev) => prev.length > 1 ? prev.filter((i) => i.id !== id) : prev);
+    }
+
+    function deployOne(inst, e) {
+      const form = document.createElement("form");
+      const fields = {
+        LOCALMONGO_INSTANCE_NAME: inst.instanceName,
+        LOCALMONGO_MONGO_PORT: inst.mongoPort,
+        LOCALMONGO_HTTPS_PORT: inst.httpsPort,
+        LOCALMONGO_HTTP_PORT: inst.httpPort,
+        LOCALMONGO_WEB_PORT: inst.webPort,
+        LOCALMONGO_ADMIN_USER: inst.adminUser,
+        LOCALMONGO_ADMIN_PASSWORD: inst.adminPassword,
+        LOCALMONGO_UI_USER: inst.uiUser,
+        LOCALMONGO_UI_PASSWORD: inst.uiPassword,
+      };
+      Object.entries(fields).forEach(([name, value]) => {
+        const inp = document.createElement("input");
+        inp.name = name; inp.value = value || "";
+        form.appendChild(inp);
+      });
+      run(e, "/run/mongo_docker", `Deploy MongoDB Docker — ${inst.instanceName}`, form);
+    }
+
+    function deployAll(e) {
+      instances.forEach((inst) => deployOne(inst, e));
+    }
+
+    function InstanceRow({ inst, idx }) {
+      return (
+        <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderRadius: 2, border: "1px solid #d1fae5" }}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="flex-start" flexWrap="wrap">
+            <TextField
+              label="Instance Name" size="small" sx={{ minWidth: 160 }}
+              value={inst.instanceName}
+              onChange={(e) => updateInstance(inst.id, "instanceName", e.target.value)}
+              helperText="Unique ID (letters, numbers, -)"
+            />
+            <TextField label="MongoDB Port" size="small" sx={{ minWidth: 120 }} value={inst.mongoPort} onChange={(e) => updateInstance(inst.id, "mongoPort", e.target.value)} />
+            <TextField
+              label={cfg.os === "windows" ? "HTTPS Port (skip on Win)" : "HTTPS Port"}
+              size="small" sx={{ minWidth: 130 }}
+              value={inst.httpsPort}
+              onChange={(e) => updateInstance(inst.id, "httpsPort", e.target.value)}
+              placeholder="skip if empty"
+            />
+            <TextField label="HTTP Port" size="small" sx={{ minWidth: 110 }} value={inst.httpPort} onChange={(e) => updateInstance(inst.id, "httpPort", e.target.value)} placeholder="skip if empty" />
+            <TextField label="Web UI Port" size="small" sx={{ minWidth: 110 }} value={inst.webPort} onChange={(e) => updateInstance(inst.id, "webPort", e.target.value)} />
+            <TextField label="Admin User" size="small" sx={{ minWidth: 110 }} value={inst.adminUser} onChange={(e) => updateInstance(inst.id, "adminUser", e.target.value)} />
+            <TextField label="Admin Password" size="small" sx={{ minWidth: 140 }} type="password" value={inst.adminPassword} onChange={(e) => updateInstance(inst.id, "adminPassword", e.target.value)} />
+          </Stack>
+          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} alignItems="center">
+            <Button
+              size="small" variant="contained"
+              disabled={serviceBusy || !inst.instanceName.trim() || !inst.mongoPort.trim()}
+              onClick={(e) => deployOne(inst, e)}
+              sx={{ textTransform: "none", bgcolor: "#166534", "&:hover": { bgcolor: "#14532d" }, fontWeight: 700 }}
+            >
+              Deploy Instance
+            </Button>
+            {instances.length > 1 && (
+              <Button size="small" variant="outlined" color="error" onClick={() => removeInstance(inst.id)} sx={{ textTransform: "none" }}>
+                Remove
+              </Button>
+            )}
+            <Typography variant="caption" color="text.secondary">
+              Instance #{idx + 1}
+            </Typography>
+          </Stack>
+        </Paper>
+      );
+    }
+
     return (
       <Grid container spacing={2}>
         <Grid item xs={12} md={8}>
-          <ActionCard
-            title="Deploy MongoDB (Docker)"
-            description={cfg.os === "windows"
-              ? "Run MongoDB and mongo-express web UI in Docker containers on Windows. HTTPS/nginx setup is skipped on Windows — use the Web UI port directly."
-              : "Run MongoDB and mongo-express web UI in Docker containers. Leave HTTP or HTTPS Port empty to skip that protocol."}
-            action="/run/mongo_docker"
-            fields={[
-              { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
-              { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS", checkPort: true },
-              { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017", checkPort: true },
-              { name: "LOCALMONGO_WEB_PORT", label: "Web UI Port (internal)", defaultValue: "8081", placeholder: "8081" },
-              { name: "LOCALMONGO_ADMIN_USER", label: "Admin User", defaultValue: "admin" },
-              { name: "LOCALMONGO_ADMIN_PASSWORD", label: "Admin Password", type: "password", defaultValue: "StrongPassword123" },
-              { name: "LOCALMONGO_UI_USER", label: "UI User", defaultValue: "admin" },
-              { name: "LOCALMONGO_UI_PASSWORD", label: "UI Password", type: "password", defaultValue: "StrongPassword123" },
-            ]}
-            onRun={run}
-            color="#166534"
-          />
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
+                <Typography variant="h6" fontWeight={800}>Deploy MongoDB (Docker)</Typography>
+                <Box sx={{ flexGrow: 1 }} />
+                <Button
+                  size="small" variant="outlined"
+                  onClick={addInstance}
+                  sx={{ textTransform: "none", fontWeight: 700 }}
+                >
+                  + Add Instance
+                </Button>
+                {instances.length > 1 && (
+                  <Button
+                    size="small" variant="contained"
+                    disabled={serviceBusy}
+                    onClick={deployAll}
+                    sx={{ textTransform: "none", bgcolor: "#166534", "&:hover": { bgcolor: "#14532d" }, fontWeight: 700 }}
+                  >
+                    Deploy All ({instances.length})
+                  </Button>
+                )}
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                {cfg.os === "windows"
+                  ? "Each instance runs as separate Docker containers (MongoDB + mongo-express). HTTPS proxy is skipped on Windows — access directly via the Web UI port."
+                  : "Each instance runs as separate Docker containers with an optional nginx HTTPS proxy. Add as many as you need — each gets its own ports and containers."}
+              </Typography>
+              {instances.map((inst, idx) => (
+                <InstanceRow key={inst.id} inst={inst} idx={idx} />
+              ))}
+            </CardContent>
+          </Card>
         </Grid>
+
         <Grid item xs={12} md={4}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
             <CardContent>
@@ -64,9 +180,13 @@
               <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "docker"})` : "Not deployed yet"}</Typography>
               {!!mongoWebsiteUrl && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongoWebsiteUrl}</Typography>}
               {!!mongo.connection_string && <Typography variant="body2">Connection: {mongo.connection_string}</Typography>}
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: "block" }}>
+                Instances planned: {instances.length}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
+
         <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
             <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
@@ -132,5 +252,9 @@
         </Grid>
       </Grid>
     );
+  }
+
+  ns.pages["mongo-docker"] = function renderMongoDockerPage(p) {
+    return React.createElement(MongoDockerInner, p);
   };
 })();

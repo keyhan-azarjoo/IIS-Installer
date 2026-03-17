@@ -3,9 +3,15 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\..\S3\windows\modules\common.ps1")
 . (Join-Path $PSScriptRoot "..\..\S3\windows\modules\docker.ps1")
 
-$Script:MongoRoot = Join-Path $env:ProgramData "LocalMongoDB"
-$Script:MongoLabel = "com.localmongo.installer=true"
-$Script:NativeMongoServiceName = "LocalMongoDB"
+# Support multiple MongoDB instances via LOCALMONGO_INSTANCE_NAME
+$_rawInstance = [Environment]::GetEnvironmentVariable("LOCALMONGO_INSTANCE_NAME")
+if ([string]::IsNullOrWhiteSpace($_rawInstance)) { $_rawInstance = "localmongo" }
+$_rawInstance = $_rawInstance.Trim().ToLower()
+$Script:InstanceName = if ($_rawInstance -match '^[a-z][a-z0-9_-]{0,29}$') { $_rawInstance } else { "localmongo" }
+
+$Script:MongoRoot = Join-Path $env:ProgramData "LocalMongoDB-$($Script:InstanceName)"
+$Script:MongoLabel = "com.localmongo.instance=$($Script:InstanceName)"
+$Script:NativeMongoServiceName = "LocalMongoDB-$($Script:InstanceName)"
 
 function Get-EnvOrDefault([string]$name, [string]$defaultValue) {
   $value = [Environment]::GetEnvironmentVariable($name)
@@ -29,11 +35,11 @@ function Require-NumericPort([string]$name, [string]$value) {
 function Remove-ExistingLocalMongo([string]$dockerCtx) {
   $prev = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  docker --context $dockerCtx rm -f localmongo-https localmongo-web localmongo-mongodb 2>$null | Out-Null
-  docker --context $dockerCtx network rm localmongo-net 2>$null | Out-Null
-  docker --context $dockerCtx volume rm -f localmongo-data 2>$null | Out-Null
-  schtasks /End /TN "LocalMongoDB-Autostart" 1>$null 2>$null | Out-Null
-  schtasks /Delete /TN "LocalMongoDB-Autostart" /F 1>$null 2>$null | Out-Null
+  docker --context $dockerCtx rm -f "$($Script:InstanceName)-https" "$($Script:InstanceName)-web" "$($Script:InstanceName)-mongodb" 2>$null | Out-Null
+  docker --context $dockerCtx network rm "$($Script:InstanceName)-net" 2>$null | Out-Null
+  docker --context $dockerCtx volume rm -f "$($Script:InstanceName)-data" 2>$null | Out-Null
+  schtasks /End /TN "LocalMongoDB-$($Script:InstanceName)-Autostart" 1>$null 2>$null | Out-Null
+  schtasks /Delete /TN "LocalMongoDB-$($Script:InstanceName)-Autostart" /F 1>$null 2>$null | Out-Null
   if (Test-Path $Script:MongoRoot) {
     Remove-Item -Recurse -Force -Path $Script:MongoRoot -ErrorAction SilentlyContinue
   }
@@ -41,9 +47,9 @@ function Remove-ExistingLocalMongo([string]$dockerCtx) {
 }
 
 function Register-LocalMongoAutostart([string]$dockerCtx) {
-  $taskCommand = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "docker --context ' + $dockerCtx + ' start localmongo-mongodb localmongo-web localmongo-https | Out-Null"'
-  schtasks /Delete /TN "LocalMongoDB-Autostart" /F 1>$null 2>$null | Out-Null
-  schtasks /Create /TN "LocalMongoDB-Autostart" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $taskCommand /F | Out-Null
+  $taskCommand = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "docker --context ' + $dockerCtx + " start $($Script:InstanceName)-mongodb $($Script:InstanceName)-web $($Script:InstanceName)-https" + ' | Out-Null"'
+  schtasks /Delete /TN "LocalMongoDB-$($Script:InstanceName)-Autostart" /F 1>$null 2>$null | Out-Null
+  schtasks /Create /TN "LocalMongoDB-$($Script:InstanceName)-Autostart" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $taskCommand /F | Out-Null
 }
 
 function Trust-LocalMongoCaddyRoot([string]$rootCertPath) {
@@ -974,7 +980,7 @@ function Main {
 
 $($addresses -join ", ") {
   tls internal
-  reverse_proxy localmongo-web:8081
+  reverse_proxy $($Script:InstanceName)-web:8081
   encode gzip
 }
 "@
@@ -983,19 +989,19 @@ $($addresses -join ", ") {
 
   $prev = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  docker --context $dockerCtx network create localmongo-net 2>$null | Out-Null
-  docker --context $dockerCtx volume create localmongo-data 2>$null | Out-Null
+  docker --context $dockerCtx network create "$($Script:InstanceName)-net" 2>$null | Out-Null
+  docker --context $dockerCtx volume create "$($Script:InstanceName)-data" 2>$null | Out-Null
 
   docker --context $dockerCtx run -d `
-    --name localmongo-mongodb `
+    --name "$($Script:InstanceName)-mongodb" `
     --label $Script:MongoLabel `
     --label "com.localmongo.role=mongodb" `
     --restart always `
-    --network localmongo-net `
+    --network "$($Script:InstanceName)-net" `
     -p "${mongoPort}:27017" `
     -e "MONGO_INITDB_ROOT_USERNAME=$mongoUser" `
     -e "MONGO_INITDB_ROOT_PASSWORD=$mongoPassword" `
-    -v "localmongo-data:/data/db" `
+    -v "$($Script:InstanceName)-data:/data/db" `
     mongo:7 | Out-Null
   if ($LASTEXITCODE -ne 0) {
     $ErrorActionPreference = $prev
@@ -1004,14 +1010,14 @@ $($addresses -join ", ") {
   }
 
   docker --context $dockerCtx run -d `
-    --name localmongo-web `
+    --name "$($Script:InstanceName)-web" `
     --label $Script:MongoLabel `
     --label "com.localmongo.role=web" `
     --restart always `
-    --network localmongo-net `
+    --network "$($Script:InstanceName)-net" `
     -p "127.0.0.1:${webPort}:8081" `
-    -e "ME_CONFIG_MONGODB_SERVER=localmongo-mongodb" `
-    -e "ME_CONFIG_MONGODB_URL=mongodb://${mongoUser}:${mongoPassword}@localmongo-mongodb:27017/" `
+    -e "ME_CONFIG_MONGODB_SERVER=$($Script:InstanceName)-mongodb" `
+    -e "ME_CONFIG_MONGODB_URL=mongodb://${mongoUser}:${mongoPassword}@$($Script:InstanceName)-mongodb:27017/" `
     -e "ME_CONFIG_MONGODB_PORT=27017" `
     -e "ME_CONFIG_MONGODB_ENABLE_ADMIN=true" `
     -e "ME_CONFIG_MONGODB_AUTH_DATABASE=admin" `
@@ -1027,11 +1033,11 @@ $($addresses -join ", ") {
   }
 
   docker --context $dockerCtx run -d `
-    --name localmongo-https `
+    --name "$($Script:InstanceName)-https" `
     --label $Script:MongoLabel `
     --label "com.localmongo.role=https" `
     --restart always `
-    --network localmongo-net `
+    --network "$($Script:InstanceName)-net" `
     -p "${httpsPort}:${httpsPort}" `
     -v "${caddyfilePath}:/etc/caddy/Caddyfile:ro" `
     -v "${dataDir}:/data" `
@@ -1080,7 +1086,7 @@ $($addresses -join ", ") {
   Write-Host "MongoDB root password:         $mongoPassword"
   Write-Host "Web UI username:               $uiUser"
   Write-Host "Web UI password:               $uiPassword"
-  Write-Host "Service:                       LocalMongoDB-Autostart (enabled)"
+  Write-Host "Service:                       LocalMongoDB-$($Script:InstanceName)-Autostart (enabled)"
   Write-Host ""
   Write-Host "You can manage databases, collections, users, and access through the web UI using the MongoDB admin credentials above."
 }

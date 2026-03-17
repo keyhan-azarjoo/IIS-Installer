@@ -7060,6 +7060,7 @@ def run_windows_mongo_installer(form, live_cb=None):
         "LOCALMONGO_ADMIN_PASSWORD",
         "LOCALMONGO_UI_USER",
         "LOCALMONGO_UI_PASSWORD",
+        "LOCALMONGO_INSTANCE_NAME",
     ]:
         value = (form.get(key, [""])[0] or "").strip()
         if value:
@@ -7131,6 +7132,7 @@ def run_unix_mongo_installer(form=None, live_cb=None):
         "LOCALMONGO_ADMIN_PASSWORD",
         "LOCALMONGO_UI_USER",
         "LOCALMONGO_UI_PASSWORD",
+        "LOCALMONGO_INSTANCE_NAME",
     ]:
         value = (form.get(key, [""])[0] or "").strip()
         if value:
@@ -7194,6 +7196,8 @@ def run_mongo_docker(form=None, live_cb=None):
     web_port = (form.get("LOCALMONGO_WEB_PORT", [""])[0] or "8081").strip()
     https_port = (form.get("LOCALMONGO_HTTPS_PORT", [""])[0] or "").strip()
     http_port = (form.get("LOCALMONGO_HTTP_PORT", [""])[0] or "").strip()
+    raw_instance = re.sub(r"[^a-zA-Z0-9_-]", "", (form.get("LOCALMONGO_INSTANCE_NAME", [""])[0] or "localmongo").strip()).lower()
+    instance_name = raw_instance if re.match(r"^[a-z][a-z0-9_-]{0,29}$", raw_instance) else "localmongo"
 
     for name, val in [("MongoDB port", mongo_port), ("Web UI port", web_port)]:
         if val and not val.isdigit():
@@ -7243,15 +7247,15 @@ def run_mongo_docker(form=None, live_cb=None):
                 return install_code, install_out or "Docker install failed."
 
     # Remove old containers if they exist
-    for cname in ["localmongo-db", "localmongo-web"]:
+    for cname in [f"{instance_name}-db", f"{instance_name}-web"]:
         run_process(docker_prefix + ["docker", "rm", "-f", cname], live_cb=None)
 
     # Start MongoDB container
     if live_cb:
-        live_cb(f"Starting MongoDB container on port {mongo_port}...\n")
+        live_cb(f"Starting MongoDB container '{instance_name}-db' on port {mongo_port}...\n")
     mongo_run = docker_prefix + [
         "docker", "run", "-d",
-        "--name", "localmongo-db",
+        "--name", f"{instance_name}-db",
         "--restart", "unless-stopped",
         "-p", f"127.0.0.1:{mongo_port}:27017",
         "-e", f"MONGO_INITDB_ROOT_USERNAME={admin_user}",
@@ -7265,12 +7269,12 @@ def run_mongo_docker(form=None, live_cb=None):
     # Start mongo-express container (web UI on localhost only)
     internal_web_port = str(int(web_port))
     if live_cb:
-        live_cb(f"Starting mongo-express web UI on port {internal_web_port}...\n")
+        live_cb(f"Starting mongo-express web UI '{instance_name}-web' on port {internal_web_port}...\n")
     mongoexpress_run = docker_prefix + [
         "docker", "run", "-d",
-        "--name", "localmongo-web",
+        "--name", f"{instance_name}-web",
         "--restart", "unless-stopped",
-        "--link", "localmongo-db:mongo",
+        "--link", f"{instance_name}-db:mongo",
         "-p", f"127.0.0.1:{internal_web_port}:8081",
         "-e", f"ME_CONFIG_MONGODB_ADMINUSERNAME={admin_user}",
         "-e", f"ME_CONFIG_MONGODB_ADMINPASSWORD={admin_pass}",
@@ -7290,7 +7294,7 @@ def run_mongo_docker(form=None, live_cb=None):
 
     # Set up nginx HTTPS for the web UI if requested (Linux/macOS only)
     if https_port and not is_windows:
-        service_name = "localmongo"
+        service_name = instance_name
         cert_dir = f"/etc/nginx/ssl/{service_name}"
         nginx_script = f"""
 set -euo pipefail
