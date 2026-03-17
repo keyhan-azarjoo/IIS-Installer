@@ -3,9 +3,21 @@
   ns.pages = ns.pages || {};
 
   ns.pages["dotnet-linux"] = function renderDotnetLinuxPage(p) {
-    const { Grid, ActionCard, cfg, run } = p;
+    const {
+      Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
+      ActionCard,
+      cfg, run, serviceBusy,
+      dotnetServices,
+      isScopeLoading, loadDotnetServices,
+      hasStoppedServices, batchServiceAction,
+      isServiceRunningStatus, formatServiceState, onServiceAction,
+      renderServiceUrls, renderServicePorts,
+    } = p;
 
     if (cfg.os !== "linux") return null;
+
+    const linuxServices = (dotnetServices || []).filter((s) => String(s.kind || "").toLowerCase() !== "docker");
+
     return (
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
@@ -26,6 +38,61 @@
             ]}
             onRun={run}
           />
+        </Grid>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                <Typography variant="h6" fontWeight={800}>Linux .NET Services</Typography>
+                <Box sx={{ flexGrow: 1 }} />
+                <Button variant="outlined" disabled={isScopeLoading("dotnet")} onClick={() => loadDotnetServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                {linuxServices.length > 0 && (
+                  <Button
+                    variant="outlined"
+                    color={hasStoppedServices(linuxServices) ? "success" : "error"}
+                    disabled={serviceBusy}
+                    onClick={() => batchServiceAction(linuxServices, "DotNet", hasStoppedServices(linuxServices) ? "start" : "stop")}
+                    sx={{ textTransform: "none" }}
+                  >
+                    {hasStoppedServices(linuxServices) ? "Start All" : "Stop All"}
+                  </Button>
+                )}
+              </Stack>
+              <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
+                {linuxServices.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">No Linux .NET services found. Deploy an app above to see services here.</Typography>
+                )}
+                {linuxServices.map((svc) => (
+                  <Paper key={`linux-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                    <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                      <Box sx={{ minWidth: 250 }}>
+                        <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "service"})</Typography></Typography>
+                        {renderServiceUrls(svc)}
+                        {renderServicePorts(svc)}
+                      </Box>
+                      <Chip
+                        size="small"
+                        color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"}
+                        label={formatServiceState(svc.status, svc.sub_status) || svc.status || "-"}
+                      />
+                      <Box sx={{ flexGrow: 1 }} />
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                        disabled={serviceBusy}
+                        onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                        sx={{ textTransform: "none" }}
+                      >
+                        {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                      </Button>
+                      <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
+                    </Stack>
+                  </Paper>
+                ))}
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
     );

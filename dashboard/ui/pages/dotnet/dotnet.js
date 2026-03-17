@@ -7,12 +7,49 @@
       Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
       NavCard,
       cfg, serviceBusy,
-      dotnetServices,
-      isScopeLoading, loadDotnetInfo, loadDotnetServices,
+      dotnetServices, dockerServices,
+      isScopeLoading, loadDotnetInfo, loadDotnetServices, loadDockerServices,
       hasStoppedServices, batchServiceAction, setPage,
       isServiceRunningStatus, formatServiceState, onServiceAction,
       renderServiceUrls, renderServicePorts,
     } = p;
+
+    const dotnetDockerServices = (dockerServices || []).filter((s) => {
+      const text = String(s.name || "") + " " + String(s.image || "");
+      return /(dotnet|aspnet|dotnetapp)/i.test(text) && !/python/i.test(text);
+    });
+    const allServices = [...(dotnetServices || []), ...dotnetDockerServices];
+
+    const serviceList = (svcs) => (
+      <Box sx={{ mt: 1.2, maxHeight: 340, overflow: "auto" }}>
+        {svcs.length === 0 && <Typography variant="body2" color="text.secondary">No DotNet-related services found.</Typography>}
+        {svcs.map((svc) => (
+          <Paper key={`dotnet-all-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+              <Box sx={{ minWidth: 250 }}>
+                <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "service"})</Typography></Typography>
+                {svc.image && <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>}
+                {renderServiceUrls(svc)}
+                {renderServicePorts(svc)}
+              </Box>
+              <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status) || svc.status || "-"} />
+              <Box sx={{ flexGrow: 1 }} />
+              <Button
+                size="small"
+                variant="outlined"
+                color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                disabled={serviceBusy}
+                onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                sx={{ textTransform: "none" }}
+              >
+                {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+              </Button>
+              <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
+            </Stack>
+          </Paper>
+        ))}
+      </Box>
+    );
 
     if (cfg.os === "windows") {
       return (
@@ -27,46 +64,22 @@
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
               <CardContent>
                 <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
+                  <Typography variant="h6" fontWeight={800}>All DotNet Services</Typography>
                   <Box sx={{ flexGrow: 1 }} />
-                  <Button variant="outlined" disabled={isScopeLoading("dotnet")} onClick={() => Promise.all([loadDotnetInfo.current(), loadDotnetServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
-                  <Button
-                    variant="outlined"
-                    color={hasStoppedServices(dotnetServices) ? "success" : "error"}
-                    disabled={serviceBusy || dotnetServices.length === 0}
-                    onClick={() => batchServiceAction(dotnetServices, "DotNet", hasStoppedServices(dotnetServices) ? "start" : "stop")}
-                    sx={{ textTransform: "none" }}
-                  >
-                    {hasStoppedServices(dotnetServices) ? "Start All DotNet" : "Stop All DotNet"}
-                  </Button>
+                  <Button variant="outlined" disabled={isScopeLoading("dotnet") || isScopeLoading("docker")} onClick={() => Promise.all([loadDotnetInfo.current(), loadDotnetServices.current(), loadDockerServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
+                  {allServices.length > 0 && (
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(allServices) ? "success" : "error"}
+                      disabled={serviceBusy}
+                      onClick={() => batchServiceAction(allServices, "DotNet", hasStoppedServices(allServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(allServices) ? "Start All" : "Stop All"}
+                    </Button>
+                  )}
                 </Stack>
-                <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
-                  {dotnetServices.length === 0 && <Typography variant="body2">No DotNet-related services found.</Typography>}
-                  {dotnetServices.map((svc) => (
-                    <Paper key={`dotnet-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                        <Box sx={{ minWidth: 250 }}>
-                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
-                          {renderServiceUrls(svc)}
-                          {renderServicePorts(svc)}
-                        </Box>
-                        <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
-                        <Box sx={{ flexGrow: 1 }} />
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                          disabled={serviceBusy}
-                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                        </Button>
-                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Box>
+                {serviceList(allServices)}
               </CardContent>
             </Card>
           </Grid>
@@ -86,46 +99,22 @@
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
               <CardContent>
                 <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
+                  <Typography variant="h6" fontWeight={800}>All DotNet Services</Typography>
                   <Box sx={{ flexGrow: 1 }} />
-                  <Button variant="outlined" disabled={isScopeLoading("dotnet")} onClick={() => Promise.all([loadDotnetInfo.current(), loadDotnetServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
-                  <Button
-                    variant="outlined"
-                    color={hasStoppedServices(dotnetServices) ? "success" : "error"}
-                    disabled={serviceBusy || dotnetServices.length === 0}
-                    onClick={() => batchServiceAction(dotnetServices, "DotNet", hasStoppedServices(dotnetServices) ? "start" : "stop")}
-                    sx={{ textTransform: "none" }}
-                  >
-                    {hasStoppedServices(dotnetServices) ? "Start All DotNet" : "Stop All DotNet"}
-                  </Button>
+                  <Button variant="outlined" disabled={isScopeLoading("dotnet") || isScopeLoading("docker")} onClick={() => Promise.all([loadDotnetInfo.current(), loadDotnetServices.current(), loadDockerServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
+                  {allServices.length > 0 && (
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(allServices) ? "success" : "error"}
+                      disabled={serviceBusy}
+                      onClick={() => batchServiceAction(allServices, "DotNet", hasStoppedServices(allServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(allServices) ? "Start All" : "Stop All"}
+                    </Button>
+                  )}
                 </Stack>
-                <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
-                  {dotnetServices.length === 0 && <Typography variant="body2">No DotNet-related services found.</Typography>}
-                  {dotnetServices.map((svc) => (
-                    <Paper key={`dotnet-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                        <Box sx={{ minWidth: 250 }}>
-                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
-                          {renderServiceUrls(svc)}
-                          {renderServicePorts(svc)}
-                        </Box>
-                        <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
-                        <Box sx={{ flexGrow: 1 }} />
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                          disabled={serviceBusy}
-                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                        </Button>
-                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Box>
+                {serviceList(allServices)}
               </CardContent>
             </Card>
           </Grid>
