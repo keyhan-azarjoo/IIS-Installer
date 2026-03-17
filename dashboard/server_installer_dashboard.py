@@ -4407,7 +4407,14 @@ def _urls_from_windows_locals3_log(preferred_host=""):
             continue
         try:
             parsed = urlparse(url)
-            host = preferred_host or get_windows_locals3_host() or parsed.hostname or choose_service_host()
+            # Prefer the hostname embedded in the MinIO log URL (set from MINIO_SERVER_URL,
+            # which is the user-selected IP). Only fall back to preferred_host / auto-detection
+            # when the log URL is on localhost / loopback.
+            log_host = str(parsed.hostname or "").strip()
+            if log_host and log_host not in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+                host = log_host
+            else:
+                host = preferred_host or get_windows_locals3_host() or choose_service_host()
             scheme = parsed.scheme or "https"
             port = parsed.port or (443 if scheme == "https" else 80)
             normalized = f"{scheme}://{host}" if port in (80, 443) else f"{scheme}://{host}:{port}"
@@ -4980,18 +4987,39 @@ def get_service_items():
                         try:
                             raw_bind = json.loads(out_bind)
                             binds = raw_bind if isinstance(raw_bind, list) else [raw_bind]
+                            seen_bind_ports: set = set()
                             for b in binds:
                                 proto = str(b.get("protocol", "http") or "http").lower()
                                 bind = str(b.get("bindingInformation", "") or "")
-                                port = parse_port_from_addr(bind)
-                                if port and str(port).isdigit():
-                                    task_ports.append({"port": int(port), "protocol": "tcp"})
-                                    scheme = "https" if proto == "https" else "http"
-                                    host = preferred_host
-                                    if int(port) in (80, 443):
-                                        task_urls.append(f"{scheme}://{host}")
-                                    else:
-                                        task_urls.append(f"{scheme}://{host}:{port}")
+                                # IIS bindingInformation format: "IP:PORT:HOSTNAME"
+                                # e.g. "*:7551:", "127.0.0.1:7551:", "192.168.1.205:7551:"
+                                bind_parts = bind.split(":")
+                                if len(bind_parts) < 2:
+                                    continue
+                                bind_ip_part = bind_parts[0].strip()
+                                port_str = bind_parts[1].strip()
+                                if not port_str.isdigit():
+                                    continue
+                                port = int(port_str)
+                                # Skip loopback bindings — they exist for internal health
+                                # checks only and should not appear as user-facing URLs.
+                                if bind_ip_part in ("127.0.0.1", "::1"):
+                                    continue
+                                if port not in seen_bind_ports:
+                                    task_ports.append({"port": port, "protocol": "tcp"})
+                                    seen_bind_ports.add(port)
+                                scheme = "https" if proto == "https" else "http"
+                                # Use the specific IP from the binding when available;
+                                # fall back to preferred_host for wildcard bindings.
+                                host = (
+                                    bind_ip_part
+                                    if bind_ip_part and bind_ip_part not in ("*", "0.0.0.0", "::")
+                                    else preferred_host
+                                )
+                                if port in (80, 443):
+                                    task_urls.append(f"{scheme}://{host}")
+                                else:
+                                    task_urls.append(f"{scheme}://{host}:{port}")
                         except Exception:
                             pass
                     if not task_urls:
