@@ -4945,20 +4945,30 @@ def get_service_items():
                     continue
                 details = _get_docker_container_details(name)
                 restart_policy = details.get("restart_policy", "")
-                ports = details.get("ports", [])
+                ports = list(details.get("ports", []))
+                container_labels = details.get("labels", {})
+                # Include nginx-managed HTTPS port stored as a container label
+                nginx_https_port_str = str(container_labels.get("com.serverinstaller.https_port", "") or "").strip()
+                if nginx_https_port_str.isdigit():
+                    nginx_https_port = int(nginx_https_port_str)
+                    if not any(p.get("port") == nginx_https_port for p in ports):
+                        ports.append({"port": nginx_https_port, "protocol": "tcp"})
                 urls = []
                 for p in ports:
+                    p_port = p.get("port")
+                    is_nginx_https = nginx_https_port_str.isdigit() and p_port == int(nginx_https_port_str)
                     scheme = "https" if (
-                        p.get("port") == 443 or
-                        details.get("labels", {}).get("com.localmongo.role") == "https"
+                        p_port == 443 or
+                        is_nginx_https or
+                        container_labels.get("com.localmongo.role") == "https"
                     ) else "http"
                     host = preferred_host
-                    if details.get("labels", {}).get("com.localmongo.role") == "mongodb":
+                    if container_labels.get("com.localmongo.role") == "mongodb":
                         continue
-                    if p.get("port") in (80, 443):
+                    if p_port in (80, 443):
                         urls.append(f"{scheme}://{host}")
                     else:
-                        urls.append(f"{scheme}://{host}:{p.get('port')}")
+                        urls.append(f"{scheme}://{host}:{p_port}")
                 items.append(
                     {
                         "kind": "docker",
@@ -7951,8 +7961,11 @@ def run_linux_docker_deploy(form, live_cb=None):
 
     if live_cb:
         live_cb(f"Starting container '{container_name}' mapped to host port {docker_host_port}\n")
+    run_labels = []
+    if https_port:
+        run_labels += ["--label", f"com.serverinstaller.https_port={https_port}"]
     code, output = run_process(
-        docker_prefix + ["docker", "run", "-d", "--restart", "unless-stopped", "--name", container_name, "-p", docker_bind, image_name],
+        docker_prefix + ["docker", "run", "-d", "--restart", "unless-stopped", "--name", container_name, "-p", docker_bind] + run_labels + [image_name],
         live_cb=live_cb,
     )
     if code != 0:
