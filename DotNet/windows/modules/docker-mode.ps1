@@ -391,7 +391,45 @@ function Invoke-DockerDeployment {
     Ensure-DockerInstalled
     $engineOsType = Get-DockerEngineOsType
 
-    # If Docker daemon is not responding, try to start Docker Desktop and wait
+    # Step 1: Try to start the native docker Windows service (Docker Engine CLI, not Docker Desktop)
+    if ([string]::IsNullOrWhiteSpace($engineOsType)) {
+        $dockerWinService = Get-Service -Name "docker" -ErrorAction SilentlyContinue
+        if ($dockerWinService) {
+            if ($dockerWinService.Status -ne "Running") {
+                Write-Host "Starting native Docker Windows service..."
+                Start-Service "docker" -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 5
+            }
+            $engineOsType = Get-DockerEngineOsType
+            if (-not [string]::IsNullOrWhiteSpace($engineOsType)) {
+                Write-Host "Docker engine available via Windows service (type: $engineOsType)."
+            }
+        }
+    }
+
+    # Step 2: Try switching to desktop-linux context (Docker Desktop's Linux VM context)
+    if ([string]::IsNullOrWhiteSpace($engineOsType)) {
+        try {
+            $previousErrorActionPreference = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            $ctxList = & docker context ls --format "{{.Name}}" 2>$null
+            $ErrorActionPreference = $previousErrorActionPreference
+            if ($ctxList -contains "desktop-linux") {
+                Write-Host "Switching to Docker Desktop Linux context (desktop-linux)..."
+                & docker context use desktop-linux 2>$null | Out-Null
+                Start-Sleep -Seconds 3
+                $engineOsType = Get-DockerEngineOsType
+                if (-not [string]::IsNullOrWhiteSpace($engineOsType)) {
+                    Write-Host "Docker engine available via desktop-linux context (type: $engineOsType)."
+                }
+            }
+        }
+        catch {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+    }
+
+    # Step 3: If still not available, start Docker Desktop and wait up to 120 seconds
     if ([string]::IsNullOrWhiteSpace($engineOsType)) {
         Write-Host "Docker engine not responding. Attempting to start Docker Desktop..."
         $desktopCandidates = @(
@@ -406,10 +444,23 @@ function Invoke-DockerDeployment {
             break
         }
 
-        Write-Host "Waiting for Docker engine to become available (up to 60 seconds)..."
-        $deadline = (Get-Date).AddSeconds(60)
+        Write-Host "Waiting for Docker engine to become available (up to 120 seconds)..."
+        $deadline = (Get-Date).AddSeconds(120)
         while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 3
+            Start-Sleep -Seconds 5
+            # Re-try context switch each iteration in case Docker Desktop just became ready
+            try {
+                $previousErrorActionPreference = $ErrorActionPreference
+                $ErrorActionPreference = "Continue"
+                $ctxList = & docker context ls --format "{{.Name}}" 2>$null
+                $ErrorActionPreference = $previousErrorActionPreference
+                if ($ctxList -contains "desktop-linux") {
+                    & docker context use desktop-linux 2>$null | Out-Null
+                }
+            }
+            catch {
+                $ErrorActionPreference = $previousErrorActionPreference
+            }
             $engineOsType = Get-DockerEngineOsType
             if (-not [string]::IsNullOrWhiteSpace($engineOsType)) {
                 Write-Host "Docker engine is now available (type: $engineOsType)."
@@ -449,7 +500,7 @@ function Invoke-DockerDeployment {
         Write-Host "Docker engine is already Linux."
     }
     else {
-        throw "Docker engine is not available. Please open Docker Desktop and wait for it to finish starting, then try again."
+        throw "Docker engine is not available after waiting. Please open Docker Desktop manually, wait for it to fully start (system tray icon turns solid), then try again."
     }
 
     $deploymentRoot = Join-Path $env:ProgramData "Server-Installer\docker"
