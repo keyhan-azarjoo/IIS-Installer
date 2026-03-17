@@ -121,6 +121,11 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   $Script:IISCertThumb = ""
   $siteName = "LocalS3"
   New-Item -ItemType Directory -Force -Path $siteRoot | Out-Null
+
+  # Determine the IP to bind IIS on: use the user-selected IP ($domain when it is an IPv4
+  # literal) so IIS only answers on that interface. Fall back to the detected LAN IP, or $null
+  # (all interfaces) if neither is available.
+  $bindIp = if (Test-IPv4Literal $domain) { $domain } elseif ($lanIp) { $lanIp } else { $null }
   if (Test-Path "IIS:\Sites\$siteName") {
     try { Stop-Website -Name $siteName -ErrorAction SilentlyContinue } catch {}
   }
@@ -256,6 +261,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   netsh http delete sslcert ipport="0.0.0.0:$httpsPort"          2>$null | Out-Null
   netsh http delete sslcert ipport="127.0.0.1:$httpsPort"        2>$null | Out-Null
   if ($lanIp) { netsh http delete sslcert ipport="${lanIp}:${httpsPort}" 2>$null | Out-Null }
+  if ($bindIp -and $bindIp -ne $lanIp) { netsh http delete sslcert ipport="${bindIp}:${httpsPort}" 2>$null | Out-Null }
   netsh http delete sslcert hostnameport="localhost:$consoleHttpsPort"   2>$null | Out-Null
   netsh http delete sslcert hostnameport="127.0.0.1:$consoleHttpsPort"  2>$null | Out-Null
   if ($domain -and $domain -ne "localhost") {
@@ -264,6 +270,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   netsh http delete sslcert ipport="0.0.0.0:$consoleHttpsPort"          2>$null | Out-Null
   netsh http delete sslcert ipport="127.0.0.1:$consoleHttpsPort"        2>$null | Out-Null
   if ($lanIp) { netsh http delete sslcert ipport="${lanIp}:${consoleHttpsPort}" 2>$null | Out-Null }
+  if ($bindIp -and $bindIp -ne $lanIp) { netsh http delete sslcert ipport="${bindIp}:${consoleHttpsPort}" 2>$null | Out-Null }
 
   # Build SAN: always include localhost + 127.0.0.1, plus domain and LAN IP if present
   $sanExt = "2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1"
@@ -331,25 +338,34 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   Get-WebBinding -Name $siteName | Remove-WebBinding -ErrorAction SilentlyContinue
   # Use non-SNI binding (SslFlags=0, no HostHeader) so HTTP.SYS uses per-IP (ipport) cert entries.
   # SNI (SslFlags=1) uses hostnameport entries that can silently fail to update across reinstalls.
-  New-WebBinding -Name $siteName -Protocol "https" -Port $httpsPort -IPAddress "*" -HostHeader "" -SslFlags 0 | Out-Null
-  # Associate SSL cert via AddSslCertificate (IIS-native: stores cert in IIS config AND HTTP.sys).
-  # Pure-netsh cert registration conflicts with IIS's own cert registration on Start-Website,
-  # causing the site to remain in Stopped state. Use AddSslCertificate to keep them in sync.
-  $mainBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "*:${httpsPort}:" } | Select-Object -First 1
-  if ($mainBind) {
-    try { $mainBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (main): $($_.Exception.Message)" }
-  }
-  New-WebBinding -Name $siteName -Protocol "https" -Port $consoleHttpsPort -IPAddress "*" -HostHeader "" -SslFlags 0 | Out-Null
-  $consoleBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "*:${consoleHttpsPort}:" } | Select-Object -First 1
-  if ($consoleBind) {
-    try { $consoleBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (console): $($_.Exception.Message)" }
-  }
-  if ($lanIp) {
-    New-WebBinding -Name $siteName -Protocol "https" -Port $httpsPort -IPAddress $lanIp -HostHeader "" -SslFlags 0 | Out-Null
-    $apiIpBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "${lanIp}:${httpsPort}:" } | Select-Object -First 1
-    if ($apiIpBind) {
-      try { $apiIpBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (LAN API): $($_.Exception.Message)" }
-    }
+  #
+  # When the user selected a specific IP, bind to 127.0.0.1 (for local health checks / IIS
+  # proxy back-channel) PLUS the selected IP (for external client access). This prevents IIS
+  # from answering on other interfaces such as a static WAN IP the user did not choose.
+  # When no specific IP is known, fall back to the wildcard "*" (original behaviour).
+  if ($bindIp) {
+    # API port: loopback for internal health checks + selected IP for external access
+    New-WebBinding -Name $siteName -Protocol "https" -Port $httpsPort -IPAddress "127.0.0.1" -HostHeader "" -SslFlags 0 | Out-Null
+    $loopApiB = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "127.0.0.1:${httpsPort}:" } | Select-Object -First 1
+    if ($loopApiB) { try { $loopApiB.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (loopback API): $($_.Exception.Message)" } }
+    New-WebBinding -Name $siteName -Protocol "https" -Port $httpsPort -IPAddress $bindIp -HostHeader "" -SslFlags 0 | Out-Null
+    $extApiB = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "${bindIp}:${httpsPort}:" } | Select-Object -First 1
+    if ($extApiB) { try { $extApiB.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (API IP): $($_.Exception.Message)" } }
+    # Console port: loopback for internal health checks + selected IP for external access
+    New-WebBinding -Name $siteName -Protocol "https" -Port $consoleHttpsPort -IPAddress "127.0.0.1" -HostHeader "" -SslFlags 0 | Out-Null
+    $loopConB = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "127.0.0.1:${consoleHttpsPort}:" } | Select-Object -First 1
+    if ($loopConB) { try { $loopConB.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (loopback console): $($_.Exception.Message)" } }
+    New-WebBinding -Name $siteName -Protocol "https" -Port $consoleHttpsPort -IPAddress $bindIp -HostHeader "" -SslFlags 0 | Out-Null
+    $extConB = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "${bindIp}:${consoleHttpsPort}:" } | Select-Object -First 1
+    if ($extConB) { try { $extConB.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (console IP): $($_.Exception.Message)" } }
+  } else {
+    # No specific IP selected — bind to all interfaces
+    New-WebBinding -Name $siteName -Protocol "https" -Port $httpsPort -IPAddress "*" -HostHeader "" -SslFlags 0 | Out-Null
+    $mainBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "*:${httpsPort}:" } | Select-Object -First 1
+    if ($mainBind) { try { $mainBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (main): $($_.Exception.Message)" } }
+    New-WebBinding -Name $siteName -Protocol "https" -Port $consoleHttpsPort -IPAddress "*" -HostHeader "" -SslFlags 0 | Out-Null
+    $consoleBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "*:${consoleHttpsPort}:" } | Select-Object -First 1
+    if ($consoleBind) { try { $consoleBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (console): $($_.Exception.Message)" } }
   }
 
   $ErrorActionPreference = "Continue"
@@ -374,7 +390,10 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   }
 
   if ($domain -ne "localhost") { Ensure-HostsEntry -domain $domain }
-  if ($lanIp) {
+  if ($bindIp) {
+    Ensure-FirewallPort -port $httpsPort
+    Ensure-FirewallPort -port $consoleHttpsPort
+  } elseif ($lanIp) {
     Ensure-FirewallPort -port $httpsPort
     Ensure-FirewallPort -port $consoleHttpsPort
   }
