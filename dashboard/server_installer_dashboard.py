@@ -40,6 +40,16 @@ from file_manager import (
     file_manager_write_file,
     normalize_file_manager_path as _normalize_file_manager_path,
 )
+from ssl_manager import (
+    ssl_list_certs,
+    ssl_delete_cert,
+    ssl_cert_info,
+    ssl_validate_pair,
+    run_ssl_letsencrypt,
+    run_ssl_renew_all,
+    run_ssl_upload,
+    run_ssl_assign,
+)
 from ui_assets import (
     DASHBOARD_UI_SCRIPTS,
     render_dashboard_page,
@@ -8912,6 +8922,16 @@ class Handler(BaseHTTPRequestHandler):
                 traceback.print_exc()
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
+        if self.path.startswith("/api/ssl/list"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                certs = ssl_list_certs()
+                self.write_json({"ok": True, "certs": certs}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
         if self.path.startswith("/api/files/list"):
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
@@ -9544,6 +9564,64 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_linux_docker_deploy(form)
+                self.respond_run_result(title, code, output)
+            return
+
+        # ── SSL / Certificate endpoints ────────────────────────────────────────
+        if self.path == "/api/ssl/delete":
+            name = (form.get("SSL_CERT_NAME", [""])[0] or "").strip()
+            ok, msg = ssl_delete_cert(name)
+            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
+            self.write_json({"ok": ok, "message": msg}, status)
+            return
+        if self.path == "/api/ssl/upload":
+            # Multipart upload: cert_file, key_file, chain_file, pfx_file + form fields
+            try:
+                parts = self._parse_multipart()
+                form_fields = {}
+                file_parts = []
+                for part in parts:
+                    pname = part.get("name", "")
+                    if pname in ("cert_file", "key_file", "chain_file", "pfx_file"):
+                        file_parts.append(part)
+                    else:
+                        form_fields[pname] = [part.get("content", b"").decode("utf-8", errors="replace").strip()]
+                # Merge with already-parsed form
+                for k, v in form.items():
+                    if k not in form_fields:
+                        form_fields[k] = v
+                code, msg = run_ssl_upload(form_fields, file_parts)
+                ok = (code == 0)
+                self.write_json({"ok": ok, "message": msg}, HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST)
+            except Exception as ex:
+                traceback.print_exc()
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        if self.path == "/run/ssl_letsencrypt":
+            title = "Let's Encrypt Certificate"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_ssl_letsencrypt(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_ssl_letsencrypt(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/ssl_renew":
+            title = "Renew SSL Certificates"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_ssl_renew_all(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_ssl_renew_all(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/ssl_assign":
+            title = "Assign Certificate to Service"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_ssl_assign(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_ssl_assign(form)
                 self.respond_run_result(title, code, output)
             return
 

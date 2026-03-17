@@ -30,6 +30,7 @@ DASHBOARD_UI_SCRIPTS = [
     "/static/ui/pages/python/python-docker.js",
     "/static/ui/pages/python/python-iis.js",
     "/static/ui/pages/website/website.js",
+    "/static/ui/pages/ssl/ssl.js",
     "/static/ui/pages/files/files.js",
     "/static/ui/app.js",
 ]

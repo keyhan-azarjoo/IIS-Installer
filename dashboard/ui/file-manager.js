@@ -332,39 +332,6 @@
             fontWeight: isSelected ? 700 : 400 }}>
           {entry.name}
         </Typography>
-        {/* Quick action bar on selection */}
-        {isSelected && (
-          <Box sx={{
-            position: "absolute", bottom: -28, left: "50%", transform: "translateX(-50%)",
-            display: "flex", gap: 0.25, bgcolor: "#fff", border: "1px solid #dbe5f6",
-            borderRadius: 1.5, px: 0.5, py: 0.25, boxShadow: "0 4px 12px rgba(0,0,0,.1)", zIndex: 20,
-          }}>
-            {!isDir && (
-              <Tooltip title="Open in Editor">
-                <IconButton size="small" sx={{ p: 0.3 }} onClick={(e) => { e.stopPropagation(); onOpenTab(entry.path); }}>
-                  <Icon icon={EditCodeIcon} sx={{ fontSize: 13, color: "#475569" }} />
-                </IconButton>
-              </Tooltip>
-            )}
-            {!isDir && (
-              <Tooltip title="Download">
-                <IconButton size="small" sx={{ p: 0.3 }} onClick={(e) => { e.stopPropagation(); onDownload(entry.path); }}>
-                  <Icon icon={DownloadIcon} sx={{ fontSize: 13, color: "#475569" }} />
-                </IconButton>
-              </Tooltip>
-            )}
-            <Tooltip title="Rename">
-              <IconButton size="small" sx={{ p: 0.3 }} disabled={fileOpBusy} onClick={(e) => { e.stopPropagation(); onRename(entry.path); }}>
-                <Icon icon={RenameIcon} sx={{ fontSize: 13, color: "#475569" }} />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Delete">
-              <IconButton size="small" sx={{ p: 0.3 }} disabled={fileOpBusy} onClick={(e) => { e.stopPropagation(); onDelete(entry.path, entry.is_dir); }}>
-                <Icon icon={DeleteIcon} sx={{ fontSize: 13, color: "#ef4444" }} />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        )}
       </Box>
     );
   }
@@ -754,6 +721,7 @@
         </Tooltip>
         <Tooltip title="Upload Folder">
           <span><Button component="label" size="small" variant="outlined" disabled={fileOpBusy || !fileManagerPath}
+            startIcon={<Icon icon={UploadIcon} sx={{ fontSize: 15 }} />}
             sx={{ textTransform: "none", fontSize: 12, px: 1.25, py: 0.4, borderColor: "#dbe5f6" }}>
             Folder<input hidden multiple type="file" webkitdirectory="" directory="" onChange={uploadIntoCurrentPath} />
           </Button></span>
@@ -765,6 +733,11 @@
               <Divider orientation="vertical" flexItem sx={{ mx: 0.5, height: 22, alignSelf: "center" }} />
               <Tooltip title="Rename"><span><IconButton size="small" sx={{ p: 0.8 }} disabled={fileOpBusy} onClick={() => renameFileManagerPath(cloudSelected)}><Icon icon={RenameIcon} sx={{ fontSize: 18, color: "#475569" }} /></IconButton></span></Tooltip>
               <Tooltip title="Delete"><span><IconButton size="small" sx={{ p: 0.8 }} disabled={fileOpBusy} onClick={() => deleteFileManagerPath(selEntry.path, selEntry.is_dir)}><Icon icon={DeleteIcon} sx={{ fontSize: 18, color: "#ef4444" }} /></IconButton></span></Tooltip>
+              <Tooltip title="Download">
+                <span><IconButton size="small" sx={{ p: 0.8 }} onClick={() => window.open(`/api/files/download?path=${encodeURIComponent(selEntry.path)}`, "_blank", "noopener,noreferrer")}>
+                  <Icon icon={DownloadIcon} sx={{ fontSize: 18, color: "#475569" }} />
+                </IconButton></span>
+              </Tooltip>
             </>
           ) : null;
         })()}
@@ -941,13 +914,6 @@
               <Typography variant="body2" noWrap sx={{ flexGrow: 1, fontSize: 13, minWidth: 0 }}>{entry.name}</Typography>
               <Typography variant="caption" sx={{ color: "#94a3b8", fontSize: 11, flexShrink: 0, minWidth: 56, textAlign: "right" }}>{entry.is_dir ? "" : fmtBytes(entry.size)}</Typography>
               <Typography variant="caption" sx={{ color: "#cbd5e1", fontSize: 11, flexShrink: 0, minWidth: 80, textAlign: "right", display: { xs: "none", md: "block" } }}>{fmtDate(entry.modified_ts)}</Typography>
-              <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0, ml: 0.5 }}>
-                {!entry.is_dir && (
-                  <Tooltip title="Download"><IconButton size="small" sx={{ p: 0.3 }} onClick={(e) => { e.stopPropagation(); window.open(`/api/files/download?path=${encodeURIComponent(entry.path)}`, "_blank", "noopener,noreferrer"); }}><Icon icon={DownloadIcon} sx={{ fontSize: 14, color: "#64748b" }} /></IconButton></Tooltip>
-                )}
-                <Tooltip title="Rename"><IconButton size="small" sx={{ p: 0.3 }} disabled={fileOpBusy} onClick={(e) => { e.stopPropagation(); renameFileManagerPath(entry.path); }}><Icon icon={RenameIcon} sx={{ fontSize: 14, color: "#64748b" }} /></IconButton></Tooltip>
-                <Tooltip title="Delete"><IconButton size="small" sx={{ p: 0.3 }} disabled={fileOpBusy} onClick={(e) => { e.stopPropagation(); deleteFileManagerPath(entry.path, entry.is_dir); }}><Icon icon={DeleteIcon} sx={{ fontSize: 14, color: "#ef4444" }} /></IconButton></Tooltip>
-              </Box>
             </Box>
           ))}
         </Box>
@@ -993,22 +959,6 @@
                       {fname}{t.dirty ? " ●" : ""}
                     </Typography>
                     {t.loading && <CircularProgress size={10} sx={{ flexShrink: 0 }} />}
-                    {!isMin && (
-                      <Tooltip title="Minimize">
-                        <Box component="span" onClick={(e) => { e.stopPropagation(); minimizeTab(t.path); }}
-                          sx={{ flexShrink: 0, opacity: 0.5, cursor: "pointer", display: "flex", "&:hover": { opacity: 1 }, lineHeight: 0 }}>
-                          <Icon icon={MinimizeIcon} sx={{ fontSize: 13, color: "#64748b" }} />
-                        </Box>
-                      </Tooltip>
-                    )}
-                    {isMin && (
-                      <Tooltip title="Restore (double-click)">
-                        <Box component="span" onClick={(e) => { e.stopPropagation(); restoreTab(t.path); }}
-                          sx={{ flexShrink: 0, opacity: 0.5, cursor: "pointer", display: "flex", "&:hover": { opacity: 1 }, lineHeight: 0 }}>
-                          <Icon icon={RestoreIcon} sx={{ fontSize: 13, color: "#64748b" }} />
-                        </Box>
-                      </Tooltip>
-                    )}
                     <Tooltip title="Close">
                       <Box component="span" onClick={(e) => { e.stopPropagation(); closeTab(t.path); }}
                         sx={{ flexShrink: 0, opacity: 0.45, cursor: "pointer", display: "flex", "&:hover": { opacity: 1 }, lineHeight: 0 }}>
@@ -1089,16 +1039,6 @@
                   onClick={() => discardTab(tab.path)}
                   sx={{ textTransform: "none", fontSize: 12, px: 1.5, py: 0.35, color: "#64748b", borderColor: "#dbe5f6" }}>
                   Discard
-                </Button>
-                <Button size="small" variant="outlined"
-                  onClick={() => minimizeTab(tab.path)}
-                  sx={{ textTransform: "none", fontSize: 12, px: 1.5, py: 0.35, color: "#64748b", borderColor: "#dbe5f6" }}>
-                  Minimize
-                </Button>
-                <Button size="small" variant="outlined" color="error"
-                  onClick={() => closeTab(tab.path)}
-                  sx={{ textTransform: "none", fontSize: 12, px: 1.5, py: 0.35 }}>
-                  Close
                 </Button>
                 <Button size="small" variant="contained" disabled={!tab.dirty || tab.loading}
                   onClick={() => saveTab(tab.path)}

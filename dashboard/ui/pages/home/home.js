@@ -30,6 +30,9 @@
         <Grid item xs={12} md={6}>
           <NavCard title="Files" text="Browse, upload, edit, rename, download, and delete files across the server filesystem." onClick={() => { setPage("files"); setFileManagerData(null); }} outlined />
         </Grid>
+        <Grid item xs={12} md={6}>
+          <NavCard title="SSL & Certificates" text="Manage TLS certificates: get free Let's Encrypt certs, upload your own CA-signed certs, and assign them to IIS, nginx, or any service." onClick={() => setPage("ssl")} outlined />
+        </Grid>
       </Grid>
     );
   };

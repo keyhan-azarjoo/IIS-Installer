@@ -544,6 +544,7 @@ function App() {
     if (page === "proxy") return "Proxy";
     if (page === "python") return "Python";
     if (page === "website") return "Websites";
+    if (page === "ssl") return "SSL & Certificates";
     if (page === "files") return "File Manager";
     if (page === "python-api") return "Python > API";
     if (page === "python-system") return "Python > OS Service";
@@ -1612,6 +1613,14 @@ function App() {
         onClick={runDashboardUpdate}
       >
         {collapsed ? "Update" : "Update Dashboard"}
+      </Button>
+      <Button
+        fullWidth
+        variant={page === "ssl" ? "contained" : "outlined"}
+        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: page === "ssl" ? undefined : "#dbeafe", borderColor: "rgba(219,234,254,.35)" }}
+        onClick={() => { setPage("ssl"); if (isMobile) setMobileOpen(false); }}
+      >
+        {collapsed ? "SSL" : "SSL & Certificates"}
       </Button>
       <Button
         fullWidth
