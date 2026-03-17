@@ -41,6 +41,17 @@
     const [uploadBusy,   setUploadBusy]   = React.useState(false);
     const [uploadStatus, setUploadStatus] = React.useState(null); // {ok, text}
 
+    // ── SSL cert list ─────────────────────────────────────────────────────
+    const [certList,     setCertList]     = React.useState([]);
+    const [selectedCert, setSelectedCert] = React.useState("self_signed");
+
+    React.useEffect(() => {
+      fetch("/api/ssl/list", { headers: { "X-Requested-With": "fetch" } })
+        .then((r) => r.json())
+        .then((j) => { if (j.ok) setCertList(j.certs || []); })
+        .catch(() => {});
+    }, []);
+
     // Keep bindIp in sync if selectableIps loads
     React.useEffect(() => {
       if (!bindIp && selectableIps.length === 1) setBindIp(selectableIps[0]);
@@ -193,6 +204,26 @@
                       onChange={(e) => { setHttpsPort(e.target.value); setPortResults(null); }}
                     />
                   </Stack>
+
+                  {/* SSL cert dropdown — shown when HTTPS port is set */}
+                  {httpsPort.trim() && (
+                    <FormControl size="small" fullWidth>
+                      <InputLabel>SSL Certificate</InputLabel>
+                      <Select
+                        label="SSL Certificate"
+                        name="WEBSITE_SSL_CERT"
+                        value={selectedCert}
+                        onChange={(e) => setSelectedCert(e.target.value)}
+                      >
+                        <MenuItem value="self_signed">Self-Signed (auto-generated)</MenuItem>
+                        {certList.map((cert) => (
+                          <MenuItem key={cert.name} value={cert.name}>
+                            {cert.name}{cert.domain ? ` — ${cert.domain}` : ""}{cert.self_signed ? " (self-signed)" : ""}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
 
                   {/* Port check button + results */}
                   <Box>

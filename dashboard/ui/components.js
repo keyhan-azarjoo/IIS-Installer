@@ -124,6 +124,7 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
       placeholder: f.placeholder ?? "",
       type: f.type ?? "text",
       checkPort: !!f.checkPort,
+      certSelect: f.certSelect || null,
     }))),
     [fields]
   );
@@ -147,6 +148,23 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
   }, [fieldSignature]);
   const [portValues, setPortValues] = React.useState(initialPortValues);
   const [portStates, setPortStates] = React.useState(initialPortStates);
+
+  // SSL cert dropdown — loaded when any field has certSelect property
+  const certSelectFields = React.useMemo(
+    () => (fields || []).filter((f) => !!f.certSelect),
+    [fieldSignature]
+  );
+  const [certList, setCertList] = React.useState([]);
+  const [certSelections, setCertSelections] = React.useState({});
+
+  React.useEffect(() => {
+    if (certSelectFields.length === 0) return;
+    fetch("/api/ssl/list", { headers: { "X-Requested-With": "fetch" } })
+      .then((r) => r.json())
+      .then((j) => { if (j.ok) setCertList(j.certs || []); })
+      .catch(() => {});
+  }, [certSelectFields.length]);
+
   const uploadInputRef = React.useRef(null);
   const formRef = React.useRef(null);
   const portValidationRunRef = React.useRef(0);
@@ -400,9 +418,13 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{description}</Typography>
         <Box ref={formRef} component="form" onSubmit={handleSubmit}>
           {(fields || []).map((f) => {
+            const certHiddenName = f.certSelect || null;
+            const certSelectedValue = certHiddenName ? (certSelections[f.name] || "self_signed") : null;
+
+            let fieldEl;
             if (f.checkPort) {
               const fieldState = portStates[f.name] || { checking: false, usable: true, error: false, message: "" };
-              return (
+              fieldEl = (
                 <Field
                   key={f.name}
                   field={f}
@@ -423,8 +445,33 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
                   }}
                 />
               );
+            } else {
+              fieldEl = <Field key={f.name} field={f} />;
             }
-            return <Field key={f.name} field={f} />;
+
+            if (!certHiddenName) return fieldEl;
+
+            return (
+              <React.Fragment key={f.name}>
+                {fieldEl}
+                <FormControl fullWidth size="small" sx={{ mb: 1.5 }}>
+                  <InputLabel>SSL Certificate</InputLabel>
+                  <Select
+                    label="SSL Certificate"
+                    value={certSelectedValue}
+                    onChange={(ev) => setCertSelections((prev) => ({ ...prev, [f.name]: ev.target.value }))}
+                  >
+                    <MenuItem value="self_signed">Self-Signed (auto-generated)</MenuItem>
+                    {certList.map((cert) => (
+                      <MenuItem key={cert.name} value={cert.name}>
+                        {cert.name}{cert.domain ? ` — ${cert.domain}` : ""}{cert.self_signed ? " (self-signed)" : ""}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <input type="hidden" name={certHiddenName} value={certSelectedValue} />
+              </React.Fragment>
+            );
           })}
           {(fields || []).some((f) => f.enableUpload) && (
             <Box sx={{ mb: 1.5 }}>

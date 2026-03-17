@@ -9423,6 +9423,71 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as ex:
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
             return
+        if self.path.startswith("/api/files/info"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                query = {}
+                if "?" in self.path:
+                    query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+                path_str = (query.get("path", [""])[0] or "").strip()
+                if not path_str:
+                    self.write_json({"ok": False, "error": "path is required"}, HTTPStatus.BAD_REQUEST)
+                    return
+                p = Path(path_str)
+                if not p.exists():
+                    self.write_json({"ok": False, "error": f"Path does not exist: {path_str}"}, HTTPStatus.NOT_FOUND)
+                    return
+                st = p.stat()
+                is_dir = p.is_dir()
+                # For directories count items (non-recursive) and compute recursive size
+                item_count = None
+                dir_size_bytes = None
+                if is_dir:
+                    try:
+                        items = list(p.iterdir())
+                        item_count = len(items)
+                    except (PermissionError, OSError):
+                        item_count = None
+                    try:
+                        dir_size_bytes = sum(
+                            f.stat().st_size for f in p.rglob("*") if f.is_file()
+                        )
+                    except (PermissionError, OSError):
+                        dir_size_bytes = None
+                # Permissions string (rwxrwxrwx style)
+                try:
+                    import stat as _stat
+                    mode = st.st_mode
+                    perm_str = _stat.filemode(mode)
+                except Exception:
+                    perm_str = ""
+                # Created time: Windows = st_ctime, Unix = birthtime if available else st_ctime
+                created = None
+                try:
+                    created = int(st.st_birthtime)
+                except AttributeError:
+                    created = int(st.st_ctime)
+                result = {
+                    "ok": True,
+                    "path": str(p),
+                    "name": p.name,
+                    "type": "folder" if is_dir else "file",
+                    "size_bytes": st.st_size if not is_dir else (dir_size_bytes or 0),
+                    "modified": int(st.st_mtime),
+                    "created": created,
+                    "permissions": perm_str,
+                }
+                if is_dir:
+                    result["item_count"] = item_count
+                    result["dir_size_bytes"] = dir_size_bytes
+                else:
+                    result["extension"] = p.suffix.lstrip(".")
+                self.write_json(result, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
         if self.path == "/api/files/write":
             form = self.parse_request_form()
             try:

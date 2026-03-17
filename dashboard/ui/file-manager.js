@@ -374,6 +374,11 @@
     const [ctxMenu, setCtxMenu]             = React.useState(null); // { x, y, entry|null }
     const [clipboard, setClipboard]         = React.useState(null); // { op:"copy"|"cut", path, name }
 
+    // ── Properties dialog state ─────────────────────────────────────────────
+    const [propsDlg, setPropsDlg]           = React.useState(null); // entry object
+    const [propsData, setPropsData]         = React.useState(null); // fetched info
+    const [propsLoading, setPropsLoading]   = React.useState(false);
+
     // ── Op error ────────────────────────────────────────────────────────────
     const [opError, setOpError]             = React.useState("");
 
@@ -648,6 +653,24 @@
       finally { setMoveBusy(false); }
     }, [clipboard, fileManagerPath, sep, loadFileManager, refreshTreeDir]);
 
+    // ── Show Properties ─────────────────────────────────────────────────────
+    const showProperties = React.useCallback(async (entry) => {
+      setPropsDlg(entry);
+      setPropsData(null);
+      setPropsLoading(true);
+      try {
+        const r = await fetch(`/api/files/info?path=${encodeURIComponent(entry.path)}`, {
+          headers: { "X-Requested-With": "fetch" },
+        });
+        const j = await r.json();
+        setPropsData(j.ok ? j : { error: j.error || "Failed to load properties." });
+      } catch (err) {
+        setPropsData({ error: String(err) });
+      } finally {
+        setPropsLoading(false);
+      }
+    }, []);
+
     const buildCtxItems = React.useCallback((entry) => {
       const pasteDir = entry ? (entry.is_dir ? entry.path : (fileManagerPath || "")) : (fileManagerPath || "");
       const items = [];
@@ -674,13 +697,15 @@
           items.push({ label: "Download", icon: DownloadIcon, action: () => window.open(`/api/files/download?path=${encodeURIComponent(entry.path)}`, "_blank", "noopener,noreferrer") });
         }
         items.push("---");
+        items.push({ label: "Properties", icon: ConfigFileIcon, action: () => showProperties(entry) });
+        items.push("---");
       }
       items.push({ label: "New Folder", icon: NewFolderIcon, action: createFolderInCurrentPath, disabled: fileOpBusy || !fileManagerPath });
       items.push({ label: "New File",   icon: NewFileIcon,   action: createFileInCurrentPath,   disabled: fileOpBusy || !fileManagerPath });
       items.push("---");
       items.push({ label: "Refresh", icon: RefreshIcon, action: () => loadFileManager(fileManagerPath) });
       return items;
-    }, [clipboard, fileManagerPath, fileOpBusy, openEditorTab, loadFileManager, ctxCopy, ctxCut, ctxPaste, renameFileManagerPath, deleteFileManagerPath, createFolderInCurrentPath, createFileInCurrentPath]);
+    }, [clipboard, fileManagerPath, fileOpBusy, openEditorTab, loadFileManager, ctxCopy, ctxCut, ctxPaste, renameFileManagerPath, deleteFileManagerPath, createFolderInCurrentPath, createFileInCurrentPath, showProperties]);
 
     // ─── TOOLBAR ────────────────────────────────────────────────────────────
     const renderToolbar = () => (
@@ -1095,6 +1120,60 @@
             onClose={() => setCtxMenu(null)}
           />
         )}
+
+        {/* Properties dialog */}
+        {propsDlg && (() => {
+          const { Dialog, DialogTitle, DialogContent, DialogActions, Button: MuiBtn, Divider: MuiDiv } = MaterialUI;
+          if (!Dialog) return null;
+          const fmt = (b) => {
+            if (b == null) return "—";
+            if (b === 0) return "0 B";
+            const k = 1024, u = ["B", "KB", "MB", "GB", "TB"];
+            const i = Math.min(Math.floor(Math.log(b + 1) / Math.log(k)), u.length - 1);
+            return `${+(b / k ** i).toFixed(2)} ${u[i]}`;
+          };
+          const fmtTs = (ts) => ts ? new Date(ts * 1000).toLocaleString() : "—";
+          const d = propsData;
+          const rows = d && !d.error ? [
+            ["Name",        d.name],
+            ["Type",        d.type === "folder" ? "Folder" : `File${d.extension ? ` (.${d.extension})` : ""}`],
+            ["Location",    d.path],
+            d.type === "folder"
+              ? ["Contains", d.item_count != null ? `${d.item_count} item(s)` : "—"]
+              : ["Size",     fmt(d.size_bytes)],
+            d.type === "folder" && d.dir_size_bytes != null
+              ? ["Total Size", fmt(d.dir_size_bytes)]
+              : null,
+            ["Modified",    fmtTs(d.modified)],
+            ["Created",     fmtTs(d.created)],
+            ["Permissions", d.permissions || "—"],
+          ].filter(Boolean) : [];
+          return (
+            <Dialog open onClose={() => { setPropsDlg(null); setPropsData(null); }} maxWidth="sm" fullWidth>
+              <DialogTitle sx={{ fontWeight: 800, pb: 0.5 }}>
+                Properties — {propsDlg.name}
+              </DialogTitle>
+              <MuiDiv />
+              <DialogContent sx={{ pt: 1.5 }}>
+                {propsLoading && (
+                  <Typography variant="body2" color="text.secondary">Loading…</Typography>
+                )}
+                {d && d.error && (
+                  <Alert severity="error">{d.error}</Alert>
+                )}
+                {rows.map(([label, val]) => (
+                  <Box key={label} sx={{ display: "flex", mb: 1 }}>
+                    <Typography variant="body2" fontWeight={700} sx={{ minWidth: 110, color: "text.secondary" }}>{label}</Typography>
+                    <Typography variant="body2" sx={{ wordBreak: "break-all" }}>{val}</Typography>
+                  </Box>
+                ))}
+              </DialogContent>
+              <DialogActions>
+                <MuiBtn onClick={() => { setPropsDlg(null); setPropsData(null); }} sx={{ textTransform: "none" }}>Close</MuiBtn>
+              </DialogActions>
+            </Dialog>
+          );
+        })()}
       </Box>
     );
   }
