@@ -6,23 +6,54 @@
     Divider, IconButton, LinearProgress, Paper,
     TextField, Tooltip, Typography, InputAdornment,
   } = MaterialUI;
-  const MuiIcons = window.MaterialUIIcons || {};
+  // ─── Inline SVG icon system ────────────────────────────────────────────────
+  function mkI(d, d2) {
+    return function SvgIcon({ sx = {}, onClick }) {
+      const sz = typeof sx.fontSize === "number" ? sx.fontSize : 20;
+      return (
+        <svg viewBox="0 0 24 24" width={sz} height={sz}
+          style={{
+            display: "inline-block", flexShrink: sx.flexShrink !== undefined ? sx.flexShrink : 0,
+            verticalAlign: "middle", fill: sx.color || "currentColor",
+            marginRight: sx.mr ? sx.mr * 8 : undefined,
+            marginLeft: sx.ml ? sx.ml * 8 : undefined,
+            opacity: sx.opacity, cursor: onClick ? "pointer" : sx.cursor,
+          }}
+          onClick={onClick}>
+          <path d={d} />{d2 && <path d={d2} />}
+        </svg>
+      );
+    };
+  }
 
-  // ─── Icon helpers (graceful fallbacks) ────────────────────────────────────
-  function ic(name) { return MuiIcons[name + "Rounded"] || MuiIcons[name] || null; }
-  const FolderIcon        = ic("Folder");
-  const FolderOpenIcon    = ic("FolderOpen");
-  const FileIcon          = ic("InsertDriveFile");
-  const ImageFileIcon     = ic("Image") || ic("Photo");
-  const VideoFileIcon     = ic("VideoFile") || ic("Videocam");
-  const AudioFileIcon     = ic("AudioFile") || ic("Audiotrack");
-  const PdfFileIcon       = ic("PictureAsPdf") || ic("Description");
-  const ZipFileIcon       = ic("FolderZip") || ic("Archive");
-  const CodeFileIcon      = ic("Code");
-  const DataFileIcon      = ic("TableChart") || ic("GridOn");
-  const DocFileIcon       = ic("Article") || ic("Description");
-  const ShellFileIcon     = ic("Terminal") || ic("Code");
-  const ConfigFileIcon    = ic("Settings") || ic("Tune");
+  const FolderIcon       = mkI("M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z");
+  const FolderOpenIcon   = mkI("M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z");
+  const FileIcon         = mkI("M6 2c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6H6zm7 7V3.5L18.5 9H13z");
+  const ImageFileIcon    = mkI("M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z");
+  const VideoFileIcon    = mkI("M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4zm-4 11l-5-3 5-3v6z");
+  const AudioFileIcon    = mkI("M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6zm-2 16c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z");
+  const PdfFileIcon      = mkI("M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z");
+  const ZipFileIcon      = mkI("M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-4 6h-2v2h2v2h-2v2h-2v-2h2v-2h-2v-2h2v-2h-2V8h2v2h2v2z");
+  const CodeFileIcon     = mkI("M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z");
+  const DataFileIcon     = mkI("M3 3h18v2H3V3zm0 4h18v2H3V7zm0 4h18v2H3v-2zm0 4h18v2H3v-2zm0 4h18v2H3v-2z");
+  const DocFileIcon      = mkI("M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z");
+  const ShellFileIcon    = mkI("M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8h16v10zm-2-1H6v-2h12v2zM8.83 12l-1.42 1.41L10.83 16l-3.41 3.41L8.83 21 14 16l-5.17-4zm6.34 1H10v2h5.17l-1.42 1.41L15.17 18 18 15.17 15.17 13z", "M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8h16v10zM6.99 11.5l1.42-1.41L10.82 12.5l-2.41 2.41L6.99 13.5 8.41 12l-1.42-1.5zm4.18 3.5h5v-2h-5v2z");
+  const ConfigFileIcon   = mkI("M19.43 12.98c.04-.32.07-.64.07-.98 0-.34-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98 0 .33.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z");
+  const ChevronRightIcon = mkI("M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z");
+  const ExpandMoreIcon   = mkI("M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z");
+  const GridViewIcon     = mkI("M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z");
+  const TreeViewIcon     = mkI("M22 11V3h-7v3H9V3H2v8h7V8h2v10h4v3h7v-8h-7v3h-2V8h2v3z");
+  const RefreshIcon      = mkI("M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z");
+  const HomeIcon         = mkI("M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z");
+  const DeleteIcon       = mkI("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z");
+  const RenameIcon       = mkI("M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.41l-2.34-2.34a1.003 1.003 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z");
+  const DownloadIcon     = mkI("M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z");
+  const NewFolderIcon    = mkI("M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z");
+  const NewFileIcon      = mkI("M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 14h-3v3h-2v-3H8v-2h3v-3h2v3h3v2zm-3-7V3.5L18.5 9H13z");
+  const UploadIcon       = mkI("M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z");
+  const BackIcon         = mkI("M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z");
+  const StorageIcon      = mkI("M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h4v2H6zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z");
+  const EditCodeIcon     = mkI("M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z");
 
   function getFileTypeIcon(name) {
     const ext = (name || "").split(".").pop().toLowerCase();
@@ -36,24 +67,8 @@
     if (["doc","docx","odt","rtf","md","txt","log"].includes(ext)) return DocFileIcon;
     if (["sh","bash","zsh","ps1","bat","cmd"].includes(ext)) return ShellFileIcon;
     if (["json","yaml","yml","toml","xml","env","ini","cfg","conf"].includes(ext)) return ConfigFileIcon;
-    return null;
+    return FileIcon;
   }
-
-  const ChevronRightIcon  = ic("ChevronRight");
-  const ExpandMoreIcon    = ic("ExpandMore");
-  const GridViewIcon      = ic("GridView") || ic("Apps");
-  const TreeViewIcon      = ic("AccountTree");
-  const RefreshIcon       = ic("Refresh");
-  const HomeIcon          = ic("Home");
-  const DeleteIcon        = ic("Delete");
-  const RenameIcon        = ic("DriveFileRenameOutline") || ic("Edit");
-  const DownloadIcon      = ic("Download");
-  const NewFolderIcon     = ic("CreateNewFolder");
-  const NewFileIcon       = ic("NoteAdd");
-  const UploadIcon        = ic("CloudUpload");
-  const BackIcon          = ic("ArrowBack");
-  const StorageIcon       = ic("Storage") || ic("Computer");
-  const EditCodeIcon      = ic("Code") || ic("Edit");
 
   // ─── Utilities ─────────────────────────────────────────────────────────────
   function fmtBytes(b) {
@@ -136,19 +151,19 @@
         <Box sx={{ width: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           {isDir && isLoadingChildren && <CircularProgress size={11} />}
           {isDir && !isLoadingChildren && (
-            <Box
-              component={isExpanded ? (ExpandMoreIcon || "span") : (ChevronRightIcon || "span")}
-              sx={{ fontSize: 16, color: "text.secondary", cursor: "pointer" }}
+            <Icon
+              icon={isExpanded ? ExpandMoreIcon : ChevronRightIcon}
+              sx={{ fontSize: 16, color: "#64748b", cursor: "pointer" }}
               onClick={(e) => { e.stopPropagation(); onToggle(entry.path); }}
             />
           )}
         </Box>
         {/* Icon */}
         {isDir ? (
-          <Box component={(isExpanded && FolderOpenIcon) ? FolderOpenIcon : (FolderIcon || "span")}
+          <Icon icon={isExpanded ? FolderOpenIcon : FolderIcon}
             sx={{ fontSize: 16, color: "#f59e0b", mr: 0.6, flexShrink: 0 }} />
         ) : (
-          <Box component={getFileTypeIcon(entry.name) || FileIcon || "span"}
+          <Icon icon={getFileTypeIcon(entry.name)}
             sx={{ fontSize: 15, color: fileExtColor(entry.name), mr: 0.6, flexShrink: 0 }} />
         )}
         {/* Name */}
@@ -229,16 +244,16 @@
       >
         {/* Icon */}
         {isDir ? (
-          <Box component={FolderIcon || "span"} sx={{ fontSize: 52, color: isDragOver ? "#16a34a" : "#f59e0b" }} />
+          <Icon icon={isDragOver ? FolderOpenIcon : FolderIcon} sx={{ fontSize: 52, color: isDragOver ? "#16a34a" : "#f59e0b" }} />
         ) : (
           <Box sx={{
-            width: 40, height: 52, bgcolor: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 1.5,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            width: 48, height: 56, bgcolor: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 1.5,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "2px",
           }}>
-            <Typography sx={{ fontSize: 9, fontWeight: 800, color: fileExtColor(entry.name), textTransform: "uppercase", letterSpacing: .5, lineHeight: 1 }}>
+            <Icon icon={getFileTypeIcon(entry.name)} sx={{ fontSize: 26, color: fileExtColor(entry.name) }} />
+            <Typography sx={{ fontSize: 8.5, fontWeight: 800, color: fileExtColor(entry.name), textTransform: "uppercase", letterSpacing: .3, lineHeight: 1 }}>
               {ext || "FILE"}
             </Typography>
-            <Box component={getFileTypeIcon(entry.name) || FileIcon || "span"} sx={{ fontSize: 18, color: fileExtColor(entry.name), mt: 0.25 }} />
           </Box>
         )}
         {/* Name */}
@@ -605,7 +620,7 @@
       <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0.25, px: 1.5, py: 0.6, bgcolor: "#f8faff", borderBottom: "1px solid #e8eef6" }}>
         {breadcrumbs.map((crumb, i) => (
           <React.Fragment key={crumb.path + "-" + i}>
-            {i > 0 && <Box component={ChevronRightIcon || "span"} sx={{ fontSize: 14, color: "#cbd5e1" }} />}
+            {i > 0 && <Icon icon={ChevronRightIcon} sx={{ fontSize: 14, color: "#cbd5e1" }} />}
             <Typography variant="caption"
               sx={{
                 fontSize: 12, px: 0.75, py: 0.2, borderRadius: 1, cursor: "pointer",
@@ -615,7 +630,7 @@
                 "&:hover": { bgcolor: "rgba(29,78,216,.07)", color: "#1d4ed8" },
               }}
               onClick={() => loadFileManager(crumb.path)}>
-              {i === 0 && StorageIcon && <Box component={StorageIcon} sx={{ fontSize: 13 }} />}
+              {i === 0 && <Icon icon={StorageIcon} sx={{ fontSize: 13 }} />}
               {crumb.label}
             </Typography>
           </React.Fragment>
@@ -680,7 +695,7 @@
 
         {entries.length === 0 && !fileManagerLoading && (
           <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", py: 8, color: "#94a3b8" }}>
-            <Box component={FolderOpenIcon || "span"} sx={{ fontSize: 72, opacity: 0.25, mb: 1.5 }} />
+            <Icon icon={FolderOpenIcon} sx={{ fontSize: 72, opacity: 0.25 }} />
             <Typography variant="body2" color="text.secondary">
               {fileManagerPath ? "This folder is empty." : "Select a drive or folder to start browsing."}
             </Typography>
@@ -805,8 +820,8 @@
               onDoubleClick={() => { if (entry.is_dir) { loadFileManager(entry.path); handleTreeToggle(entry.path); } }}
             >
               {entry.is_dir
-                ? <Box component={FolderIcon || "span"} sx={{ fontSize: 18, color: "#f59e0b", flexShrink: 0 }} />
-                : <Box component={getFileTypeIcon(entry.name) || FileIcon || "span"} sx={{ fontSize: 16, color: fileExtColor(entry.name), flexShrink: 0 }} />
+                ? <Icon icon={FolderIcon} sx={{ fontSize: 18, color: "#f59e0b", flexShrink: 0 }} />
+                : <Icon icon={getFileTypeIcon(entry.name)} sx={{ fontSize: 16, color: fileExtColor(entry.name), flexShrink: 0 }} />
               }
               <Typography variant="body2" noWrap sx={{ flexGrow: 1, fontSize: 13, minWidth: 0 }}>{entry.name}</Typography>
               <Typography variant="caption" sx={{ color: "#94a3b8", fontSize: 11, flexShrink: 0, minWidth: 56, textAlign: "right" }}>
@@ -845,7 +860,7 @@
       <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 500 }}>
         {/* Editor header */}
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 0.9, borderBottom: "1px solid #e8eef6", bgcolor: "#f8faff" }}>
-          <Box component={EditCodeIcon || "span"} sx={{ fontSize: 16, color: "#475569" }} />
+          <Icon icon={EditCodeIcon} sx={{ fontSize: 16, color: "#475569" }} />
           <Typography variant="body2" fontWeight={700} noWrap sx={{ flexGrow: 1, fontSize: 13, minWidth: 0, color: "#0f172a" }}>
             {fileEditorPath ? fileEditorPath.split(/[\\/]/).pop() : "Editor"}
           </Typography>
@@ -873,7 +888,7 @@
         {/* Editor body */}
         {!fileEditorPath ? (
           <Box sx={{ flexGrow: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", p: 3, color: "#94a3b8" }}>
-            <Box component={FileIcon || "span"} sx={{ fontSize: 52, opacity: 0.2, mb: 1.5 }} />
+            <Icon icon={FileIcon} sx={{ fontSize: 52, opacity: 0.2 }} />
             <Typography variant="body2" color="text.secondary" align="center">
               Open a text file to edit it here.
             </Typography>
