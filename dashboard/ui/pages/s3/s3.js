@@ -134,9 +134,10 @@
               fields={[
                 { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
                 { name: "LOCALS3_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
-                { name: "LOCALS3_HTTPS_PORT", label: "HTTPS Port", defaultValue: "8443", placeholder: "Leave empty to skip HTTPS", checkPort: true, certSelect: "SSL_CERT_NAME" },
-                { name: "LOCALS3_API_PORT", label: "MinIO API Port", defaultValue: "9000", required: true, placeholder: "9000", checkPort: true },
-                { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port", defaultValue: "9001", required: true, placeholder: "9001", checkPort: true },
+                { name: "LOCALS3_HTTPS_PORT", label: "API HTTPS Port", defaultValue: "8443", placeholder: "Leave empty to skip HTTPS", checkPort: true, certSelect: "SSL_CERT_NAME" },
+                { name: "LOCALS3_CONSOLE_PORT", label: "Console HTTPS Port", defaultValue: "9443", required: true, placeholder: "9443", checkPort: true },
+                { name: "LOCALS3_API_PORT", label: "MinIO API Port (internal)", defaultValue: "9000", required: true, placeholder: "9000", checkPort: true },
+                { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (internal)", defaultValue: "9001", required: true, placeholder: "9001", checkPort: true },
                 { name: "LOCALS3_ROOT_USER", label: "S3 Username", defaultValue: "admin" },
                 { name: "LOCALS3_ROOT_PASSWORD", label: "S3 Password", defaultValue: "StrongPassword123" },
               ]}

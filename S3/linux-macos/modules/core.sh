@@ -530,11 +530,23 @@ main() {
   if [ "$https_port" != "443" ]; then
     warn "Using HTTPS port: $https_port"
   fi
-  api_port="$(pick_port 9000 19000 29000)"
-  ui_port="$(pick_port 9001 19001 29001)"
+  if [ -n "${LOCALS3_API_PORT:-}" ]; then
+    api_port="${LOCALS3_API_PORT}"
+  else
+    api_port="$(pick_port 9000 19000 29000)"
+  fi
+  if [ -n "${LOCALS3_UI_PORT:-}" ]; then
+    ui_port="${LOCALS3_UI_PORT}"
+  else
+    ui_port="$(pick_port 9001 19001 29001)"
+  fi
   [ -z "$api_port" ] && { err "No free API port."; exit 1; }
   [ -z "$ui_port" ] && { err "No free UI port."; exit 1; }
-  console_https_port="$(pick_distinct_port "$https_port" 9443 10443 18443 8444)"
+  if [ -n "${LOCALS3_CONSOLE_PORT:-}" ]; then
+    console_https_port="${LOCALS3_CONSOLE_PORT}"
+  else
+    console_https_port="$(pick_distinct_port "$https_port" 9443 10443 18443 8444)"
+  fi
   [ -z "$console_https_port" ] && { err "No free Console HTTPS port."; exit 1; }
 
   proxy_host="$domain"
