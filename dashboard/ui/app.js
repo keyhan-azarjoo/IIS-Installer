@@ -612,7 +612,7 @@ function App() {
   };
 
   const renderServiceUrls = (svc) => {
-    const urls = Array.isArray(svc?.urls) ? svc.urls : [];
+    const urls = (Array.isArray(svc?.urls) ? svc.urls : []).filter((u) => /^https?:\/\//i.test(String(u || "")));
     if (urls.length === 0) return null;
     return (
       <Box sx={{ mt: 0.6 }}>
