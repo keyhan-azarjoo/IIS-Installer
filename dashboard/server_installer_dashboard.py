@@ -4530,6 +4530,86 @@ echo "nginx HTTP redirect configured: port {http_port} -> HTTPS {https_port}"
     run_process(sudo_prefix + ["bash", "-c", nginx_script], live_cb=live_cb)
 
 
+def _lookup_service_ports(name, kind):
+    """Return list of {port, protocol} dicts for a service, looked up from state files and OS.
+    Called before deletion so ports can be closed in the firewall afterwards."""
+    svc_name = _safe_service_name(name)
+    ports = []
+
+    # 1. Python API state file
+    try:
+        py_state = _read_json_file(PYTHON_API_STATE_FILE)
+        for payload in (py_state.get("deployments") or {}).values():
+            if not isinstance(payload, dict):
+                continue
+            if str(payload.get("name") or "").strip() == svc_name:
+                for key in ("port", "http_port"):
+                    pt = str(payload.get(key) or "").strip()
+                    if pt.isdigit():
+                        ports.append({"port": int(pt), "protocol": "tcp"})
+                if ports:
+                    return ports
+    except Exception:
+        pass
+
+    # 2. Website state file
+    try:
+        web_state = _read_json_file(WEBSITE_STATE_FILE)
+        for payload in (web_state.get("deployments") or {}).values():
+            if not isinstance(payload, dict):
+                continue
+            names = {str(payload.get("name") or "").strip(), str(payload.get("form_name") or "").strip()}
+            if svc_name in names or svc_name.replace(".service", "") in names:
+                pt = str(payload.get("port") or "").strip()
+                if pt.isdigit():
+                    return [{"port": int(pt), "protocol": "tcp"}]
+    except Exception:
+        pass
+
+    # 3. Docker: inspect for published host ports
+    if kind == "docker" and command_exists("docker"):
+        try:
+            details = _get_docker_container_details(svc_name)
+            if details.get("ports"):
+                return details["ports"]
+        except Exception:
+            pass
+
+    # 4. IIS site: query bindings
+    if kind == "iis_site" and os.name == "nt":
+        try:
+            rc, out = run_capture(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+                 f"Import-Module WebAdministration; Get-WebBinding -Name '{svc_name}' | Select bindingInformation | ConvertTo-Json -Depth 2"],
+                timeout=20,
+            )
+            if rc == 0 and out:
+                raw = json.loads(out)
+                binds = raw if isinstance(raw, list) else [raw]
+                for b in binds:
+                    bind = str((b or {}).get("bindingInformation", "") or "")
+                    port = parse_port_from_addr(bind)
+                    if port and str(port).isdigit():
+                        ports.append({"port": int(port), "protocol": "tcp"})
+        except Exception:
+            pass
+        return ports
+
+    # 5. Linux systemd: nginx conf
+    if kind in ("service", "website_launchd") and os.name != "nt":
+        base_name = svc_name.replace(".service", "")
+        for conf_path in (
+            f"/etc/nginx/conf.d/{base_name}.conf",
+            f"/opt/locals3/nginx/nginx-standalone.conf",
+            "/etc/nginx/conf.d/locals3.conf",
+        ):
+            _, found = _urls_from_nginx_conf(conf_path)
+            if found:
+                return found
+
+    return ports
+
+
 def _is_internal_ip(ip):
     """Return True if ip is a loopback, link-local, or RFC-1918 private address."""
     if not ip:
@@ -9910,17 +9990,27 @@ class Handler(BaseHTTPRequestHandler):
             kind = (form.get("kind", ["service"])[0] or "service").strip()
             detail = (form.get("detail", [""])[0] or "").strip()
             ports_json = (form.get("ports", [""])[0] or "").strip()
-            ok, message = manage_service(action, name, kind, detail)
-            if ok and action == "delete" and ports_json:
+            # Collect ports to close BEFORE deletion (service may disappear after)
+            ports_to_close = {}
+            if action == "delete":
                 try:
-                    import json as _json
-                    for p in _json.loads(ports_json):
-                        port = p.get("port")
-                        protocol = p.get("protocol", "tcp")
-                        if port:
-                            manage_firewall_port("close", str(port), protocol)
+                    if ports_json:
+                        for p in json.loads(ports_json):
+                            port = p.get("port")
+                            proto = str(p.get("protocol", "tcp") or "tcp").strip().lower()
+                            if port and str(port).isdigit():
+                                ports_to_close[(int(port), proto)] = True
                 except Exception:
                     pass
+                for p in _lookup_service_ports(name, kind):
+                    port = p.get("port")
+                    proto = str(p.get("protocol", "tcp") or "tcp").strip().lower()
+                    if port and str(port).isdigit():
+                        ports_to_close[(int(port), proto)] = True
+            ok, message = manage_service(action, name, kind, detail)
+            if ok and action == "delete":
+                for (port, proto) in ports_to_close:
+                    manage_firewall_port("close", str(port), proto)
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             self.write_json({"ok": ok, "message": message}, status)
             return
