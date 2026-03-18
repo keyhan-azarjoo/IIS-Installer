@@ -10236,8 +10236,63 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_dashboard_apply_cert(form)
                 self.respond_run_result(title, code, output)
             return
+        if self.path == "/run/system_restart":
+            title = "Restart System"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_system_power("restart", live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_system_power("restart")
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/system_shutdown":
+            title = "Shut Down System"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_system_power("shutdown", live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_system_power("shutdown")
+                self.respond_run_result(title, code, output)
+            return
 
         self.write_html("Not found", HTTPStatus.NOT_FOUND)
+
+
+def run_system_power(action, live_cb=None):
+    """action: 'restart' or 'shutdown'"""
+    def emit(msg):
+        if live_cb:
+            live_cb(msg if msg.endswith("\n") else msg + "\n")
+
+    if action not in ("restart", "shutdown"):
+        return 1, f"Unknown action: {action}"
+
+    label = "Restart" if action == "restart" else "Shut Down"
+    emit(f"[INFO] {label} requested...")
+
+    if os.name == "nt":
+        flag = "/r" if action == "restart" else "/s"
+        cmd = ["shutdown", flag, "/t", "5", "/c", f"Dashboard {label}"]
+    else:
+        flag = "-r" if action == "restart" else "-h"
+        cmd = ["shutdown", flag, "now"]
+        if os.geteuid() != 0 and subprocess.run(
+            ["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        ).returncode == 0:
+            cmd = ["sudo"] + cmd
+
+    emit(f"[INFO] Running: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode != 0:
+            msg = (result.stderr or result.stdout or "").strip()
+            emit(f"[ERROR] {msg}")
+            return 1, msg
+        emit(f"[INFO] {label} command sent. System will {action} shortly.")
+        return 0, f"{label} command sent."
+    except Exception as ex:
+        emit(f"[ERROR] {ex}")
+        return 1, str(ex)
 
 
 def main():

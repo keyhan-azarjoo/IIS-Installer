@@ -45,12 +45,22 @@
     const isExpired = certInfo.not_after && certInfo.not_after * 1000 < Date.now();
     const isExpiringSoon = certInfo.not_after && !isExpired && (certInfo.not_after * 1000 - Date.now()) < 30 * 24 * 3600 * 1000;
 
+    function handlePower(e, action) {
+      const label = action === "restart" ? "Restart" : "Shut Down";
+      if (!window.confirm(`Are you sure you want to ${label.toLowerCase()} the computer?`)) return;
+      run(e, action === "restart" ? "/run/system_restart" : "/run/system_shutdown", `${label} System`, null);
+    }
+
     return (
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
             <CardContent>
-              <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>System</Typography>
+              <Stack direction="row" alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1 }}>System</Typography>
+                <Button size="small" variant="outlined" color="warning" onClick={(e) => handlePower(e, "restart")} sx={{ textTransform: "none", mr: 1 }}>Restart</Button>
+                <Button size="small" variant="outlined" color="error" onClick={(e) => handlePower(e, "shutdown")} sx={{ textTransform: "none" }}>Shut Down</Button>
+              </Stack>
               <Typography variant="body2">Host: {systemInfo?.hostname || "-"}</Typography>
               <Typography variant="body2">OS: {systemInfo?.os || "-"} {systemInfo?.os_release || ""}</Typography>
               <Typography variant="body2">Platform: {systemInfo?.platform || "-"}</Typography>
