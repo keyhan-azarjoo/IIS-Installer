@@ -7,7 +7,7 @@
       Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
       TextField, MenuItem, Select, FormControl, InputLabel,
       ActionCard,
-      cfg, run, selectableIps, serviceBusy,
+      cfg, run, selectableIps, getDefaultSelectableIp, serviceBusy,
       websiteEditor, websiteEditorSeed, websiteInfo, websiteServices,
       iis, docker,
       isScopeLoading, loadWebsiteInfo, loadWebsiteServices,
@@ -21,7 +21,7 @@
 
     const websiteHost = selectableIps.includes(String(websiteEditor?.host || "").trim())
       ? String(websiteEditor?.host || "").trim()
-      : (selectableIps.length === 1 ? selectableIps[0] : "");
+      : getDefaultSelectableIp(selectableIps);
 
     // ── Form state ─────────────────────────────────────────────────────────
     const [siteName,   setSiteName]   = React.useState(websiteEditor?.name || "ServerInstallerWebsite");
@@ -54,7 +54,7 @@
 
     // Keep bindIp in sync if selectableIps loads
     React.useEffect(() => {
-      if (!bindIp && selectableIps.length === 1) setBindIp(selectableIps[0]);
+      if (!bindIp) { const d = getDefaultSelectableIp(selectableIps); if (d) setBindIp(d); }
     }, [selectableIps]);
 
     const kindOptions = ["auto", "static", "next-export", "nextjs", "flutter", "php"];

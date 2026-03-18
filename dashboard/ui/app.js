@@ -26,6 +26,7 @@ const {
   extractLabeledUrl,
   formatBytes,
   formatUptime,
+  getDefaultSelectableIp,
   getSelectableIps,
   uniqUrls,
 } = utils;
@@ -401,7 +402,8 @@ function App() {
     setRunError("");
     if (isS3Install) {
       const selectedIp = String(body.get("LOCALS3_HOST_IP") || "").trim();
-      if (!selectedIp && selectableIps.length > 1) {
+      const networkIpsS3 = selectableIps.filter((ip) => ip !== "localhost" && ip !== "127.0.0.1");
+      if (!selectedIp && networkIpsS3.length > 1) {
         const msg = "Select an IP address before starting S3 setup.";
         setRunError(msg);
         setInfoMessage(msg);
@@ -409,7 +411,7 @@ function App() {
         append(msg);
         return;
       }
-      const resolvedHost = selectedIp || (selectableIps.length === 1 ? selectableIps[0] : "localhost");
+      const resolvedHost = selectedIp || getDefaultSelectableIp(selectableIps) || "localhost";
       body.set("LOCALS3_HOST", resolvedHost);
       if (selectedIp) {
         body.set("LOCALS3_HOST_IP", selectedIp);
@@ -443,7 +445,8 @@ function App() {
     }
     if (isMongoInstall) {
       const selectedIp = String(body.get("LOCALMONGO_HOST_IP") || "").trim();
-      if (!selectedIp && selectableIps.length > 1) {
+      const networkIpsMongo = selectableIps.filter((ip) => ip !== "localhost" && ip !== "127.0.0.1");
+      if (!selectedIp && networkIpsMongo.length > 1) {
         const msg = "Select an IP address before starting MongoDB setup.";
         setRunError(msg);
         setInfoMessage(msg);
@@ -453,8 +456,9 @@ function App() {
       }
       if (selectedIp) {
         body.set("LOCALMONGO_HOST", selectedIp);
-      } else if (selectableIps.length === 1) {
-        body.set("LOCALMONGO_HOST", selectableIps[0]);
+      } else {
+        const autoIp = getDefaultSelectableIp(selectableIps);
+        if (autoIp) body.set("LOCALMONGO_HOST", autoIp);
       }
     }
     try {
@@ -522,7 +526,7 @@ function App() {
   const runPythonInstallWithCurrentSettings = async () => {
     const title = `Python Installer (${cfg.os === "windows" ? "Windows" : "Linux/macOS"})`;
     const body = new FormData();
-    const selectedHost = String(pythonService.host || "").trim() || (selectableIps.length === 1 ? selectableIps[0] : "");
+    const selectedHost = String(pythonService.host || "").trim() || getDefaultSelectableIp(selectableIps);
     const selectedVersion = String(pythonService.requested_version || pythonService.python_version || "3.12").trim() || "3.12";
     const selectedPort = String(pythonService.jupyter_port || "8888").trim() || "8888";
     const selectedNotebookDir = String(
@@ -1704,7 +1708,7 @@ function App() {
     RefreshSmallIcon, StartAllIcon, StopAllIcon, FolderIcon,
     // Utilities
     clampPercent, defaultNotebookDirForOs, defaultPythonApiDirForOs, defaultWebsiteDirForOs,
-    extractLabeledUrl, formatBytes, formatUptime, getSelectableIps, uniqUrls,
+    extractLabeledUrl, formatBytes, formatUptime, getDefaultSelectableIp, getSelectableIps, uniqUrls,
     // Actions
     ActionIcon, formatServiceState, IconOnlyAction, isServiceRunningStatus, MiniMetric,
     // App state

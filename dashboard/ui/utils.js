@@ -51,7 +51,15 @@
     };
     (systemInfo?.ips || []).forEach(pushIp);
     pushIp(systemInfo?.public_ip);
+    values.push("localhost"); // always offer local-only binding
     return values;
+  }
+
+  // Returns the one network IP to pre-select when there is exactly one non-localhost IP,
+  // preserving the old auto-select UX. Returns "" when there are 0 or 2+ network IPs.
+  function getDefaultSelectableIp(selectableIps) {
+    const networkIps = (selectableIps || []).filter((ip) => ip !== "localhost" && ip !== "127.0.0.1");
+    return networkIps.length === 1 ? networkIps[0] : "";
   }
 
   function trimDetectedUrl(value) {
@@ -102,6 +110,7 @@
     extractLabeledUrl,
     formatBytes,
     formatUptime,
+    getDefaultSelectableIp,
     getSelectableIps,
     isSelectableHostIp,
     trimDetectedUrl,

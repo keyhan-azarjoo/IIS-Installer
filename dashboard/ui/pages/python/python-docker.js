@@ -6,13 +6,13 @@
     const {
       Grid, Card, CardContent, Typography,
       ActionCard,
-      cfg, run, selectableIps,
+      cfg, run, selectableIps, getDefaultSelectableIp,
       pythonApiEditor, pythonApiEditorSeed,
       renderPythonApiRunsCard,
       defaultPythonApiDirForOs,
     } = p;
 
-    const dockerHost = selectableIps.includes(String(pythonApiEditor?.host || "").trim()) ? String(pythonApiEditor?.host || "").trim() : (selectableIps.length === 1 ? selectableIps[0] : "");
+    const dockerHost = selectableIps.includes(String(pythonApiEditor?.host || "").trim()) ? String(pythonApiEditor?.host || "").trim() : getDefaultSelectableIp(selectableIps);
     return (
       <Grid container spacing={2}>
         <Grid item xs={12} md={8}>

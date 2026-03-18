@@ -6,7 +6,7 @@
     const {
       Alert, Grid, Card, CardContent, Typography,
       ActionCard,
-      cfg, run, selectableIps,
+      cfg, run, selectableIps, getDefaultSelectableIp,
       pythonApiEditor, pythonApiEditorSeed,
       renderPythonApiRunsCard,
       defaultPythonApiDirForOs,
@@ -15,7 +15,7 @@
     if (cfg.os !== "windows") {
       return <Alert severity="info">Python IIS deployment is only available on Windows hosts.</Alert>;
     }
-    const iisHost = selectableIps.includes(String(pythonApiEditor?.host || "").trim()) ? String(pythonApiEditor?.host || "").trim() : (selectableIps.length === 1 ? selectableIps[0] : "");
+    const iisHost = selectableIps.includes(String(pythonApiEditor?.host || "").trim()) ? String(pythonApiEditor?.host || "").trim() : getDefaultSelectableIp(selectableIps);
     return (
       <Grid container spacing={2}>
         <Grid item xs={12} md={8}>

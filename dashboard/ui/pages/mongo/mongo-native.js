@@ -5,10 +5,11 @@
   // Default ports auto-increment across instances
   function makeDefaultInstance(index, selectableIps) {
     const base = index * 10;
+    const networkIps = selectableIps.filter((ip) => ip !== "localhost" && ip !== "127.0.0.1");
     return {
       id: Date.now() + index,
       instanceName: index === 0 ? "localmongo" : `localmongo${index + 1}`,
-      hostIp: selectableIps.length === 1 ? selectableIps[0] : "",
+      hostIp: networkIps.length === 1 ? networkIps[0] : "",
       mongoPort: String(27017 + base),
       httpsPort: String(9445 + base),
       httpPort: "",
@@ -46,9 +47,10 @@
 
     // Keep first instance's IP in sync when selectableIps loads
     React.useEffect(() => {
-      if (selectableIps.length === 1) {
+      const networkIps = selectableIps.filter((ip) => ip !== "localhost" && ip !== "127.0.0.1");
+      if (networkIps.length === 1) {
         setInstances((prev) => prev.map((inst) =>
-          inst.hostIp ? inst : { ...inst, hostIp: selectableIps[0] }
+          inst.hostIp ? inst : { ...inst, hostIp: networkIps[0] }
         ));
       }
     }, [selectableIps]);
