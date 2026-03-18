@@ -6920,21 +6920,10 @@ def run_windows_docker_setup_only(live_cb=None):
         "DotNet/windows/modules/docker-mode.ps1",
     ], live_cb=live_cb)
 
-    cmd = [
-        "powershell.exe",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        (
-            f". '{ROOT / 'DotNet' / 'windows' / 'modules' / 'common.ps1'}';"
-            f". '{ROOT / 'DotNet' / 'windows' / 'modules' / 'docker-mode.ps1'}';"
-            f"Ensure-DockerInstalled"
-        ),
-    ]
-    env = os.environ.copy()
-    env["SERVER_INSTALLER_NONINTERACTIVE"] = "1"
-    return run_process(cmd, env=env, live_cb=live_cb)
+    ok, ctx, err = _ensure_docker_windows_ready(live_cb=live_cb)
+    if not ok:
+        return 1, err
+    return 0, f"Docker Engine is running (context: {ctx})."
 
 
 def run_linux_installer(form, live_cb=None, require_source=True):
