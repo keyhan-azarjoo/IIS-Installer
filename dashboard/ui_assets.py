@@ -355,6 +355,9 @@ def render_dashboard_page(config, script_paths=None, dashboard_root=None):
   <script crossorigin src="https://cdn.jsdelivr.net/npm/@mui/material@5.16.14/umd/material-ui.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mui/icons-material@5.16.14/umd/material-icons.production.min.js" onerror="window.MaterialIcons=window.MaterialIcons||{};"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@4.19.0/css/xterm.css">
+  <script src="https://cdn.jsdelivr.net/npm/xterm@4.19.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.7.0/lib/xterm-addon-fit.js"></script>
   <script>window.MaterialUIIcons = window.MaterialIcons || {};</script>
 </head>
 <body>

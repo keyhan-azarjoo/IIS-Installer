@@ -1051,12 +1051,6 @@ function App() {
                 <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                   <Box sx={{ minWidth: 280 }}>
                     <Typography variant="body2"><b>{svc.form_name || svc.name}</b> ({svc.kind})</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                      Project: {svc.project_path || "-"}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                      Main file: {svc.main_file || "-"}
-                    </Typography>
                     {!!svc.service_log && (
                       <Typography variant="caption" color="text.secondary" sx={{ display: "block", wordBreak: "break-all" }}>
                         Runtime log: {svc.service_log}

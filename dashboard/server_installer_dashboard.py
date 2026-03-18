@@ -821,6 +821,8 @@ async def _handle(request):
     connection_header = request.headers.get("Connection", "")
     upgrade_header = request.headers.get("Upgrade", "")
     wants_ws = "upgrade" in connection_header.lower() and upgrade_header.lower() == "websocket"
+    if wants_ws and request.path == "/ws/pty":
+        return await _handle_pty_ws(request, app["username"], app["password"])
     if wants_ws:
         return await _proxy_ws(
             request,
@@ -840,6 +842,197 @@ async def _handle(request):
         app["username"],
         app["password"],
     )
+
+
+async def _handle_pty_ws(request, username, password):
+    """Spawn a real shell PTY and proxy I/O over WebSocket."""
+    if not _authorized(request, username, password):
+        return web.Response(status=401, text="Unauthorized")
+    cwd = (request.query.get("cwd", "") or "").strip() or None
+    cols = max(10, min(512, int(request.query.get("cols", 80) or 80)))
+    rows = max(2, min(200, int(request.query.get("rows", 24) or 24)))
+    ws = web.WebSocketResponse(autoping=False, autoclose=False, max_msg_size=0)
+    await ws.prepare(request)
+    loop = asyncio.get_event_loop()
+    if os.name == "nt":
+        try:
+            import winpty as _winpty
+        except ImportError:
+            await ws.send_str("\r\nError: pywinpty not installed.\r\n")
+            await ws.close()
+            return ws
+        shell = os.environ.get("COMSPEC", "cmd.exe")
+        try:
+            proc = _winpty.PtyProcess.spawn(shell, dimensions=(rows, cols), cwd=cwd)
+        except Exception as ex:
+            await ws.send_str(f"\r\nFailed to start terminal: {ex}\r\n")
+            await ws.close()
+            return ws
+
+        async def _pty_read():
+            try:
+                while not ws.closed:
+                    try:
+                        data = await loop.run_in_executor(None, lambda: proc.read(4096))
+                        if data:
+                            await ws.send_str(data)
+                        elif not proc.isalive():
+                            break
+                    except EOFError:
+                        break
+                    except Exception:
+                        break
+            except Exception:
+                pass
+            if not ws.closed:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+
+        async def _pty_write():
+            try:
+                async for msg in ws:
+                    if msg.type == WSMsgType.TEXT:
+                        d = msg.data
+                        if d.startswith('{"type":"resize"'):
+                            try:
+                                r = json.loads(d)
+                                if r.get("type") == "resize":
+                                    proc.setwinsize(max(2, int(r.get("rows", rows))), max(10, int(r.get("cols", cols))))
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                proc.write(d)
+                            except Exception:
+                                break
+                    elif msg.type == WSMsgType.BINARY:
+                        try:
+                            proc.write(msg.data.decode("utf-8", errors="replace"))
+                        except Exception:
+                            break
+                    elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                        break
+            except Exception:
+                pass
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+        await asyncio.gather(_pty_read(), _pty_write(), return_exceptions=True)
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    else:
+        try:
+            import pty as _pty
+            import termios as _termios
+            import fcntl as _fcntl
+            import struct as _struct
+        except ImportError as ex:
+            await ws.send_str(f"\r\nError: {ex}\r\n")
+            await ws.close()
+            return ws
+        shell = os.environ.get("SHELL", "/bin/bash")
+        master_fd = None
+        slave_fd = None
+        proc = None
+        try:
+            master_fd, slave_fd = _pty.openpty()
+            try:
+                _fcntl.ioctl(slave_fd, _termios.TIOCSWINSZ, _struct.pack("HHHH", rows, cols, 0, 0))
+            except Exception:
+                pass
+            env = {**os.environ, "TERM": "xterm-256color"}
+            proc = subprocess.Popen(
+                [shell], stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+                cwd=cwd, env=env, close_fds=True, start_new_session=True,
+            )
+            os.close(slave_fd)
+            slave_fd = None
+        except Exception as ex:
+            if slave_fd is not None:
+                try:
+                    os.close(slave_fd)
+                except Exception:
+                    pass
+            if master_fd is not None:
+                try:
+                    os.close(master_fd)
+                except Exception:
+                    pass
+            await ws.send_str(f"\r\nFailed to start terminal: {ex}\r\n")
+            await ws.close()
+            return ws
+
+        async def _pty_read():
+            try:
+                while not ws.closed:
+                    try:
+                        data = await loop.run_in_executor(None, lambda fd=master_fd: os.read(fd, 4096))
+                        if data:
+                            await ws.send_bytes(data)
+                    except (OSError, IOError):
+                        break
+            except Exception:
+                pass
+            if not ws.closed:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+
+        async def _pty_write():
+            try:
+                async for msg in ws:
+                    if msg.type == WSMsgType.TEXT:
+                        d = msg.data
+                        if d.startswith('{"type":"resize"'):
+                            try:
+                                r = json.loads(d)
+                                if r.get("type") == "resize":
+                                    _fcntl.ioctl(master_fd, _termios.TIOCSWINSZ,
+                                                 _struct.pack("HHHH", max(2, int(r.get("rows", rows))), max(10, int(r.get("cols", cols))), 0, 0))
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                os.write(master_fd, d.encode())
+                            except Exception:
+                                break
+                    elif msg.type == WSMsgType.BINARY:
+                        try:
+                            os.write(master_fd, msg.data)
+                        except Exception:
+                            break
+                    elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                        break
+            except Exception:
+                pass
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            try:
+                os.close(master_fd)
+            except Exception:
+                pass
+
+        await asyncio.gather(_pty_read(), _pty_write(), return_exceptions=True)
+        if proc:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        try:
+            os.close(master_fd)
+        except Exception:
+            pass
+    return ws
 
 
 async def _create_app(args):
@@ -5227,6 +5420,7 @@ def get_service_items():
                             "platform": "windows",
                             "urls": sorted(set(urls)),
                             "ports": ports,
+                            "project_path": str(s.get("PhysicalPath", "")).strip(),
                         }
                     )
             except Exception:

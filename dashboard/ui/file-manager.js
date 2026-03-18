@@ -62,6 +62,7 @@
   const PasteIcon        = mkI("M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z");
   const OpenFolderIcon   = mkI("M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z");
   const OpenFileIcon     = mkI("M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 2 5 5h-5V4zM6 20V4h6v6h6v10H6z");
+  const TerminalIcon = mkI("M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h16v12zM6.41 15.59L5 17l5-5-5-5 1.41-1.41L9.17 9H19v2H9.17l-2.76 2.59z");
 
   function getFileTypeIcon(name) {
     const ext = (name || "").split(".").pop().toLowerCase();
@@ -128,6 +129,96 @@
   function Icon({ icon, sx, onClick }) {
     if (!icon) return null;
     return React.createElement(icon, { sx, onClick });
+  }
+
+  // ─── Terminal tab view ──────────────────────────────────────────────────────
+  function TerminalView({ cwd, isActive }) {
+    const containerRef = React.useRef(null);
+    const termRef      = React.useRef(null);
+    const wsRef        = React.useRef(null);
+    const fitRef       = React.useRef(null);
+
+    React.useEffect(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const T = window.Terminal;
+      if (!T) {
+        el.textContent = "xterm.js not available. Check CDN connection.";
+        return;
+      }
+      const term = new T({
+        cursorBlink: true, fontFamily: "Consolas,'Courier New',monospace", fontSize: 13,
+        theme: {
+          background:"#1e1e2e", foreground:"#cdd6f4", cursor:"#f5e0dc",
+          selectionBackground:"#363659",
+          black:"#45475a", red:"#f38ba8", green:"#a6e3a1", yellow:"#f9e2af",
+          blue:"#89b4fa", magenta:"#f5c2e7", cyan:"#94e2d5", white:"#bac2de",
+          brightBlack:"#585b70", brightRed:"#f38ba8", brightGreen:"#a6e3a1",
+          brightYellow:"#f9e2af", brightBlue:"#89b4fa", brightMagenta:"#f5c2e7",
+          brightCyan:"#94e2d5", brightWhite:"#a6adc8",
+        },
+      });
+      const FA = window.FitAddon;
+      let fitAddon = null;
+      if (FA && FA.FitAddon) { fitAddon = new FA.FitAddon(); term.loadAddon(fitAddon); }
+      term.open(el);
+      if (fitAddon) { try { fitAddon.fit(); } catch (_) {} }
+      termRef.current = term;
+      fitRef.current  = fitAddon;
+
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const cols  = term.cols || 80;
+      const rows  = term.rows || 24;
+      const ws = new WebSocket(`${proto}//${location.host}/ws/pty?cwd=${encodeURIComponent(cwd || "")}&cols=${cols}&rows=${rows}`);
+      ws.binaryType = "arraybuffer";
+      wsRef.current  = ws;
+
+      ws.onopen    = () => { if (fitAddon) try { fitAddon.fit(); } catch (_) {} };
+      ws.onmessage = (e) => {
+        if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data));
+        else term.write(e.data);
+      };
+      ws.onclose = () => term.write("\r\n\x1b[33m[Terminal disconnected]\x1b[0m\r\n");
+      ws.onerror = () => term.write("\r\n\x1b[31m[Connection failed]\x1b[0m\r\n");
+
+      term.onData((data) => { if (ws.readyState === WebSocket.OPEN) ws.send(data); });
+
+      const sendResize = () => {
+        if (fitAddon) try { fitAddon.fit(); } catch (_) {}
+        if (ws.readyState === WebSocket.OPEN)
+          ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      };
+      const observer = new ResizeObserver(sendResize);
+      observer.observe(el);
+
+      return () => {
+        observer.disconnect();
+        ws.close();
+        term.dispose();
+        termRef.current = wsRef.current = fitRef.current = null;
+      };
+    }, []);
+
+    React.useEffect(() => {
+      if (!isActive) return;
+      const id = setTimeout(() => {
+        const fa = fitRef.current;
+        const ws = wsRef.current;
+        const t  = termRef.current;
+        if (fa) try { fa.fit(); } catch (_) {}
+        if (ws && ws.readyState === WebSocket.OPEN && t)
+          ws.send(JSON.stringify({ type: "resize", cols: t.cols, rows: t.rows }));
+      }, 60);
+      return () => clearTimeout(id);
+    }, [isActive]);
+
+    return (
+      <Box ref={containerRef} sx={{
+        width:"100%", height:"100%", flexGrow:1, bgcolor:"#1e1e2e", overflow:"hidden",
+        "& .xterm": { height:"100%", padding:"4px" },
+        "& .xterm-viewport": { overflowY:"auto !important" },
+      }} />
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -398,6 +489,7 @@
     const panelDragCount              = React.useRef(0);
     const [moveBusy, setMoveBusy]     = React.useState(false);
     const [moveError, setMoveError]   = React.useState("");
+    const [termCounter, setTermCounter] = React.useState(0);
 
     // Derived
     const [pathInput, setPathInput]   = React.useState(fileManagerPath || "");
@@ -432,6 +524,18 @@
     }, []);
 
     // ── Tab helpers ────────────────────────────────────────────────────────
+    const openTerminalTab = React.useCallback(() => {
+      const id = Date.now();
+      const termPath = `__term__:${id}`;
+      setTermCounter((c) => {
+        const n = c + 1;
+        setEditorTabs((prev) => [...prev, { path: termPath, kind: "terminal", cwd: fileManagerPath || "", title: `Terminal ${n}` }]);
+        return n;
+      });
+      setActiveTabPath(termPath);
+      setMinimizedTabs((prev) => prev.filter((p) => p !== termPath));
+    }, [fileManagerPath]);
+
     const openEditorTab = React.useCallback(async (path) => {
       // If already open, just activate
       const existing = editorTabs.find((t) => t.path === path);
@@ -737,6 +841,10 @@
         <Tooltip title="New Folder"><span><IconButton size="small" sx={{ p: 0.8 }} disabled={fileOpBusy || !fileManagerPath} onClick={createFolderInCurrentPath}><Icon icon={NewFolderIcon} sx={{ fontSize: 18, color: "#475569" }} /></IconButton></span></Tooltip>
         <Tooltip title="New File"><span><IconButton size="small" sx={{ p: 0.8 }} disabled={fileOpBusy || !fileManagerPath} onClick={createFileInCurrentPath}><Icon icon={NewFileIcon} sx={{ fontSize: 18, color: "#475569" }} /></IconButton></span></Tooltip>
         <Divider orientation="vertical" flexItem sx={{ mx: 0.5, height: 22, alignSelf: "center" }} />
+        <Tooltip title="Open Terminal Here">
+          <span><IconButton size="small" sx={{ p: 0.8 }} onClick={openTerminalTab}><Icon icon={TerminalIcon} sx={{ fontSize: 18, color: "#475569" }} /></IconButton></span>
+        </Tooltip>
+        <Divider orientation="vertical" flexItem sx={{ mx: 0.5, height: 22, alignSelf: "center" }} />
         <Tooltip title="Upload Files">
           <span><Button component="label" size="small" variant="outlined" disabled={fileOpBusy || !fileManagerPath}
             startIcon={<Icon icon={UploadIcon} sx={{ fontSize: 15 }} />}
@@ -963,7 +1071,8 @@
               {editorTabs.map((t) => {
                 const isMin = minimizedTabs.includes(t.path);
                 const isActive = t.path === activeTabPath && !isMin;
-                const fname = t.path.split(/[\\/]/).pop();
+                const isTerm = t.kind === "terminal";
+                const fname = isTerm ? (t.title || "Terminal") : t.path.split(/[\\/]/).pop();
                 return (
                   <Box key={t.path}
                     onDoubleClick={() => isMin ? restoreTab(t.path) : undefined}
@@ -979,11 +1088,11 @@
                     }}
                     onClick={() => { if (isMin) restoreTab(t.path); else setActiveTabPath(t.path); }}
                   >
-                    <Icon icon={getFileTypeIcon(fname)} sx={{ fontSize: 13, color: fileExtColor(fname), flexShrink: 0 }} />
+                    <Icon icon={isTerm ? TerminalIcon : getFileTypeIcon(fname)} sx={{ fontSize: 13, color: isTerm ? "#22c55e" : fileExtColor(fname), flexShrink: 0 }} />
                     <Typography noWrap sx={{ fontSize: 12, flexGrow: 1, minWidth: 0, fontWeight: isActive ? 700 : 400, fontStyle: isMin ? "italic" : "normal", color: isActive ? "#1d4ed8" : "#374151" }}>
-                      {fname}{t.dirty ? " ●" : ""}
+                      {fname}{!isTerm && t.dirty ? " ●" : ""}
                     </Typography>
-                    {t.loading && <CircularProgress size={10} sx={{ flexShrink: 0 }} />}
+                    {t.loading && !isTerm && <CircularProgress size={10} sx={{ flexShrink: 0 }} />}
                     <Tooltip title="Close">
                       <Box component="span" onClick={(e) => { e.stopPropagation(); closeTab(t.path); }}
                         sx={{ flexShrink: 0, opacity: 0.45, cursor: "pointer", display: "flex", "&:hover": { opacity: 1 }, lineHeight: 0 }}>
@@ -996,8 +1105,18 @@
             </Box>
           )}
 
+          {/* Terminal tabs — always in DOM once opened so the session stays alive */}
+          {editorTabs.filter((t) => t.kind === "terminal").map((t) => {
+            const isTermActive = t.path === activeTabPath && !minimizedTabs.includes(t.path);
+            return (
+              <Box key={t.path} sx={{ display: isTermActive ? "flex" : "none", flexGrow: 1, overflow: "hidden", flexDirection: "column" }}>
+                <TerminalView cwd={t.cwd} isActive={isTermActive} />
+              </Box>
+            );
+          })}
+
           {/* Minimized-only message when active tab is minimized or nothing active */}
-          {(!tab) && hasOpenTabs && (
+          {(!tab) && hasOpenTabs && !editorTabs.some((t) => t.kind === "terminal" && t.path === activeTabPath && !minimizedTabs.includes(t.path)) && (
             <Box sx={{ flexGrow: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", p: 3, color: "#94a3b8" }}>
               <Icon icon={MinimizeIcon} sx={{ fontSize: 40, opacity: 0.2 }} />
               <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 1 }}>
@@ -1017,8 +1136,8 @@
             </Box>
           )}
 
-          {/* Active editor */}
-          {tab && (
+          {/* Active editor — file tabs only; terminal tabs are rendered above */}
+          {tab && tab.kind !== "terminal" && (
             <>
               {/* Path strip */}
               <Box sx={{ px: 1.5, py: 0.4, bgcolor: "#fafbff", borderBottom: "1px solid #f1f5f9" }}>
