@@ -8214,8 +8214,19 @@ def run_linux_s3_installer(form=None, live_cb=None):
             return 1, f"Requested HTTPS port {requested_https} is already in use by another app. Choose another port."
 
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
-    if not requested_host or requested_host in ("localhost", "127.0.0.1"):
-        resolved_host = choose_s3_host(requested_host)
+    if not requested_host:
+        # Use the IP the user selected in the frontend dropdown
+        requested_host_ip = (form.get("LOCALS3_HOST_IP", [""])[0] or "").strip()
+        if requested_host_ip:
+            requested_host = requested_host_ip
+            form["LOCALS3_HOST"] = [requested_host_ip]
+        else:
+            resolved_host = choose_s3_host("")
+            form["LOCALS3_HOST"] = [resolved_host]
+            requested_host = resolved_host
+    # If host is still empty after all fallbacks, auto-resolve
+    if not requested_host:
+        resolved_host = choose_s3_host("")
         form["LOCALS3_HOST"] = [resolved_host]
         requested_host = resolved_host
     requested_lan = (form.get("LOCALS3_ENABLE_LAN", [""])[0] or "").strip().lower()
@@ -8224,9 +8235,10 @@ def run_linux_s3_installer(form=None, live_cb=None):
 
     # Keep compatibility with older interactive scripts:
     # 1) host prompt
-    # 2) LAN prompt
-    # 3) use 443 prompt -> default to No
-    # 4) choose HTTPS option / custom port
+    # 2) (only when host=localhost) "Use public IP instead?" prompt -> answer No
+    # 3) LAN prompt
+    # 4) use 443 prompt -> default to No
+    # 5) choose HTTPS option / custom port
     if requested_https:
         if requested_https == "443":
             https_flow = "y"
@@ -8235,7 +8247,11 @@ def run_linux_s3_installer(form=None, live_cb=None):
     else:
         https_flow = "n\n1"
 
-    scripted_input = f"{host_line}\n{lan_line}\n{https_flow}\n" + ("\n" * 200)
+    # When host is localhost, core.sh may ask "Use public IP instead?" - answer No
+    if requested_host in ("localhost", "127.0.0.1"):
+        scripted_input = f"{host_line}\nn\n{lan_line}\n{https_flow}\n" + ("\n" * 200)
+    else:
+        scripted_input = f"{host_line}\n{lan_line}\n{https_flow}\n" + ("\n" * 200)
     env = os.environ.copy()
     forwarded_env = {}
     for key in [

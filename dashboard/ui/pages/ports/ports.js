@@ -17,10 +17,17 @@
 
     // Known OS/system process names (Windows + Linux)
     const SYSTEM_PROC_NAMES = React.useMemo(() => new Set([
+      // Windows OS processes
       "svchost","system","lsass","services","wininit","smss","csrss","winlogon",
       "ntoskrnl","wslhost","vmmem","msmpeng","idle","registry","spoolsv","dwm",
       "fontdrvhost","audiodg","taskhostw","runtimebroker","searchindexer","msiexec",
+      // Linux/macOS system daemons
       "systemd","init","kthreadd","kernel","rpcbind","dbus-daemon","rpc.statd",
+      "sshd","systemd-resolved","systemd-networkd","avahi-daemon","cups","cupsd",
+      "chronyd","ntpd","rsyslogd","syslog-ng","crond","cron","atd","dnsmasq",
+      "NetworkManager","wpa_supplicant","ModemManager","bluetoothd","polkitd",
+      "udevd","systemd-udevd","irqbalance","acpid","thermald","fwupd",
+      "mdnsresponder","configd","launchd","netbiosd","discoveryd",
     ]), []);
 
     const isSystemPort = React.useCallback((item) => {
