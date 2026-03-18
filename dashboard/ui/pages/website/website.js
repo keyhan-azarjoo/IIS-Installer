@@ -13,7 +13,7 @@
       isScopeLoading, loadWebsiteInfo, loadWebsiteServices,
       onServiceAction, openWebsiteRun,
       isServiceRunningStatus, formatServiceState, renderServiceStatus,
-      renderServiceUrls, renderServicePorts, renderFolderIcon,
+      renderServiceUrls, renderServicePorts, renderFolderIcon, renderEditServiceIcon,
       scopeErrors,
       defaultWebsiteDirForOs,
       setPage, setFileManagerPath,
@@ -156,9 +156,10 @@
         target: "docker",
         label: "Docker",
         color: "#1f2937",
-        desc: "Run in a Docker container. Supports all website types including Next.js, PHP, and Flutter.",
-        available: docker.installed,
-        unavailableReason: "Docker is not installed on this host.",
+        desc: docker.installed
+          ? "Run in a Docker container. Supports all website types including Next.js, PHP, and Flutter."
+          : "Docker will be installed automatically, then your site will be deployed as a container.",
+        available: true,
       },
     ];
 
@@ -407,15 +408,9 @@
                   <Paper key={`website-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                     <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                       <Box sx={{ minWidth: 280 }}>
-                        <Typography variant="body2"><b>{svc.form_name || svc.name}</b> ({svc.stack_label || "website"})</Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                          Target: {svc.target_value || svc.kind || "-"}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                          Source: {svc.project_path || "-"}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                          Publish Folder: {svc.publish_rel || "."}
+                        <Typography variant="body2"><b>{svc.form_name || svc.name}</b></Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {svc.stack_label || svc.target_value || svc.kind || "website"}
                         </Typography>
                         {renderServiceUrls(svc)}
                         {renderServicePorts(svc)}
@@ -428,6 +423,7 @@
                         </Button>
                       )}
                       {renderFolderIcon(svc)}
+                      {renderEditServiceIcon(svc)}
                       <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => openWebsiteRun(svc)} sx={{ textTransform: "none" }}>
                         Update Files
                       </Button>
