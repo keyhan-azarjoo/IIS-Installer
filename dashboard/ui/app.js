@@ -315,6 +315,24 @@ function App() {
     };
   }, []);
 
+  const waitForServerAndReload = (msg) => {
+    append(msg || "[INFO] Dashboard is restarting. Waiting for server...");
+    setInfoMessage("Dashboard restarting — reconnecting...");
+    setTermState("Idle");
+    const start = Date.now();
+    const check = () => {
+      fetch("/api/status", { headers: { "X-Requested-With": "fetch" } })
+        .then(() => window.location.reload())
+        .catch(() => {
+          if (Date.now() - start < 30000) setTimeout(check, 800);
+          else window.location.reload();
+        });
+    };
+    setTimeout(check, 1200);
+  };
+
+  const RESTART_TITLES = new Set(["Dashboard Update", "Apply Dashboard Certificate"]);
+
   const poll = async (jobId, title, offset = 0) => {
     try {
       const r = await fetch(`/job/${jobId}?offset=${offset}`, { headers: { "X-Requested-With": "fetch" } });
@@ -323,16 +341,14 @@ function App() {
       const next = j.next_offset || offset;
       if (j.done) {
         append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code})`);
-        if (title === "Dashboard Update") {
+        if (RESTART_TITLES.has(title)) {
           if (Number(j.exit_code) === 0) {
-            append("[INFO] Dashboard is restarting. Page will reload automatically in 15 seconds...");
-            setInfoMessage("Dashboard updated. Reloading in 15 seconds...");
+            waitForServerAndReload("[INFO] Dashboard is restarting. Reconnecting automatically...");
           } else {
             setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
             setInfoMessage("Dashboard update failed. Check the terminal for details.");
+            setTermState("Idle");
           }
-          setTermState("Idle");
-          setTimeout(() => window.location.reload(), 15000);
           return;
         }
         if (Number(j.exit_code) !== 0) {
@@ -345,11 +361,8 @@ function App() {
       }
       setTimeout(() => poll(jobId, title, next), 300);
     } catch (err) {
-      if (title === "Dashboard Update") {
-        append(`Update triggered. Dashboard is restarting... (${err})`);
-        setInfoMessage("Dashboard update started. Reloading in 15 seconds...");
-        setTermState("Idle");
-        setTimeout(() => window.location.reload(), 15000);
+      if (RESTART_TITLES.has(title)) {
+        waitForServerAndReload(`[INFO] Dashboard is restarting... (${err})`);
         return;
       }
       append(`Polling failed: ${err}`);
