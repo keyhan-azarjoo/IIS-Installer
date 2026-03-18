@@ -5,13 +5,17 @@
   ns.pages.ports = function renderPortsPage(p) {
     const {
       Grid, Card, CardContent, Typography, Stack, TextField, FormControl, InputLabel,
-      Select, MenuItem, Button, Box, Chip, Paper, Tooltip,
+      Select, MenuItem, Button, Box, Chip, Paper, Tooltip, Dialog, DialogTitle,
+      DialogContent, DialogActions, Divider,
       portValue, setPortValue, portProtocol, setPortProtocol, portBusy,
       onPortAction, closeListeningPort,
       listeningPorts, isScopeLoading, loadSystem,
     } = p;
 
-    // Deduplicate by proto+port in case backend still sends duplicates
+    const [searchText, setSearchText] = React.useState("");
+    const [selectedPort, setSelectedPort] = React.useState(null);
+
+    // Deduplicate by proto+port
     const portRows = React.useMemo(() => {
       const seen = {};
       (listeningPorts || []).forEach((item) => {
@@ -31,6 +35,22 @@
       });
       return Object.values(seen).sort((a, b) => a.port - b.port || a.proto.localeCompare(b.proto));
     }, [listeningPorts]);
+
+    // Filter rows by search text
+    const filteredRows = React.useMemo(() => {
+      const q = searchText.trim().toLowerCase();
+      if (!q) return portRows;
+      return portRows.filter((item) => {
+        const procs = Array.isArray(item.processes) && item.processes.length > 0
+          ? item.processes
+          : (item.process ? [item.process] : []);
+        return (
+          String(item.port).includes(q) ||
+          String(item.proto || "").toLowerCase().includes(q) ||
+          procs.some((n) => n.toLowerCase().includes(q))
+        );
+      });
+    }, [portRows, searchText]);
 
     const tcpCount = portRows.filter((r) => r.proto.startsWith("tcp")).length;
     const udpCount = portRows.filter((r) => r.proto.startsWith("udp")).length;
@@ -98,8 +118,16 @@
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }} sx={{ mb: 1.5 }}>
                 <Typography variant="h6" fontWeight={800}>Open / Listening Ports</Typography>
                 <Box sx={{ flexGrow: 1 }} />
-                <Stack direction="row" spacing={0.75}>
-                  <Chip label={`${portRows.length} total`} size="small" />
+                <Stack direction="row" spacing={0.75} alignItems="center">
+                  <TextField
+                    size="small"
+                    placeholder="Filter by port or process…"
+                    value={searchText}
+                    onChange={(e) => setSearchText(e.target.value)}
+                    inputProps={{ autoComplete: "off", "data-lpignore": "true", "data-form-type": "other" }}
+                    sx={{ width: 220 }}
+                  />
+                  <Chip label={`${filteredRows.length}${searchText ? ` / ${portRows.length}` : ""} total`} size="small" />
                   <Chip label={`TCP: ${tcpCount}`} size="small" color="primary" />
                   {udpCount > 0 && <Chip label={`UDP: ${udpCount}`} size="small" />}
                 </Stack>
@@ -118,12 +146,12 @@
               </Box>
 
               <Box sx={{ maxHeight: "calc(100vh - 440px)", overflow: "auto" }}>
-                {portRows.length === 0 && (
+                {filteredRows.length === 0 && (
                   <Typography variant="body2" sx={{ px: 1.5, py: 1, color: "text.secondary" }}>
-                    No listening ports found.
+                    {searchText ? "No ports match your filter." : "No listening ports found."}
                   </Typography>
                 )}
-                {portRows.map((item) => {
+                {filteredRows.map((item) => {
                   const proto = String(item.proto || "").toLowerCase();
                   const isTcp = proto.startsWith("tcp");
                   const processes = (Array.isArray(item.processes) && item.processes.length > 0)
@@ -136,11 +164,12 @@
                     <Paper
                       key={`${proto}-${item.port}`}
                       variant="outlined"
+                      onClick={() => setSelectedPort(item)}
                       sx={{
                         display: "grid",
                         gridTemplateColumns: "64px 72px 1fr 140px 72px",
                         gap: 1, px: 1.5, py: 0.75, mb: 0.4, borderRadius: 1.5,
-                        alignItems: "center",
+                        alignItems: "center", cursor: "pointer",
                         "&:hover": { bgcolor: "#f5f8ff" },
                       }}
                     >
@@ -169,7 +198,7 @@
                         variant="outlined"
                         color="error"
                         disabled={portBusy}
-                        onClick={() => closeListeningPort(item.port, proto)}
+                        onClick={(e) => { e.stopPropagation(); closeListeningPort(item.port, proto); }}
                         sx={{ textTransform: "none", fontSize: 11, minWidth: 58, px: 1 }}
                       >
                         Close
@@ -181,6 +210,81 @@
             </CardContent>
           </Card>
         </Grid>
+
+        {/* Port detail dialog */}
+        {selectedPort && (() => {
+          const item = selectedPort;
+          const proto = String(item.proto || "").toLowerCase();
+          const processes = (Array.isArray(item.processes) && item.processes.length > 0)
+            ? item.processes
+            : (item.process ? [item.process] : []);
+          const pids = (Array.isArray(item.pids) && item.pids.length > 0)
+            ? item.pids
+            : (item.pid ? [item.pid] : []);
+          return (
+            <Dialog open onClose={() => setSelectedPort(null)} maxWidth="xs" fullWidth>
+              <DialogTitle sx={{ fontWeight: 800, pb: 1 }}>
+                Port {item.port} — {proto.toUpperCase()}
+              </DialogTitle>
+              <DialogContent sx={{ pt: 0 }}>
+                <Stack spacing={1.5}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>PROTOCOL</Typography>
+                    <Typography variant="body2">{proto.toUpperCase()}</Typography>
+                  </Box>
+                  <Divider />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>PORT</Typography>
+                    <Typography variant="body2" fontWeight={700}>{item.port}</Typography>
+                  </Box>
+                  <Divider />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                      {processes.length === 1 ? "PROCESS" : "PROCESSES"}
+                    </Typography>
+                    {processes.length > 0
+                      ? processes.map((name, i) => (
+                          <Typography key={i} variant="body2">{name}</Typography>
+                        ))
+                      : <Typography variant="body2" color="text.secondary">—</Typography>
+                    }
+                  </Box>
+                  <Divider />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                      {pids.length === 1 ? "PID" : "PIDs"}
+                    </Typography>
+                    {pids.length > 0
+                      ? <Typography variant="body2" sx={{ fontFamily: "monospace" }}>{pids.join(", ")}</Typography>
+                      : <Typography variant="body2" color="text.secondary">—</Typography>
+                    }
+                  </Box>
+                  {item.state && (
+                    <>
+                      <Divider />
+                      <Box>
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>STATE</Typography>
+                        <Typography variant="body2">{item.state}</Typography>
+                      </Box>
+                    </>
+                  )}
+                </Stack>
+              </DialogContent>
+              <DialogActions sx={{ px: 3, pb: 2 }}>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  disabled={portBusy}
+                  onClick={() => { setSelectedPort(null); closeListeningPort(item.port, proto); }}
+                  sx={{ textTransform: "none" }}
+                >
+                  Close Port
+                </Button>
+                <Button onClick={() => setSelectedPort(null)} sx={{ textTransform: "none" }}>Dismiss</Button>
+              </DialogActions>
+            </Dialog>
+          );
+        })()}
       </Grid>
     );
   };
