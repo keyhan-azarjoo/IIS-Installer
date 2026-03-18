@@ -11,7 +11,7 @@
       isScopeLoading, loadDotnetInfo, loadDotnetServices, loadDockerServices,
       hasStoppedServices, batchServiceAction, setPage,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts,
+      renderServiceUrls, renderServicePorts, renderServiceStatus,
     } = p;
 
     const dotnetDockerServices = (dockerServices || []).filter((s) => {
@@ -32,7 +32,7 @@
                 {renderServiceUrls(svc)}
                 {renderServicePorts(svc)}
               </Box>
-              <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status) || svc.status || "-"} />
+              {renderServiceStatus(svc)}
               <Box sx={{ flexGrow: 1 }} />
               <Button
                 size="small"

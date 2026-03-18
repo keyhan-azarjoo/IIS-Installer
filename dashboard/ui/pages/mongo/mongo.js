@@ -12,7 +12,7 @@
       isScopeLoading, loadMongoInfo, loadMongoServices,
       hasStoppedServices, batchServiceAction, copyText, tryOpenCompass, promptOpenMongoWebsite,
       isServiceRunningStatus, formatServiceState, onServiceAction, setPage,
-      renderServiceUrls, renderServicePorts,
+      renderServiceUrls, renderServicePorts, renderServiceStatus,
       DownloadCompassIcon, CopyCompassIcon, TryOpenCompassIcon, OpenCompassStyleIcon,
       RefreshSmallIcon, StartAllIcon, StopAllIcon,
     } = p;
@@ -65,7 +65,7 @@
                   {renderServiceUrls(svc)}
                   {renderServicePorts(svc)}
                 </Box>
-                <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status) || "-"} />
+                {renderServiceStatus(svc)}
                 <Box sx={{ flexGrow: 1 }} />
                 <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
                   {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}

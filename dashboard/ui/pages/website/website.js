@@ -12,7 +12,7 @@
       iis, docker,
       isScopeLoading, loadWebsiteInfo, loadWebsiteServices,
       onServiceAction, openWebsiteRun,
-      isServiceRunningStatus, formatServiceState,
+      isServiceRunningStatus, formatServiceState, renderServiceStatus,
       renderServiceUrls, renderServicePorts,
       scopeErrors,
       defaultWebsiteDirForOs,
@@ -420,7 +420,7 @@
                         {renderServiceUrls(svc)}
                         {renderServicePorts(svc)}
                       </Box>
-                      <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                      {renderServiceStatus(svc)}
                       <Box sx={{ flexGrow: 1 }} />
                       {!!(svc.urls && svc.urls[0]) && (
                         <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => window.open(svc.urls[0], "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>

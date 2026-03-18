@@ -10,7 +10,7 @@
       pythonService, pythonRuntimeServices, pythonInstalledRuntimes,
       isScopeLoading, loadPythonInfo, loadPythonServices,
       onServiceAction, runPythonInstallWithCurrentSettings,
-      isServiceRunningStatus, formatServiceState,
+      isServiceRunningStatus, formatServiceState, renderServiceStatus,
       renderServiceUrls, renderServicePorts,
       scopeErrors,
       defaultNotebookDirForOs,
@@ -112,7 +112,7 @@
                         {renderServiceUrls(svc)}
                         {renderServicePorts(svc)}
                       </Box>
-                      <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                      {renderServiceStatus(svc)}
                       <Box sx={{ flexGrow: 1 }} />
                       {!!(svc.project_path && setFileManagerPath && setPage) && (
                         <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>

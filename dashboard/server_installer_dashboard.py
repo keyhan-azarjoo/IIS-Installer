@@ -9892,7 +9892,18 @@ class Handler(BaseHTTPRequestHandler):
             name = (form.get("name", [""])[0] or "").strip()
             kind = (form.get("kind", ["service"])[0] or "service").strip()
             detail = (form.get("detail", [""])[0] or "").strip()
+            ports_json = (form.get("ports", [""])[0] or "").strip()
             ok, message = manage_service(action, name, kind, detail)
+            if ok and action == "delete" and ports_json:
+                try:
+                    import json as _json
+                    for p in _json.loads(ports_json):
+                        port = p.get("port")
+                        protocol = p.get("protocol", "tcp")
+                        if port:
+                            manage_firewall_port("close", str(port), protocol)
+                except Exception:
+                    pass
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             self.write_json({"ok": ok, "message": message}, status)
             return

@@ -11,7 +11,7 @@
       isScopeLoading, loadDockerInfo, loadDockerServices,
       hasStoppedServices, batchServiceAction, copyText,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts,
+      renderServiceUrls, renderServicePorts, renderServiceStatus,
       scopeErrors,
     } = p;
     return (
@@ -114,7 +114,7 @@
                           <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
                         </Box>
                         <Chip size="small" label={svc.kind || "service"} />
-                        <Chip size="small" color={running ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                        {renderServiceStatus(svc)}
                         <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
                         <Box sx={{ flexGrow: 1 }} />
                         <Button

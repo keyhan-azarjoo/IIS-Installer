@@ -615,14 +615,32 @@ function App() {
     const urls = (Array.isArray(svc?.urls) ? svc.urls : []).filter((u) => /^https?:\/\//i.test(String(u || "")));
     if (urls.length === 0) return null;
     return (
-      <Box sx={{ mt: 0.6 }}>
+      <Box sx={{ mt: 0.5, display: "flex", flexWrap: "wrap", gap: 0.75 }}>
         {urls.map((u) => (
-          <Stack key={`${svc.name}-${u}`} direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.4 }}>
-            <Typography variant="caption" sx={{ display: "block", color: "text.secondary", wordBreak: "break-all" }}>{u}</Typography>
-            <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => window.open(u, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", minWidth: 56 }}>Open</Button>
-          </Stack>
+          <Typography
+            key={`${svc.name}-${u}`}
+            variant="caption"
+            component="a"
+            href={u}
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{ color: "primary.main", wordBreak: "break-all", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
+          >
+            {u}
+          </Typography>
         ))}
       </Box>
+    );
+  };
+
+  const renderServiceStatus = (svc) => {
+    const running = isServiceRunningStatus(svc?.status, svc?.sub_status);
+    const title = formatServiceState(svc?.status, svc?.sub_status) || (running ? "Running" : "Stopped");
+    return (
+      <Box
+        title={title}
+        sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: running ? "success.main" : "grey.400", flexShrink: 0 }}
+      />
     );
   };
 
@@ -644,6 +662,9 @@ function App() {
       body.set("name", svc.name);
       body.set("kind", svc.kind || "service");
       body.set("detail", svc.detail || svc.sub_status || "");
+      if (action === "delete" && Array.isArray(svc.ports) && svc.ports.length > 0) {
+        body.set("ports", JSON.stringify(svc.ports));
+      }
       const r = await fetch("/api/system/service", {
         method: "POST",
         headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
@@ -942,7 +963,7 @@ function App() {
                     {renderServiceUrls(svc)}
                     {renderServicePorts(svc)}
                   </Box>
-                  <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                  {renderServiceStatus(svc)}
                   <Box sx={{ flexGrow: 1 }} />
                   <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => setUpdateSourceDlg({ svc, path: "" })} sx={{ textTransform: "none" }}>
                     Update Files
@@ -1564,7 +1585,7 @@ function App() {
     refreshPageServices, refreshPageStatus, refreshPageContext,
     poll, run, runDashboardUpdate, runPythonInstallWithCurrentSettings,
     goBack, onPortAction, onServicePortAction,
-    renderServiceUrls, renderServicePorts,
+    renderServiceUrls, renderServicePorts, renderServiceStatus,
     onServiceAction, stopServicesBatch, batchServiceAction, hasStoppedServices,
     onProxyServiceAction, actionLabel,
     openPythonApiRun, runPythonApiUpdateSource,

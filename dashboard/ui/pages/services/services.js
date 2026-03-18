@@ -8,7 +8,7 @@
       serviceFilter, setServiceFilter, isScopeLoading, loadServices,
       scopeErrors, filteredServices, serviceBusy,
       isServiceRunningStatus, formatServiceState, onServiceAction, actionLabel,
-      renderServiceUrls, renderServicePorts,
+      renderServiceUrls, renderServicePorts, renderServiceStatus,
       setPage, setFileManagerPath,
     } = p;
     return (
@@ -39,7 +39,7 @@
                           <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
                         </Box>
                         <Chip size="small" label={svc.kind || "service"} />
-                        <Chip size="small" color={isServiceRunningStatus(status, svc.sub_status) ? "success" : "default"} label={formatServiceState(status, svc.sub_status)} />
+                        {renderServiceStatus(svc)}
                         <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
                         <Box sx={{ flexGrow: 1 }} />
                         {!!(svc.project_path && setFileManagerPath && setPage) && (

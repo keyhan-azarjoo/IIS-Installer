@@ -11,7 +11,7 @@
       isScopeLoading, loadDotnetServices,
       hasStoppedServices, batchServiceAction,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts,
+      renderServiceUrls, renderServicePorts, renderServiceStatus,
       setPage, setFileManagerPath,
     } = p;
 
@@ -71,11 +71,7 @@
                         {renderServiceUrls(svc)}
                         {renderServicePorts(svc)}
                       </Box>
-                      <Chip
-                        size="small"
-                        color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"}
-                        label={formatServiceState(svc.status, svc.sub_status) || svc.status || "-"}
-                      />
+                      {renderServiceStatus(svc)}
                       <Box sx={{ flexGrow: 1 }} />
                       {!!(svc.project_path && setFileManagerPath && setPage) && (
                         <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>

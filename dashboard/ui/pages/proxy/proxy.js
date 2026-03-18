@@ -10,7 +10,7 @@
       proxy, proxyServices, systemInfo,
       isScopeLoading, loadProxyInfo, loadProxyServices,
       hasStoppedServices, batchServiceAction, onProxyServiceAction,
-      isServiceRunningStatus, formatServiceState,
+      isServiceRunningStatus, formatServiceState, renderServiceStatus,
       windowsAdminRequired, windowsAdminReason,
       setPage, setFileManagerPath,
     } = p;
@@ -111,7 +111,7 @@
                             <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "service"})</Typography>
                             <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
                           </Box>
-                          <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                          {renderServiceStatus(svc)}
                           <Box sx={{ flexGrow: 1 }} />
                           {!!(svc.project_path && setFileManagerPath && setPage) && (
                             <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
