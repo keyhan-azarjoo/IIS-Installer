@@ -1696,6 +1696,20 @@ function App() {
     setFileEditorContent, setFileEditorDirty,
   };
 
+  const currentPageScope = (() => {
+    if (page === "services") return "all";
+    if (page === "home" || page === "sysinfo" || page === "ports" || page === "api") return "all";
+    if (page === "mongo" || String(page).startsWith("mongo-")) return "mongo";
+    if (page === "s3") return "s3";
+    if (page === "docker") return "docker";
+    if (page === "proxy") return "proxy";
+    if (page === "python" || String(page).startsWith("python-")) return "python";
+    if (page === "website") return "website";
+    if (page === "dotnet" || String(page).startsWith("dotnet-")) return "dotnet";
+    return null;
+  })();
+  const isPageDataLoading = currentPageScope ? isScopeLoading(currentPageScope) : false;
+
   const renderPage = () => {
     const pageRenderer = (window.ServerInstallerUI && window.ServerInstallerUI.pages) ? window.ServerInstallerUI.pages[page] : null;
     if (pageRenderer) {
@@ -1834,6 +1848,9 @@ function App() {
         {sidebar}
       </Drawer>
 
+      {isPageDataLoading && (
+        <LinearProgress sx={{ position: "fixed", top: 64, left: `${mainMargin}px`, right: 0, zIndex: 1400, height: 3, transition: "left .2s ease" }} />
+      )}
       <Box component="main" sx={{ flexGrow: 1, mt: "64px", p: { xs: 2, md: 3 }, ml: `${mainMargin}px`, transition: "margin .2s ease", display: "flex", flexDirection: "column", minHeight: "calc(100vh - 64px)" }}>
         {cfg.message && <Alert severity="success" sx={{ mb: 2 }}>{cfg.message}</Alert>}
         {infoMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfoMessage("")}>{infoMessage}</Alert>}
