@@ -257,7 +257,15 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
           return;
         }
         if (j.busy && !j.managed_owner) {
-          resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: `Port ${port} is already in use by another service.` };
+          // If user supplied a domain name (not a bare IP), the port can be shared via nginx virtual host
+          const domainInput = formRef.current && formRef.current.querySelector('[name="DOMAIN_NAME"]');
+          const domainValue = (domainInput ? domainInput.value : "").trim();
+          const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(domainValue);
+          if (domainValue && !isIp) {
+            resolvedStates[fieldName] = { checking: false, usable: true, error: false, message: `Port ${port} is in use — will be added as a virtual host for "${domainValue}".` };
+          } else {
+            resolvedStates[fieldName] = { checking: false, usable: false, error: true, message: `Port ${port} is already in use by another service.` };
+          }
           return;
         }
         if (j.busy && j.managed_owner) {
@@ -446,7 +454,14 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
                 />
               );
             } else {
-              fieldEl = <Field key={f.name} field={f} />;
+              // Re-run port validation when DOMAIN_NAME changes, because domain presence
+              // determines whether a busy port is allowed (virtual host) or blocked.
+              const triggerPortRecheck = f.name === "DOMAIN_NAME" && portFields.length > 0;
+              fieldEl = <Field
+                key={f.name}
+                field={f}
+                onChange={triggerPortRecheck ? () => setTimeout(() => validatePorts(portValues), 0) : undefined}
+              />;
             }
 
             if (!certHiddenName) return fieldEl;
