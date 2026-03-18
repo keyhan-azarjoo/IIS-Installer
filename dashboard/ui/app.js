@@ -617,13 +617,9 @@ function App() {
     const ports = Array.isArray(svc?.ports) ? svc.ports : [];
     if (ports.length === 0) return null;
     return (
-      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} sx={{ mt: 0.6 }}>
+      <Stack direction={{ xs: "column", md: "row" }} spacing={0.5} alignItems={{ xs: "stretch", md: "center" }} sx={{ mt: 0.6 }} flexWrap="wrap">
         {ports.map((p) => (
-          <Stack key={`${svc.name}-${p.port}-${p.protocol}`} direction="row" spacing={0.5} alignItems="center">
-            <Chip size="small" label={`${p.protocol || "tcp"}:${p.port}`} />
-            <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServicePortAction(svc, p, "open")} sx={{ textTransform: "none" }}>Open</Button>
-            <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServicePortAction(svc, p, "close")} sx={{ textTransform: "none" }}>Close</Button>
-          </Stack>
+          <Chip key={`${svc.name}-${p.port}-${p.protocol}`} size="small" label={`${p.protocol || "tcp"}:${p.port}`} />
         ))}
       </Stack>
     );
