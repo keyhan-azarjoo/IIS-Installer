@@ -9718,6 +9718,9 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
                 return
             return
+        if self.path == "/api/status":
+            self.write_json({"ok": True}, HTTPStatus.OK)
+            return
         if self.path.startswith("/api/system/status"):
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)

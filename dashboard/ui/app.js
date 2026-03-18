@@ -321,15 +321,28 @@ function App() {
     setInfoMessage("Dashboard restarting — reconnecting...");
     setTermState("Idle");
     const start = Date.now();
-    const check = () => {
+    // Phase 1: wait for server to go DOWN (restart has started)
+    const waitDown = () => {
       fetch("/api/status", { headers: { "X-Requested-With": "fetch" } })
-        .then(() => window.location.reload())
-        .catch(() => {
-          if (Date.now() - start < 30000) setTimeout(check, 800);
-          else window.location.reload();
-        });
+        .then(() => {
+          if (Date.now() - start < 15000) setTimeout(waitDown, 600);
+          else waitUp(); // timeout — skip to phase 2
+        })
+        .catch(() => waitUp()); // server is down, move to phase 2
     };
-    setTimeout(check, 1200);
+    // Phase 2: wait for server to come back UP, then reload
+    const upStart = { t: 0 };
+    const waitUp = () => {
+      if (!upStart.t) upStart.t = Date.now();
+      fetch("/api/status", { headers: { "X-Requested-With": "fetch" } })
+        .then((r) => { if (r.ok) window.location.reload(); else retry(); })
+        .catch(() => retry());
+      function retry() {
+        if (Date.now() - upStart.t < 30000) setTimeout(waitUp, 800);
+        else window.location.reload();
+      }
+    };
+    setTimeout(waitDown, 1200);
   };
 
   const RESTART_TITLES = new Set(["Dashboard Update", "Apply Dashboard Certificate"]);
