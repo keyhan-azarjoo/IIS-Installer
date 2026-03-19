@@ -6033,17 +6033,7 @@ def _windows_cleanup_localmongo(svc_name="LocalMongoDB"):
         f"  Stop-Website -Name '{safe}' | Out-Null\n"
         f"  Remove-Website -Name '{safe}' | Out-Null\n"
         "}\n"
-        # --- Stop the service and wait for it to fully stop ---
-        f"$svc = Get-Service -Name '{safe}' -ErrorAction SilentlyContinue\n"
-        "if($svc){\n"
-        f"  Stop-Service -Name '{safe}' -Force -ErrorAction SilentlyContinue\n"
-        "  $waited = 0\n"
-        "  while($waited -lt 30){\n"
-        "    try{ $svc.Refresh(); if($svc.Status -eq 'Stopped'){ break } }catch{}\n"
-        "    Start-Sleep -Seconds 1; $waited++\n"
-        "  }\n"
-        "}\n"
-        # Kill ANY mongod.exe whose ExecutablePath or CommandLine lives inside this instance root.
+        # --- Kill mongod.exe first so the service process is dead before we touch SCM ---
         f"$instRoot = (Join-Path $env:ProgramData '{data_root_name}').ToLower()\n"
         "Get-WmiObject Win32_Process -Filter \"Name='mongod.exe'\" -ErrorAction SilentlyContinue | ForEach-Object {\n"
         "  $exe = if($_.ExecutablePath){ $_.ExecutablePath.ToLower() } else { '' }\n"
@@ -6052,11 +6042,20 @@ def _windows_cleanup_localmongo(svc_name="LocalMongoDB"):
         "    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue\n"
         "  }\n"
         "}\n"
-        "Start-Sleep -Seconds 2\n"
-        # sc.exe delete marks the service for deletion. If handles are still open the entry
-        # stays in "MARKED_FOR_DELETION" state and Get-Service still returns it. Remove the
-        # registry key directly as the definitive step — next Get-Service call won't find it.
+        # Use sc.exe stop + sc.exe query so no .NET ServiceController handle is kept open.
+        # A live ServiceController ($svc) holds an SCM handle that blocks finalization of
+        # sc.exe delete and keeps the service visible in services.msc.
+        f"sc.exe stop '{safe}' | Out-Null\n"
+        "$waited = 0\n"
+        "do {\n"
+        "  Start-Sleep -Seconds 1; $waited++\n"
+        f"  $qout = (sc.exe query '{safe}' 2>$null) -join ' '\n"
+        "} while ($waited -lt 30 -and $qout -notmatch 'STOPPED')\n"
+        "Start-Sleep -Seconds 1\n"
+        # Delete the service entry. With no .NET handles open, sc.exe delete causes the SCM
+        # to immediately finalize removal — the service vanishes from services.msc on next refresh.
         f"sc.exe delete '{safe}' | Out-Null\n"
+        # Belt-and-suspenders: also nuke the registry key so Get-Service never sees it again.
         f"Remove-Item -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\{safe}' -Recurse -Force -ErrorAction SilentlyContinue\n"
         "Start-Sleep -Seconds 1\n"
         "$bindings = @('0.0.0.0:9445','127.0.0.1:9445')\n"
