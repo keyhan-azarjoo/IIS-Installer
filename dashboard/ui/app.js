@@ -1347,26 +1347,33 @@ function App() {
     return "https://www.mongodb.com/try/download/compass";
   }, [clientOs]);
   const mongoCompassUri = React.useMemo(() => {
-    const buildMongoUri = (baseHost) => {
+    const buildMongoUri = (baseHost, user, pass) => {
       const authority = String(baseHost || "").trim().replace(/\/+$/, "");
       const normalized = !authority ? "localhost:27017" : (
         /^\[[^\]]+\](?::\d+)?$/.test(authority)
           ? (/\]:\d+$/.test(authority) ? authority : `${authority}:27017`)
           : (/:\d+$/.test(authority) ? authority : `${authority}:27017`)
       );
-      const user = encodeURIComponent("admin");
-      const pass = encodeURIComponent("StrongPassword123");
-      return `mongodb://${user}:${pass}@${normalized}/admin?authSource=admin`;
+      if (user && pass) {
+        return `mongodb://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${normalized}/admin?authSource=admin`;
+      }
+      return `mongodb://${normalized}/admin`;
     };
+    const adminUser = String(mongo.admin_user || "admin").trim() || "admin";
+    const adminPass = String(mongo.admin_password || "").trim();
+    // Only include credentials when auth is initialized, or when we have a saved password
+    const useAuth = mongo.auth_enabled || !!adminPass;
+    const credUser = useAuth ? adminUser : null;
+    const credPass = useAuth ? (adminPass || "StrongPassword123") : null;
     if (mongo.connection_string) {
       try {
         const raw = String(mongo.connection_string).trim();
         const hostPart = raw.replace(/^mongodb:\/\//, "").replace(/\/.*$/, "").trim();
-        if (hostPart) return buildMongoUri(hostPart);
+        if (hostPart) return buildMongoUri(hostPart, credUser, credPass);
       } catch (_) {}
     }
     if (mongo.host) {
-      return buildMongoUri(String(mongo.host).trim());
+      return buildMongoUri(String(mongo.host).trim(), credUser, credPass);
     }
     const host = (
       mongoStatusInfo?.public_ip ||
@@ -1375,8 +1382,8 @@ function App() {
       (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) ||
       "localhost"
     );
-    return buildMongoUri(host);
-  }, [mongo.connection_string, mongo.host, mongoStatusInfo, systemInfo]);
+    return buildMongoUri(host, credUser, credPass);
+  }, [mongo.connection_string, mongo.host, mongo.admin_user, mongo.admin_password, mongo.auth_enabled, mongoStatusInfo, systemInfo]);
   const mongoServiceUrls = React.useMemo(() => uniqUrls((mongoDisplayServices || []).flatMap((svc) => svc?.urls || [])), [mongoDisplayServices]);
   const mongoWebsiteUrl = React.useMemo(() => {
     if (mongo.https_url) return String(mongo.https_url).trim();

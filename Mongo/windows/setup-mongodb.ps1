@@ -734,7 +734,7 @@ function Remove-ExistingNativeLocalMongo {
   }
 }
 
-function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$hostValue, [int]$mongoPort, [string]$version, [string]$connectionString, [string]$webVersion, [bool]$authEnabled) {
+function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$hostValue, [int]$mongoPort, [string]$version, [string]$connectionString, [string]$webVersion, [bool]$authEnabled, [string]$adminUser = "", [string]$adminPassword = "") {
   $primaryHost = if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") { $hostValue } else { "localhost" }
   $metadata = [ordered]@{
     mode = $mode
@@ -746,6 +746,8 @@ function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$ho
     version = $version
     web_version = $webVersion
     auth_enabled = $authEnabled
+    admin_user = $adminUser
+    admin_password = $adminPassword
   }
   $json = $metadata | ConvertTo-Json -Depth 4
   [System.IO.File]::WriteAllText((Get-LocalMongoMetadataPath), $json, (New-Object System.Text.UTF8Encoding($false)))
@@ -834,8 +836,10 @@ function Install-NativeLocalMongo([string]$hostValue, [int]$mongoPort, [string]$
   $logPath = Join-Path $logDir "mongod.log"
   New-Item -ItemType Directory -Force -Path $Script:MongoRoot, $configDir, $dataDir, $logDir | Out-Null
 
-  $connectHost = if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") { $hostValue } else { "127.0.0.1" }
-  $bindIps = @($connectHost)
+  $isLanIp = ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1")
+  $connectHost = if ($isLanIp) { $hostValue } else { "127.0.0.1" }
+  # Always bind to loopback so mongosh can init auth locally; also bind to the selected LAN IP
+  $bindIps = if ($isLanIp) { @("127.0.0.1", $connectHost) } else { @("127.0.0.1") }
   Write-NativeMongoConfig -cfgPath $cfgPath -bindIps $bindIps -mongoPort $mongoPort -dataDir $dataDir -logPath $logPath -authEnabled $false
 
   & $mongodExe --config $cfgPath --install --serviceName $Script:NativeMongoServiceName --serviceDisplayName $Script:NativeMongoServiceName | Out-Null
@@ -846,7 +850,8 @@ function Install-NativeLocalMongo([string]$hostValue, [int]$mongoPort, [string]$
 
   Set-Service -Name $Script:NativeMongoServiceName -StartupType Automatic
   Start-Service -Name $Script:NativeMongoServiceName
-  if (-not (Wait-TcpPort -targetHost $connectHost -port $mongoPort -maxSeconds 45)) {
+  # Wait on loopback — always works regardless of selected host
+  if (-not (Wait-TcpPort -targetHost "127.0.0.1" -port $mongoPort -maxSeconds 45)) {
     Err "MongoDB service did not open TCP port $mongoPort."
     exit 1
   }
@@ -856,15 +861,16 @@ function Install-NativeLocalMongo([string]$hostValue, [int]$mongoPort, [string]$
   $mongoshExe = Ensure-MongoshExe
   if ($mongoshExe) {
     Info "Initializing MongoDB admin user..."
-    if (Initialize-NativeMongoAuthentication -mongoshExe $mongoshExe -connectHost $connectHost -mongoPort $mongoPort -mongoUser $mongoUser -mongoPassword $mongoPassword) {
+    # Always init via loopback — reliable regardless of LAN IP binding
+    if (Initialize-NativeMongoAuthentication -mongoshExe $mongoshExe -connectHost "127.0.0.1" -mongoPort $mongoPort -mongoUser $mongoUser -mongoPassword $mongoPassword) {
       Write-NativeMongoConfig -cfgPath $cfgPath -bindIps $bindIps -mongoPort $mongoPort -dataDir $dataDir -logPath $logPath -authEnabled $true
-      Restart-NativeMongoService -serviceName $Script:NativeMongoServiceName -connectHost $connectHost -mongoPort $mongoPort -logPath $logPath -phaseLabel "enabling authentication"
-      if (Test-NativeMongoAuthentication -mongoshExe $mongoshExe -connectHost $connectHost -mongoPort $mongoPort -mongoUser $mongoUser -mongoPassword $mongoPassword) {
+      Restart-NativeMongoService -serviceName $Script:NativeMongoServiceName -connectHost "127.0.0.1" -mongoPort $mongoPort -logPath $logPath -phaseLabel "enabling authentication"
+      if (Test-NativeMongoAuthentication -mongoshExe $mongoshExe -connectHost "127.0.0.1" -mongoPort $mongoPort -mongoUser $mongoUser -mongoPassword $mongoPassword) {
         $authEnabled = $true
       } else {
         Warn "MongoDB service restarted, but admin login validation failed. Leaving authentication disabled in installer metadata."
         Write-NativeMongoConfig -cfgPath $cfgPath -bindIps $bindIps -mongoPort $mongoPort -dataDir $dataDir -logPath $logPath -authEnabled $false
-        Restart-NativeMongoService -serviceName $Script:NativeMongoServiceName -connectHost $connectHost -mongoPort $mongoPort -logPath $logPath -phaseLabel "reverting authentication"
+        Restart-NativeMongoService -serviceName $Script:NativeMongoServiceName -connectHost "127.0.0.1" -mongoPort $mongoPort -logPath $logPath -phaseLabel "reverting authentication"
       }
     } else {
       Warn "Could not initialize MongoDB admin user automatically. Compass authentication will fail until a user is created."
@@ -873,9 +879,8 @@ function Install-NativeLocalMongo([string]$hostValue, [int]$mongoPort, [string]$
     Warn "mongosh is not available, so MongoDB authentication could not be initialized automatically."
   }
 
-  $primaryConnection = if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") { "mongodb://${hostValue}:$mongoPort/" } else { "mongodb://127.0.0.1:$mongoPort/" }
-  Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version -connectionString $primaryConnection -webVersion "native-service" -authEnabled $false
-  Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version -connectionString $primaryConnection -webVersion "native-service" -authEnabled $authEnabled
+  $primaryConnection = if ($isLanIp) { "mongodb://${connectHost}:$mongoPort/" } else { "mongodb://127.0.0.1:$mongoPort/" }
+  Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version -connectionString $primaryConnection -webVersion "native-service" -authEnabled $authEnabled -adminUser $mongoUser -adminPassword $mongoPassword
 
   Write-Host ""
   Write-Host "===== INSTALLATION COMPLETE ====="

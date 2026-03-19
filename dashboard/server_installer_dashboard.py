@@ -4564,6 +4564,9 @@ def get_mongo_info():
         "https_url": "",
         "connection_string": "",
         "auth_enabled": False,
+        "host": "",
+        "admin_user": "",
+        "admin_password": "",
     }
     preferred_host = choose_service_host()
 
@@ -4583,6 +4586,9 @@ def get_mongo_info():
         if native.get("mode") == "native":
             info["web_version"] = str(native.get("web_version") or "native")
         info["auth_enabled"] = bool(native.get("auth_enabled"))
+        info["host"] = host
+        info["admin_user"] = str(native.get("admin_user") or "")
+        info["admin_password"] = str(native.get("admin_password") or "")
 
     if command_exists("docker"):
         for name in ("localmongo-mongodb", "localmongo-web", "localmongo-https"):
@@ -5136,13 +5142,19 @@ def get_windows_native_mongo_info():
     if os.name != "nt":
         return {}
     ps = (
-        "$root=Join-Path $env:ProgramData 'LocalMongoDB'; "
-        "$meta=Join-Path $root 'install-info.json'; "
-        "$cfg=Join-Path $root 'config\\mongod.cfg'; "
-        "$svc=Get-Service -Name 'LocalMongoDB' -ErrorAction SilentlyContinue; "
-        "$obj=[ordered]@{installed=$false;version='';connection='';port='';host='';mode='';web_version='';auth_enabled=$false;status=''}; "
-        "if($svc){$obj.installed=$true; $obj.status=[string]$svc.Status}; "
-        "if(Test-Path $meta){ "
+        # Scan all LocalMongoDB-* instance directories for install-info.json, pick newest
+        "$pd=$env:ProgramData; "
+        "$metas=@(); "
+        "Get-ChildItem -Path $pd -Filter 'LocalMongoDB-*' -Directory -ErrorAction SilentlyContinue | ForEach-Object { "
+        "  $f=Join-Path $_.FullName 'install-info.json'; "
+        "  if(Test-Path $f){ $metas+=[PSCustomObject]@{Path=$f;Modified=(Get-Item $f -ErrorAction SilentlyContinue).LastWriteTime} } "
+        "}; "
+        # Also check legacy path without instance suffix
+        "$legacyMeta=Join-Path (Join-Path $pd 'LocalMongoDB') 'install-info.json'; "
+        "if(Test-Path $legacyMeta){ $metas+=[PSCustomObject]@{Path=$legacyMeta;Modified=(Get-Item $legacyMeta -ErrorAction SilentlyContinue).LastWriteTime} }; "
+        "$meta=if($metas.Count -gt 0){ ($metas | Sort-Object Modified -Descending | Select-Object -First 1).Path } else { $null }; "
+        "$obj=[ordered]@{installed=$false;version='';connection='';port='';host='';mode='';web_version='';auth_enabled=$false;status='';admin_user='';admin_password=''}; "
+        "if($meta){ "
         "  try { "
         "    $m=Get-Content -LiteralPath $meta -Raw | ConvertFrom-Json; "
         "    if($m.version){$obj.version=[string]$m.version}; "
@@ -5152,18 +5164,25 @@ def get_windows_native_mongo_info():
         "    if($m.mode){$obj.mode=[string]$m.mode}; "
         "    if($m.web_version){$obj.web_version=[string]$m.web_version}; "
         "    if($null -ne $m.auth_enabled){$obj.auth_enabled=[bool]$m.auth_enabled}; "
+        "    if($m.admin_user){$obj.admin_user=[string]$m.admin_user}; "
+        "    if($m.admin_password){$obj.admin_password=[string]$m.admin_password}; "
         "    $obj.installed=$true; "
         "  } catch {} "
-        "} "
-        "if((-not $obj.port) -and (Test-Path $cfg)){ "
-        "  $match=Select-String -Path $cfg -Pattern '^\\s*port\\s*:\\s*(\\d+)' -AllMatches -ErrorAction SilentlyContinue | Select-Object -First 1; "
-        "  if($match){$obj.port=[string]$match.Matches[0].Groups[1].Value} "
-        "} "
-        "if((-not $obj.version) -and (Test-Path (Join-Path $root 'mongodb\\bin\\mongod.exe'))){ "
-        "  try { "
-        "    $ver=& (Join-Path $root 'mongodb\\bin\\mongod.exe') --version 2>$null | Out-String; "
-        "    if($ver -match 'db version v([0-9A-Za-z\\.\\-]+)'){ $obj.version=$matches[1] } "
-        "  } catch {} "
+        "  $svcName=if($m -and $m.service_name){ [string]$m.service_name } else { 'LocalMongoDB' }; "
+        "  $svc=Get-Service -Name $svcName -ErrorAction SilentlyContinue; "
+        "  if($svc){ $obj.installed=$true; $obj.status=[string]$svc.Status }; "
+        "  $cfgDir=Split-Path $meta; "
+        "  $cfg=Join-Path $cfgDir 'config\\mongod.cfg'; "
+        "  if((-not $obj.port) -and (Test-Path $cfg)){ "
+        "    $match=Select-String -Path $cfg -Pattern '^\\s*port\\s*:\\s*(\\d+)' -AllMatches -ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "    if($match){$obj.port=[string]$match.Matches[0].Groups[1].Value} "
+        "  } "
+        "  if((-not $obj.version) -and (Test-Path (Join-Path $cfgDir 'mongodb\\bin\\mongod.exe'))){ "
+        "    try { "
+        "      $ver=& (Join-Path $cfgDir 'mongodb\\bin\\mongod.exe') --version 2>$null | Out-String; "
+        "      if($ver -match 'db version v([0-9A-Za-z\\.\\-]+)'){ $obj.version=$matches[1] } "
+        "    } catch {} "
+        "  } "
         "} "
         "$obj | ConvertTo-Json -Depth 3"
     )
