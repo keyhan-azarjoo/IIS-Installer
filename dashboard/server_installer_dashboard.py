@@ -5428,7 +5428,7 @@ def get_service_items():
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            "Get-Service | Select-Object Name,DisplayName,Status,StartType | ConvertTo-Json -Depth 2",
+            "Get-Service | Where-Object { Test-Path ('HKLM:\\SYSTEM\\CurrentControlSet\\Services\\' + $_.Name) } | Select-Object Name,DisplayName,Status,StartType | ConvertTo-Json -Depth 2",
         ]
         rc, out = run_capture(cmd, timeout=60)
         if rc == 0 and out:
