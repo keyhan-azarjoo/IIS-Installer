@@ -303,6 +303,13 @@
                             </span>
                           </Tooltip>
                         )}
+                        {Array.isArray(svc.urls) && svc.urls.length > 0 && (
+                          <Tooltip title="Open Web UI">
+                            <span>
+                              <ActionIcon title="Web UI" onClick={() => window.open(svc.urls[0], "_blank", "noopener,noreferrer")} IconComp={OpenCompassStyleIcon} fallback="UI" />
+                            </span>
+                          </Tooltip>
+                        )}
                         {renderEditServiceIcon(svc)}
                         <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
                           {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
