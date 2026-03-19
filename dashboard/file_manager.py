@@ -221,8 +221,7 @@ def file_manager_copy_path(source_value, target_dir_value):
 
 def file_manager_save_uploads(parts, target_dir):
     base_dir = Path(normalize_file_manager_path(target_dir))
-    if not base_dir.exists() or not base_dir.is_dir():
-        raise RuntimeError("Upload target must be an existing folder.")
+    base_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for part in parts:
         filename = str(part.get("filename") or "").strip()

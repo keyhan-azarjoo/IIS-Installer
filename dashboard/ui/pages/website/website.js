@@ -38,8 +38,10 @@
     const [portChecking,  setPortChecking]  = React.useState(false);
 
     // ── Folder-upload state ───────────────────────────────────────────────
-    const [uploadBusy,   setUploadBusy]   = React.useState(false);
-    const [uploadStatus, setUploadStatus] = React.useState(null); // {ok, text}
+    const [uploadBusy,    setUploadBusy]    = React.useState(false);
+    const [uploadStatus,  setUploadStatus]  = React.useState(null); // {ok, text}
+    const [selectedFiles, setSelectedFiles] = React.useState([]); // files staged for upload
+    const folderInputRef  = React.useRef(null);
 
     // ── SSL cert list ─────────────────────────────────────────────────────
     const [certList,     setCertList]     = React.useState([]);
@@ -92,11 +94,17 @@
       setPortChecking(false);
     }, [port, httpsPort]);
 
-    // ── Folder / files upload to source path ─────────────────────────────
-    const handleFolderUpload = React.useCallback(async (event) => {
+    // ── Stage selected files (don't upload yet) ───────────────────────────
+    const handleFilesSelected = React.useCallback((event) => {
       const files = Array.from(event.target.files || []);
-      // reset input so same selection re-triggers onChange
-      event.target.value = "";
+      event.target.value = ""; // allow re-selecting same folder
+      setSelectedFiles(files);
+      setUploadStatus(null);
+    }, []);
+
+    // ── Upload staged files to source path ────────────────────────────────
+    const handleFolderUpload = React.useCallback(async () => {
+      const files = selectedFiles;
       if (!files.length) return;
       const targetDir = source.trim();
       if (!targetDir) {
@@ -113,6 +121,7 @@
           method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd,
         });
         const j = await r.json();
+        if (j.ok) setSelectedFiles([]);
         setUploadStatus({
           ok: j.ok,
           text: j.ok
@@ -124,7 +133,7 @@
       } finally {
         setUploadBusy(false);
       }
-    }, [source]);
+    }, [selectedFiles, source]);
 
     // ── Open source folder in file manager ────────────────────────────────
     const openSourceInFileManager = React.useCallback(() => {
@@ -249,22 +258,55 @@
                     ))}
                   </Box>
 
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems="flex-start">
+                  {/* Published Folder + Select + Upload */}
+                  <Stack spacing={1}>
                     <TextField
                       label="Published Folder or Path" size="small" fullWidth
                       name="WEBSITE_SOURCE" value={source}
                       placeholder={defaultWebsiteDirForOs(cfg.os)}
-                      onChange={(e) => setSource(e.target.value)}
+                      onChange={(e) => { setSource(e.target.value); setSelectedFiles([]); setUploadStatus(null); }}
                       helperText="Point to your built/published folder. The dashboard auto-detects the project type."
                     />
-                    <Button
-                      size="small" variant="outlined"
-                      onClick={openSourceInFileManager}
-                      disabled={!source.trim()}
-                      sx={{ textTransform: "none", flexShrink: 0, mt: 0.5 }}
-                    >
-                      Open Folder
-                    </Button>
+                    {/* hidden folder input */}
+                    <input
+                      ref={folderInputRef}
+                      type="file"
+                      style={{ display: "none" }}
+                      webkitdirectory=""
+                      multiple
+                      onChange={handleFilesSelected}
+                    />
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                      <Button
+                        size="small" variant="outlined"
+                        onClick={() => folderInputRef.current && folderInputRef.current.click()}
+                        sx={{ textTransform: "none", flexShrink: 0 }}
+                      >
+                        Select Folder
+                      </Button>
+                      <Button
+                        size="small" variant="contained"
+                        disabled={uploadBusy || selectedFiles.length === 0}
+                        onClick={handleFolderUpload}
+                        sx={{ textTransform: "none", flexShrink: 0 }}
+                      >
+                        {uploadBusy ? "Uploading…" : `Upload${selectedFiles.length ? ` (${selectedFiles.length} files)` : ""}`}
+                      </Button>
+                      {selectedFiles.length > 0 && (
+                        <Typography variant="caption" color="text.secondary">
+                          {selectedFiles[0]?.webkitRelativePath?.split("/")[0] || "folder"} — {selectedFiles.length} file(s) ready
+                        </Typography>
+                      )}
+                    </Stack>
+                    {uploadStatus && (
+                      <Alert
+                        severity={uploadStatus.ok ? "success" : "error"}
+                        sx={{ py: 0.5 }}
+                        onClose={() => setUploadStatus(null)}
+                      >
+                        {uploadStatus.text}
+                      </Alert>
+                    )}
                   </Stack>
                 </Stack>
               </form>
@@ -272,93 +314,38 @@
           </Card>
         </Grid>
 
-        {/* ── Info + Upload card ── */}
+        {/* ── Info card (description only) ── */}
         <Grid item xs={12} md={4}>
-          <Stack spacing={2} sx={{ height: "100%" }}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-              <CardContent>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Auto-Detection</Typography>
-                <Typography variant="body2">
-                  The dashboard scans your source folder and auto-detects the project type:
-                </Typography>
-                <Box component="ul" sx={{ pl: 2, mt: 1, mb: 0 }}>
-                  {[
-                    ["Next.js", "package.json + .next"],
-                    ["Flutter web", "build/web/index.html"],
-                    ["PHP", ".php files"],
-                    ["Static / exported", "index.html"],
-                  ].map(([label, hint]) => (
-                    <Box key={label} component="li" sx={{ mb: 0.5 }}>
-                      <Typography variant="body2"><b>{label}</b> — {hint}</Typography>
-                    </Box>
-                  ))}
-                </Box>
-                <Typography variant="body2" sx={{ mt: 1.5 }}>
-                  Managed sites: {Number(websiteInfo?.count || websiteServices.length || 0)}
-                </Typography>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Auto-Detection</Typography>
+              <Typography variant="body2">
+                The dashboard scans your source folder and auto-detects the project type:
+              </Typography>
+              <Box component="ul" sx={{ pl: 2, mt: 1, mb: 0 }}>
+                {[
+                  ["Next.js", "package.json + .next"],
+                  ["Flutter web", "build/web/index.html"],
+                  ["PHP", ".php files"],
+                  ["Static / exported", "index.html"],
+                ].map(([label, hint]) => (
+                  <Box key={label} component="li" sx={{ mb: 0.5 }}>
+                    <Typography variant="body2"><b>{label}</b> — {hint}</Typography>
+                  </Box>
+                ))}
+              </Box>
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="body2">Managed sites: {Number(websiteInfo?.count || websiteServices.length || 0)}</Typography>
                 <Typography variant="body2">IIS: {iis.installed ? "Installed" : "Not installed"}</Typography>
                 <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "available"})` : "Not installed"}</Typography>
-              </CardContent>
-            </Card>
-
-            {/* ── Upload files to source folder ── */}
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-              <CardContent>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>Upload to Source Folder</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  Upload your built files directly to the Published Folder on the server. Select a folder or individual files from your local machine.
+              </Box>
+              <Box sx={{ mt: 2, pt: 2, borderTop: "1px solid #e8edf6" }}>
+                <Typography variant="body2" color="text.secondary">
+                  Use <b>Select Folder</b> to pick your built output from your local machine, then <b>Upload</b> to send it to the server path set in Published Folder.
                 </Typography>
-                {uploadStatus && (
-                  <Alert
-                    severity={uploadStatus.ok ? "success" : "error"}
-                    sx={{ mb: 1.5, py: 0.5 }}
-                    onClose={() => setUploadStatus(null)}
-                  >
-                    {uploadStatus.text}
-                  </Alert>
-                )}
-                {!source.trim() && (
-                  <Alert severity="warning" sx={{ mb: 1.5, py: 0.5 }}>
-                    Set a Published Folder path above before uploading.
-                  </Alert>
-                )}
-                <Stack direction="row" spacing={1} flexWrap="wrap">
-                  <Button
-                    component="label"
-                    variant="contained"
-                    size="small"
-                    disabled={uploadBusy || !source.trim()}
-                    sx={{ textTransform: "none", fontWeight: 700 }}
-                  >
-                    {uploadBusy ? "Uploading…" : "Upload Folder"}
-                    <input
-                      hidden type="file"
-                      webkitdirectory=""
-                      multiple
-                      onChange={handleFolderUpload}
-                    />
-                  </Button>
-                  <Button
-                    component="label"
-                    variant="outlined"
-                    size="small"
-                    disabled={uploadBusy || !source.trim()}
-                    sx={{ textTransform: "none" }}
-                  >
-                    Upload Files
-                    <input
-                      hidden type="file"
-                      multiple
-                      onChange={handleFolderUpload}
-                    />
-                  </Button>
-                </Stack>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-                  Target: {source.trim() || "(not set)"}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Stack>
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
 
         {/* ── Deploy target buttons ── */}
