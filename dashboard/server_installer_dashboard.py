@@ -5412,11 +5412,13 @@ def get_service_items():
         display_host = host_val or preferred_host
         if port_str.isdigit():
             p = int(port_str)
-            if auth_enabled or admin_password:
-                from urllib.parse import quote as _q
-                compass_uri = f"mongodb://{_q(admin_user, safe='')}:{_q(admin_password or 'StrongPassword123', safe='')}@{display_host}:{p}/admin?authSource=admin"
-            else:
-                compass_uri = f"mongodb://{display_host}:{p}/admin"
+            from urllib.parse import quote as _q
+            # Native MongoDB instances always configure an admin user.
+            # Always include credentials so Compass can authenticate.
+            # If the password wasn't recorded in metadata (e.g. auth init failed),
+            # fall back to the installer default so the URI is usable.
+            credential_pass = admin_password or "StrongPassword123"
+            compass_uri = f"mongodb://{_q(admin_user, safe='')}:{_q(credential_pass, safe='')}@{display_host}:{p}/admin?authSource=admin"
         else:
             compass_uri = ""
         return port_list, host_val, compass_uri, admin_user, admin_password

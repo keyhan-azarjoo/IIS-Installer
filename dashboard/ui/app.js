@@ -1472,8 +1472,19 @@ function App() {
 
   const launchCompassProtocol = React.useCallback((uri) => {
     if (!uri) return;
-    window.location.href = uri;
-  }, []);
+    // Use a hidden <a> click so the browser invokes the mongodb:// protocol
+    // handler without navigating away from the dashboard.
+    try {
+      const a = document.createElement("a");
+      a.href = uri;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (_) {}
+    // Copy URI to clipboard as fallback so the user can paste it into Compass.
+    copyText(uri, "Compass URI (also copied as fallback)");
+  }, [copyText]);
 
   const copyText = async (text, label) => {
     try {
