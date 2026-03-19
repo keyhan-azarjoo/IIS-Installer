@@ -8544,6 +8544,7 @@ main() {
     safe_nginx_fn = r'''
 configure_nginx_linux() {
   local domain="$1" api_https_port="$2" api_target_port="$3" console_https_port="$4" console_target_port="$5" cert_dir="$6"
+  local http_port="${LOCALS3_HTTP_PORT:-}"
   cat > /etc/nginx/conf.d/locals3.conf <<EOF
 server {
     listen ${api_https_port} ssl;
@@ -8586,6 +8587,28 @@ server {
 }
 EOF
 
+  if [ -n "$http_port" ]; then
+    cat >> /etc/nginx/conf.d/locals3.conf <<EOF
+
+server {
+    listen ${http_port};
+    server_name ${domain} localhost;
+    location / {
+        proxy_pass http://127.0.0.1:${api_target_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host \$http_host;
+        proxy_set_header X-Forwarded-Port \$server_port;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+  fi
+
   nginx -t || { err "Nginx config test failed."; exit 1; }
 
   if has_cmd systemctl; then
@@ -8596,11 +8619,13 @@ EOF
       systemctl start nginx >/dev/null 2>&1 || true
     fi
     if ! port_free "$api_https_port" && ! port_free "$console_https_port"; then
+      [ -n "$http_port" ] && open_public_tcp_ports_linux "$http_port"
       return
     fi
   elif has_cmd service; then
     service nginx reload >/dev/null 2>&1 || service nginx restart >/dev/null 2>&1 || true
     if ! port_free "$api_https_port" && ! port_free "$console_https_port"; then
+      [ -n "$http_port" ] && open_public_tcp_ports_linux "$http_port"
       return
     fi
   fi
@@ -8613,6 +8638,27 @@ EOF
   if [ -f "$standalone_pid" ]; then
     kill "$(cat "$standalone_pid")" >/dev/null 2>&1 || true
     rm -f "$standalone_pid" || true
+  fi
+
+  local http_block=""
+  if [ -n "$http_port" ]; then
+    http_block="
+    server {
+        listen ${http_port};
+        server_name ${domain} localhost;
+        location / {
+            proxy_pass http://127.0.0.1:${api_target_port};
+            proxy_http_version 1.1;
+            proxy_set_header Host \$http_host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Host \$http_host;
+            proxy_set_header X-Forwarded-Port \$server_port;
+            proxy_set_header X-Forwarded-Proto http;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection \"upgrade\";
+        }
+    }"
   fi
 
   cat > "$standalone_conf" <<EOF
@@ -8661,12 +8707,13 @@ http {
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection "upgrade";
         }
-    }
+    }${http_block}
 }
 EOF
   nginx -t -c "$standalone_conf" || { err "Isolated nginx config test failed."; exit 1; }
   nginx -c "$standalone_conf" >/dev/null 2>&1 || true
   if ! port_free "$api_https_port" && ! port_free "$console_https_port"; then
+    [ -n "$http_port" ] && open_public_tcp_ports_linux "$http_port"
     return
   fi
 
