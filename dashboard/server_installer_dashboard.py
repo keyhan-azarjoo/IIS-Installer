@@ -5399,6 +5399,20 @@ def get_service_items():
                     all_mongo_meta[svc_nm] = meta
             except Exception:
                 pass
+    else:
+        # Linux native installs: scan /opt/localmongodb-* directories
+        try:
+            for inst_dir in Path("/opt").glob("localmongodb-*"):
+                meta_file = inst_dir / "install-info.json"
+                if meta_file.exists():
+                    try:
+                        meta = json.loads(meta_file.read_text(encoding="utf-8", errors="replace"))
+                        svc_nm = str(meta.get("service_name") or "").strip() or inst_dir.name
+                        all_mongo_meta[svc_nm] = meta
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     def _mongo_service_extra(name):
         """Return ports, host, compass_uri for a native MongoDB service item."""
@@ -7839,33 +7853,28 @@ def run_unix_mongo_installer(form=None, live_cb=None):
             return 1, "Select an IP address before starting MongoDB setup."
         env["LOCALMONGO_HOST"] = choose_service_host()
 
-    for port_key in ("LOCALMONGO_HTTPS_PORT", "LOCALMONGO_MONGO_PORT", "LOCALMONGO_WEB_PORT"):
-        port_value = env.get(port_key, "").strip()
-        if port_value and (not port_value.isdigit()):
-            return 1, f"{port_key} must be numeric."
+    # Native Linux installer only needs the MongoDB port — HTTPS/WEB ports are Docker-only.
+    mongo_port_value = env.get("LOCALMONGO_MONGO_PORT", "").strip()
+    if mongo_port_value and not mongo_port_value.isdigit():
+        return 1, "LOCALMONGO_MONGO_PORT must be numeric."
+    if mongo_port_value and is_local_tcp_port_listening(mongo_port_value):
+        usage = get_port_usage(mongo_port_value, "tcp")
+        if not usage.get("managed_owner"):
+            return 1, f"Requested MongoDB port {mongo_port_value} is already in use. Choose another port."
 
-    for port_key in ("LOCALMONGO_HTTPS_PORT", "LOCALMONGO_MONGO_PORT", "LOCALMONGO_WEB_PORT"):
-        port_value = env.get(port_key, "").strip()
-        if port_value and is_local_tcp_port_listening(port_value):
-            usage = get_port_usage(port_value, "tcp")
-            if not usage.get("managed_owner"):
-                return 1, f"Requested port {port_value} for {port_key} is already in use. Choose another port."
-
+    passthrough_keys = [
+        "LOCALMONGO_HOST",
+        "LOCALMONGO_HOST_IP",
+        "LOCALMONGO_MONGO_PORT",
+        "LOCALMONGO_ADMIN_USER",
+        "LOCALMONGO_ADMIN_PASSWORD",
+        "LOCALMONGO_INSTANCE_NAME",
+        "LOCALMONGO_VERSION",
+    ]
     cmd = ["bash", str(ROOT / "Mongo" / "linux-macos" / "setup-mongodb.sh")]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         cmd = ["sudo", "env"]
-        for key in [
-            "LOCALMONGO_HOST",
-            "LOCALMONGO_HOST_IP",
-            "LOCALMONGO_HTTP_PORT",
-            "LOCALMONGO_HTTPS_PORT",
-            "LOCALMONGO_MONGO_PORT",
-            "LOCALMONGO_WEB_PORT",
-            "LOCALMONGO_ADMIN_USER",
-            "LOCALMONGO_ADMIN_PASSWORD",
-            "LOCALMONGO_UI_USER",
-            "LOCALMONGO_UI_PASSWORD",
-        ]:
+        for key in passthrough_keys:
             value = env.get(key, "").strip()
             if value:
                 cmd.append(f"{key}={value}")
