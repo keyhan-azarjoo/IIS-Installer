@@ -8357,8 +8357,8 @@ configure_minio_linux() {
 MINIO_ROOT_USER=admin
 MINIO_ROOT_PASSWORD=StrongPassword123
 MINIO_SERVER_URL=${public_url}
+MINIO_BROWSER_REDIRECT_URL=${console_browser_url}
 EOF
-  [ -z "${LOCALS3_HTTP_PORT:-}" ] && echo "MINIO_BROWSER_REDIRECT_URL=${console_browser_url}" >> "$envf"
 
   cat > /etc/systemd/system/locals3-minio.service <<EOF
 [Unit]
@@ -8386,9 +8386,6 @@ configure_minio_macos() {
   local plist="/Library/LaunchDaemons/com.locals3.minio.plist"
   mkdir -p "$root" "$data"
   install_minio_binary "$bin"
-  local redirect_key=""
-  [ -z "${LOCALS3_HTTP_PORT:-}" ] && redirect_key="<key>MINIO_BROWSER_REDIRECT_URL</key><string>${console_browser_url}</string>"
-
   cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -8403,7 +8400,7 @@ configure_minio_macos() {
     <key>MINIO_ROOT_USER</key><string>admin</string>
     <key>MINIO_ROOT_PASSWORD</key><string>StrongPassword123</string>
     <key>MINIO_SERVER_URL</key><string>$public_url</string>
-    ${redirect_key}
+    <key>MINIO_BROWSER_REDIRECT_URL</key><string>$console_browser_url</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
