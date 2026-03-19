@@ -5543,6 +5543,9 @@ def get_service_items():
                     urls, ports = _urls_from_nginx_conf("/etc/nginx/conf.d/locals3.conf", preferred_host=preferred_host)
                     if not urls:
                         urls, ports = _urls_from_nginx_conf("/opt/locals3/nginx/nginx-standalone.conf", preferred_host=preferred_host)
+                    for mp in _get_linux_minio_direct_ports():
+                        if not any(p.get("port") == mp["port"] for p in ports):
+                            ports.append(mp)
                 else:
                     urls, ports = _urls_from_nginx_conf(f"/etc/nginx/conf.d/{base_name}.conf", preferred_host=preferred_host)
                 items.append(
@@ -7223,6 +7226,29 @@ def _linux_locals3_owns_port(port):
     return _linux_locals3_nginx_owns_port(port) or _docker_locals3_owns_port(port)
 
 
+def _get_linux_minio_direct_ports():
+    """Return port dicts for MinIO --address and --console-address ports from the systemd service."""
+    if os.name == "nt":
+        return []
+    svc_file = Path("/etc/systemd/system/locals3-minio.service")
+    if not svc_file.exists():
+        return []
+    try:
+        text = svc_file.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return []
+    ports = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("ExecStart="):
+            continue
+        for m in re.finditer(r"--(?:address|console-address)\s+:(\d+)", line):
+            port = int(m.group(1))
+            if port > 0 and not any(p["port"] == port for p in ports):
+                ports.append({"port": port, "protocol": "tcp"})
+    return ports
+
+
 def run_windows_installer(form, live_cb=None):
     if os.name != "nt":
         return 1, "Windows installer can only run on Windows hosts."
@@ -8331,8 +8357,8 @@ configure_minio_linux() {
 MINIO_ROOT_USER=admin
 MINIO_ROOT_PASSWORD=StrongPassword123
 MINIO_SERVER_URL=${public_url}
-MINIO_BROWSER_REDIRECT_URL=${console_browser_url}
 EOF
+  [ -z "${LOCALS3_HTTP_PORT:-}" ] && echo "MINIO_BROWSER_REDIRECT_URL=${console_browser_url}" >> "$envf"
 
   cat > /etc/systemd/system/locals3-minio.service <<EOF
 [Unit]
@@ -8360,6 +8386,8 @@ configure_minio_macos() {
   local plist="/Library/LaunchDaemons/com.locals3.minio.plist"
   mkdir -p "$root" "$data"
   install_minio_binary "$bin"
+  local redirect_key=""
+  [ -z "${LOCALS3_HTTP_PORT:-}" ] && redirect_key="<key>MINIO_BROWSER_REDIRECT_URL</key><string>${console_browser_url}</string>"
 
   cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -8375,7 +8403,7 @@ configure_minio_macos() {
     <key>MINIO_ROOT_USER</key><string>admin</string>
     <key>MINIO_ROOT_PASSWORD</key><string>StrongPassword123</string>
     <key>MINIO_SERVER_URL</key><string>$public_url</string>
-    <key>MINIO_BROWSER_REDIRECT_URL</key><string>$console_browser_url</string>
+    ${redirect_key}
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
