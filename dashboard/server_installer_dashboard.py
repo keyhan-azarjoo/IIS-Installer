@@ -5667,19 +5667,23 @@ def get_service_items():
                 restart_policy = details.get("restart_policy", "")
                 ports = list(details.get("ports", []))
                 container_labels = details.get("labels", {})
-                # Include nginx-managed HTTPS port stored as a container label
+                # Collect all ports labelled as HTTPS by the container
+                https_ports_set = set()
+                for label_key in ("com.serverinstaller.https_port", "com.serverinstaller.https_console_port"):
+                    val = str(container_labels.get(label_key, "") or "").strip()
+                    if val.isdigit():
+                        hp = int(val)
+                        https_ports_set.add(hp)
+                        if not any(p.get("port") == hp for p in ports):
+                            ports.append({"port": hp, "protocol": "tcp"})
+                # Keep backwards-compat alias
                 nginx_https_port_str = str(container_labels.get("com.serverinstaller.https_port", "") or "").strip()
-                if nginx_https_port_str.isdigit():
-                    nginx_https_port = int(nginx_https_port_str)
-                    if not any(p.get("port") == nginx_https_port for p in ports):
-                        ports.append({"port": nginx_https_port, "protocol": "tcp"})
                 urls = []
                 for p in ports:
                     p_port = p.get("port")
-                    is_nginx_https = nginx_https_port_str.isdigit() and p_port == int(nginx_https_port_str)
                     scheme = "https" if (
                         p_port == 443 or
-                        is_nginx_https or
+                        p_port in https_ports_set or
                         container_labels.get("com.localmongo.role") == "https"
                     ) else "http"
                     host = preferred_host
@@ -9000,7 +9004,7 @@ if [ "$HOST" = "localhost" ] || echo "$HOST" | grep -qE '^127\.'; then
 else
   DISPLAY_HOST="$HOST"
 fi
-CONSOLE_REDIRECT_URL="http://${{DISPLAY_HOST}}:${{CONS_PORT}}"
+CONSOLE_REDIRECT_URL="https://${{DISPLAY_HOST}}:${{CONS_PORT}}"
 
 echo "[5/7] Writing nginx config..."
 cat > "$NGINX_DIR/default.conf" <<NGINXEOF
@@ -9025,8 +9029,12 @@ server {{
     }}
 }}
 server {{
-    listen 4443;
+    listen 4443 ssl;
     server_name $HOST localhost;
+    ssl_certificate     /etc/nginx/certs/localhost.crt;
+    ssl_certificate_key /etc/nginx/certs/localhost.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
     client_max_body_size 5g;
     location / {{
         proxy_pass         http://${{INSTANCE}}-minio:9001;
@@ -9079,6 +9087,7 @@ services:
       - "com.locals3.role=nginx"
       - "com.locals3.instance=${{INSTANCE}}"
       - "com.serverinstaller.https_port=${{API_PORT}}"
+      - "com.serverinstaller.https_console_port=${{CONS_PORT}}"
     ports:
       - "${{API_PORT}}:443"
       - "${{CONS_PORT}}:4443"
@@ -9117,7 +9126,7 @@ done
 echo ""
 echo "===== INSTALLATION COMPLETE ====="
 echo "API URL:      https://${{DISPLAY_HOST}}:${{API_PORT}}"
-echo "Console URL:  http://${{DISPLAY_HOST}}:${{CONS_PORT}}"
+echo "Console URL:  https://${{DISPLAY_HOST}}:${{CONS_PORT}}"
 echo "Username:     $ROOT_USER"
 echo "Password:     $ROOT_PASS"
 echo ""
