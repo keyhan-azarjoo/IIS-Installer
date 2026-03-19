@@ -6033,32 +6033,32 @@ def _windows_cleanup_localmongo(svc_name="LocalMongoDB"):
         f"  Stop-Website -Name '{safe}' | Out-Null\n"
         f"  Remove-Website -Name '{safe}' | Out-Null\n"
         "}\n"
-        # Stop the service and WAIT for it to reach Stopped state before deleting
+        # --- Stop the service and wait for it to fully stop ---
         f"$svc = Get-Service -Name '{safe}' -ErrorAction SilentlyContinue\n"
         "if($svc){\n"
         f"  Stop-Service -Name '{safe}' -Force -ErrorAction SilentlyContinue\n"
-        # Wait up to 30 s for the service to stop
         "  $waited = 0\n"
         "  while($waited -lt 30){\n"
         "    try{ $svc.Refresh(); if($svc.Status -eq 'Stopped'){ break } }catch{}\n"
         "    Start-Sleep -Seconds 1; $waited++\n"
         "  }\n"
-        # Kill ANY mongod.exe whose ExecutablePath or CommandLine lives inside this instance root.
-        # mongod is registered as "mongod.exe --config <root>\config\mongod.cfg", so matching
-        # only the data dir (as before) never matched. Matching the root path catches both
-        # zip-extracted binaries (exe inside root) and config-launched instances.
-        f"  $instRoot = (Join-Path $env:ProgramData '{data_root_name}').ToLower()\n"
-        "  Get-WmiObject Win32_Process -Filter \"Name='mongod.exe'\" -ErrorAction SilentlyContinue | ForEach-Object {\n"
-        "    $exe = if($_.ExecutablePath){ $_.ExecutablePath.ToLower() } else { '' }\n"
-        "    $cmd = if($_.CommandLine){ $_.CommandLine.ToLower() } else { '' }\n"
-        "    if($exe.StartsWith($instRoot) -or $cmd -match [regex]::Escape($instRoot)){\n"
-        "      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue\n"
-        "    }\n"
-        "  }\n"
-        "  Start-Sleep -Seconds 2\n"
-        f"  sc.exe delete '{safe}' | Out-Null\n"
-        "  Start-Sleep -Seconds 2\n"
         "}\n"
+        # Kill ANY mongod.exe whose ExecutablePath or CommandLine lives inside this instance root.
+        f"$instRoot = (Join-Path $env:ProgramData '{data_root_name}').ToLower()\n"
+        "Get-WmiObject Win32_Process -Filter \"Name='mongod.exe'\" -ErrorAction SilentlyContinue | ForEach-Object {\n"
+        "  $exe = if($_.ExecutablePath){ $_.ExecutablePath.ToLower() } else { '' }\n"
+        "  $cmd = if($_.CommandLine){ $_.CommandLine.ToLower() } else { '' }\n"
+        "  if($exe.StartsWith($instRoot) -or $cmd -match [regex]::Escape($instRoot)){\n"
+        "    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue\n"
+        "  }\n"
+        "}\n"
+        "Start-Sleep -Seconds 2\n"
+        # sc.exe delete marks the service for deletion. If handles are still open the entry
+        # stays in "MARKED_FOR_DELETION" state and Get-Service still returns it. Remove the
+        # registry key directly as the definitive step — next Get-Service call won't find it.
+        f"sc.exe delete '{safe}' | Out-Null\n"
+        f"Remove-Item -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\{safe}' -Recurse -Force -ErrorAction SilentlyContinue\n"
+        "Start-Sleep -Seconds 1\n"
         "$bindings = @('0.0.0.0:9445','127.0.0.1:9445')\n"
         "foreach($binding in $bindings){\n"
         "  netsh http delete sslcert ipport=$binding 1>$null 2>$null | Out-Null\n"
