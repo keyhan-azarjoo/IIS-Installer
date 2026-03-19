@@ -4669,6 +4669,78 @@ def _urls_from_windows_locals3_log(preferred_host=""):
     return dedup_urls, dedup_ports
 
 
+def _get_proc_net_tcp_ports():
+    """
+    Read ALL listening TCP ports from /proc/net/tcp and /proc/net/tcp6.
+    Resolves process names via /proc/<pid>/fd socket inode lookup.
+    Returns list of {port, proto, process, pid, processes, pids, state}.
+    Only available on Linux (no-op on other platforms).
+    """
+    if os.name == "nt" or not Path("/proc/net/tcp").exists():
+        return []
+    import re as _re
+
+    # Build inode -> (pid, comm) map by scanning /proc/<pid>/fd
+    inode_to_proc = {}
+    try:
+        for pid_dir in Path("/proc").iterdir():
+            if not pid_dir.name.isdigit():
+                continue
+            pid = pid_dir.name
+            try:
+                comm = (pid_dir / "comm").read_text(encoding="utf-8", errors="ignore").strip()
+            except Exception:
+                comm = ""
+            fd_dir = pid_dir / "fd"
+            try:
+                for fd in fd_dir.iterdir():
+                    try:
+                        target = os.readlink(str(fd))
+                        m = _re.match(r"socket:\[(\d+)\]", target)
+                        if m:
+                            inode_to_proc[m.group(1)] = (pid, comm)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    result = {}  # port -> entry dict
+    for filepath in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            text = Path(filepath).read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        for line in text.splitlines():
+            parts = line.strip().split()
+            if len(parts) < 10 or parts[0] == "sl":
+                continue
+            if parts[3] != "0A":  # 0A = TCP_LISTEN
+                continue
+            local = parts[1]
+            port_hex = local.split(":")[-1]
+            try:
+                port = int(port_hex, 16)
+            except Exception:
+                continue
+            if not (1 <= port <= 65535):
+                continue
+            inode = parts[9]
+            pid, comm = inode_to_proc.get(inode, ("", ""))
+            if port not in result:
+                result[port] = {
+                    "proto": "tcp",
+                    "port": port,
+                    "process": comm,
+                    "pid": pid,
+                    "processes": [comm] if comm else [],
+                    "pids": [pid] if pid else [],
+                    "state": "LISTEN",
+                }
+    return list(result.values())
+
+
 def get_listening_ports(limit=200):
     ports = []
     if os.name == "nt":
@@ -4743,6 +4815,13 @@ def get_listening_ports(limit=200):
                     if seen[key]["pids"]:
                         seen[key]["pid"] = seen[key]["pids"][0]
             ports = list(seen.values())
+
+        # Supplement with /proc/net/tcp to catch any ports ss missed (e.g. isolated nginx)
+        proc_entries = _get_proc_net_tcp_ports()
+        ss_ports = {p["port"] for p in ports}
+        for entry in proc_entries:
+            if entry["port"] not in ss_ports:
+                ports.append(entry)
 
     ports.sort(key=lambda x: (x.get("port", 0), x.get("proto", "")))
     return ports[:limit]
