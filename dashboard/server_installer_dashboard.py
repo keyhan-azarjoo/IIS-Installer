@@ -8827,9 +8827,9 @@ echo "[1/7] Ensuring Docker is installed and running..."
 if ! command -v docker >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -qq
-    apt-get install -y -qq docker.io docker-compose-plugin || apt-get install -y -qq docker.io
+    apt-get install -y -qq docker.io docker-compose-plugin 2>/dev/null || apt-get install -y -qq docker.io
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y -q docker docker-compose-plugin || dnf install -y -q docker
+    dnf install -y -q docker docker-compose-plugin 2>/dev/null || dnf install -y -q docker
   elif command -v yum >/dev/null 2>&1; then
     yum install -y -q docker
   elif command -v brew >/dev/null 2>&1; then
@@ -8846,12 +8846,34 @@ if ! docker info >/dev/null 2>&1; then
   echo "[ERROR] Docker daemon is not responding. Start Docker and retry."
   exit 1
 fi
-echo "      Docker is ready."
+# Ensure docker compose (V2 plugin or V1 standalone) is available
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE_CMD="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE_CMD="docker-compose"
+else
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get install -y -qq docker-compose 2>/dev/null || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q docker-compose 2>/dev/null || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q docker-compose 2>/dev/null || true
+  fi
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD="docker compose"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_CMD="docker-compose"
+  else
+    echo "[ERROR] docker compose is not available. Install docker-compose or docker-compose-plugin and retry."
+    exit 1
+  fi
+fi
+echo "      Docker is ready (compose: $COMPOSE_CMD)."
 
 echo "[2/7] Stopping previous LocalS3 Docker containers (if any)..."
 docker rm -f locals3-minio locals3-nginx >/dev/null 2>&1 || true
 if [ -f "$PROJECT/docker-compose.yml" ]; then
-  docker compose -f "$PROJECT/docker-compose.yml" down >/dev/null 2>&1 || true
+  $COMPOSE_CMD -f "$PROJECT/docker-compose.yml" down >/dev/null 2>&1 || true
 fi
 
 echo "[3/7] Creating project directories..."
@@ -8967,7 +8989,7 @@ volumes:
   $VOLUME:
 COMPOSEEOF
 
-docker compose -f "$PROJECT/docker-compose.yml" up -d
+$COMPOSE_CMD -f "$PROJECT/docker-compose.yml" up -d
 
 echo "[7/7] Waiting for MinIO to become healthy..."
 ELAPSED=0
