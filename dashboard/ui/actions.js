@@ -26,23 +26,19 @@
 
   function ActionIcon({ title, onClick, disabled, color = "primary", variant = "outlined", IconComp, fallback }) {
     return (
-      <Tooltip title={title}>
-        <span>
-          <Button
-            type="button"
-            color={color}
-            variant={variant}
-            disabled={disabled}
-            onClick={onClick}
-            aria-label={title}
-            startIcon={IconComp ? <IconComp fontSize="small" /> : null}
-            sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
-          >
-            {title}
-            {!IconComp && fallback ? ` ${fallback}` : ""}
-          </Button>
-        </span>
-      </Tooltip>
+      <Button
+        type="button"
+        color={color}
+        variant={variant}
+        disabled={disabled}
+        onClick={onClick}
+        aria-label={title}
+        startIcon={IconComp ? <IconComp fontSize="small" /> : null}
+        sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+      >
+        {title}
+        {!IconComp && fallback ? ` ${fallback}` : ""}
+      </Button>
     );
   }
 
