@@ -5595,6 +5595,8 @@ def get_service_items():
                 pass
 
         # Include managed IIS websites.
+        # Try PowerShell WebAdministration first, fall back to appcmd.exe
+        iis_sites_found = False
         rc_sites, out_sites = run_capture(
             [
                 "powershell.exe",
@@ -5661,8 +5663,72 @@ def get_service_items():
                             "project_path": str(s.get("PhysicalPath", "")).strip(),
                         }
                     )
+                    iis_sites_found = True
             except Exception:
                 pass
+
+        # Fallback: use appcmd.exe when WebAdministration module is unavailable
+        if not iis_sites_found:
+            appcmd = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "inetsrv", "appcmd.exe")
+            if os.path.isfile(appcmd):
+                rc_cmd, out_cmd = run_capture([appcmd, "list", "site"], timeout=20)
+                if rc_cmd == 0 and out_cmd:
+                    # Parse: SITE "Name" (id:N,bindings:proto/addr:port:host,...,state:State)
+                    for line in out_cmd.strip().splitlines():
+                        line = line.strip()
+                        m = re.match(r'^SITE\s+"([^"]+)"\s+\((.+)\)\s*$', line)
+                        if not m:
+                            continue
+                        name = m.group(1).strip()
+                        if not name or name.lower() == "default web site":
+                            continue
+                        meta = m.group(2)
+                        # Extract state
+                        state_m = re.search(r'state:(\w+)', meta)
+                        status = state_m.group(1) if state_m else "Unknown"
+                        # Extract bindings
+                        urls = []
+                        ports = []
+                        bind_m = re.search(r'bindings:(.+?)(?:,state:|$)', meta)
+                        if bind_m:
+                            for part in bind_m.group(1).split(","):
+                                part = part.strip()
+                                # format: proto/addr:port:host
+                                slash = part.find("/")
+                                if slash < 0:
+                                    continue
+                                proto = part[:slash].strip().lower()
+                                rest = part[slash + 1:]
+                                segments = rest.split(":")
+                                if len(segments) >= 2:
+                                    port_str = segments[-2] if len(segments) >= 3 else segments[-1]
+                                    if port_str.isdigit():
+                                        port_num = int(port_str)
+                                        ports.append({"port": port_num, "protocol": "tcp"})
+                                        scheme = "https" if proto == "https" else "http"
+                                        if port_num in (80, 443):
+                                            urls.append(f"{scheme}://{preferred_host}")
+                                        else:
+                                            urls.append(f"{scheme}://{preferred_host}:{port_num}")
+                        # Deduplicate
+                        seen_ports = set()
+                        deduped_ports = []
+                        for pp in ports:
+                            if pp["port"] not in seen_ports:
+                                seen_ports.add(pp["port"])
+                                deduped_ports.append(pp)
+                        items.append(
+                            {
+                                "kind": "iis_site",
+                                "name": name,
+                                "display_name": name,
+                                "status": status,
+                                "autostart": True,
+                                "platform": "windows",
+                                "urls": sorted(set(urls)),
+                                "ports": deduped_ports,
+                            }
+                        )
     elif command_exists("systemctl"):
         rc, out = run_capture(
             ["systemctl", "list-units", "--type=service", "--all", "--no-pager", "--no-legend"],
