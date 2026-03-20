@@ -7,7 +7,7 @@
       Grid, Card, CardContent, Typography, Divider, ActionCard,
       Stack, Button, Box, Paper,
       cfg, run, serviceBusy,
-      dotnetServices,
+      dotnetServices, services, loadServices,
       isScopeLoading, loadDotnetServices, loadDotnetInfo,
       hasStoppedServices, batchServiceAction,
       isServiceRunningStatus, onServiceAction,
@@ -16,7 +16,17 @@
 
     if (cfg.os !== "windows") return null;
 
-    const iisServices = (dotnetServices || []).filter((s) => String(s.kind || "").toLowerCase() === "iis_site");
+    // Show ALL IIS sites — from both dotnet-scoped and all-scoped service lists
+    // (sites deployed with custom names like "windows" won't match the dotnet name pattern)
+    const allSources = [...(dotnetServices || []), ...(services || [])];
+    const seen = new Set();
+    const iisServices = allSources.filter((s) => {
+      if (String(s.kind || "").toLowerCase() !== "iis_site") return false;
+      const key = s.name;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
     return (
       <Grid container spacing={2}>
@@ -63,7 +73,7 @@
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                 <Typography variant="h6" fontWeight={800}>IIS DotNet Services</Typography>
                 <Box sx={{ flexGrow: 1 }} />
-                <Button variant="outlined" disabled={isScopeLoading("dotnet")} onClick={() => { loadDotnetServices.current(); loadDotnetInfo.current(); }} sx={{ textTransform: "none" }}>Refresh</Button>
+                <Button variant="outlined" disabled={isScopeLoading("dotnet") || isScopeLoading("all")} onClick={() => { loadDotnetServices.current(); loadDotnetInfo.current(); loadServices.current(); }} sx={{ textTransform: "none" }}>Refresh</Button>
                 {iisServices.length > 0 && (
                   <Button
                     variant="outlined"
