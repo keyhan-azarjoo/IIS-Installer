@@ -15,6 +15,8 @@
       setPage, setFileManagerPath,
     } = p;
 
+    const { ServiceListCard, ServiceRow, PageDescription } = ns.shared || {};
+
     if (cfg.os === "windows" || cfg.os === "linux") {
       const panelUrl = String(proxy.panel_url || "").trim();
       const panelHostMatch = panelUrl.match(/^https?:\/\/([^/:]+)/i);
@@ -30,6 +32,14 @@
       ];
       return (
         <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <PageDescription title="Proxy">
+              <Typography variant="body2">
+                Install and manage a reverse-proxy stack that tunnels traffic through multiple protocol layers.
+                On Windows the proxy runs inside WSL with persistent keepalive and autostart; on Linux it installs natively from a vendored project copy.
+              </Typography>
+            </PageDescription>
+          </Grid>
           <Grid item xs={12} md={8}>
             <ActionCard
               title={`Install Proxy (${cfg.os === "windows" ? "Windows" : "Linux"})`}
@@ -77,59 +87,50 @@
             </Card>
           </Grid>
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
-              <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>Proxy Services</Typography>
-                  <Box sx={{ flexGrow: 1 }} />
-                  {!!panelUrl && (
-                    <Button variant="contained" disabled={serviceBusy} onClick={() => window.open(panelUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}>
-                      Open Proxy Panel
-                    </Button>
-                  )}
-                  <Button
-                    variant="outlined"
-                    color={hasStoppedServices(proxyServices) ? "success" : "error"}
-                    disabled={serviceBusy || proxyServices.length === 0}
-                    onClick={() => batchServiceAction(proxyServices, "Proxy", hasStoppedServices(proxyServices) ? "start" : "stop")}
-                    sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
-                  >
-                    {hasStoppedServices(proxyServices) ? "Start All Proxy" : "Stop All Proxy"}
+            <ServiceListCard
+              title="Proxy Services"
+              services={proxyServices}
+              emptyText="No proxy services detected yet."
+              loading={isScopeLoading("proxy")}
+              onRefresh={() => Promise.all([loadProxyInfo.current(), loadProxyServices.current()])}
+              serviceBusy={serviceBusy}
+              extraActions={<>
+                {!!panelUrl && (
+                  <Button variant="contained" disabled={serviceBusy} onClick={() => window.open(panelUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}>
+                    Open Proxy Panel
                   </Button>
-                  <Button variant="outlined" disabled={isScopeLoading("proxy")} onClick={() => Promise.all([loadProxyInfo.current(), loadProxyServices.current()])} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}>
-                    Refresh
-                  </Button>
-                </Stack>
-                <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
-                  {proxyServices.length === 0 && <Typography variant="body2">No proxy services detected yet.</Typography>}
-                  {proxyServices.map((svc) => {
-                    const deleteDisabled = serviceBusy || !["proxy-panel", "ServerInstaller-ProxyWSL"].includes(String(svc.name || ""));
-                    return (
-                      <Paper key={`proxy-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                          <Box sx={{ minWidth: 260 }}>
-                            <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "service"})</Typography>
-                            <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
-                          </Box>
-                          {renderServiceStatus(svc)}
-                          <Box sx={{ flexGrow: 1 }} />
-                          {renderFolderIcon(svc)}
-                          <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onProxyServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
-                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                          </Button>
-                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onProxyServiceAction("restart", svc)} sx={{ textTransform: "none" }}>
-                            Restart
-                          </Button>
-                          <Button size="small" variant="outlined" color="error" disabled={deleteDisabled} onClick={() => onProxyServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
-                            Delete
-                          </Button>
-                        </Stack>
-                      </Paper>
-                    );
-                  })}
-                </Box>
-              </CardContent>
-            </Card>
+                )}
+                <Button
+                  variant="outlined"
+                  color={hasStoppedServices(proxyServices) ? "success" : "error"}
+                  disabled={serviceBusy || proxyServices.length === 0}
+                  onClick={() => batchServiceAction(proxyServices, "Proxy", hasStoppedServices(proxyServices) ? "start" : "stop")}
+                  sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+                >
+                  {hasStoppedServices(proxyServices) ? "Start All Proxy" : "Stop All Proxy"}
+                </Button>
+              </>}
+            >
+              {proxyServices.map((svc) => {
+                const deleteDisabled = serviceBusy || !["proxy-panel", "ServerInstaller-ProxyWSL"].includes(String(svc.name || ""));
+                return (
+                  <ServiceRow
+                    key={`proxy-${svc.kind}-${svc.name}`}
+                    svc={svc}
+                    serviceBusy={serviceBusy}
+                    onServiceAction={onProxyServiceAction}
+                    renderServiceStatus={renderServiceStatus}
+                    renderFolderIcon={renderFolderIcon}
+                    showDelete={false}
+                    extraButtons={
+                      <Button size="small" variant="outlined" color="error" disabled={deleteDisabled} onClick={() => onProxyServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
+                        Delete
+                      </Button>
+                    }
+                  />
+                );
+              })}
+            </ServiceListCard>
           </Grid>
         </Grid>
       );
