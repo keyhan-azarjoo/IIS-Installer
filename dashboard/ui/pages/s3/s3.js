@@ -4,22 +4,73 @@
 
   ns.pages.s3 = function renderS3Page(p) {
     const {
-      Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
+      Alert, Grid, Typography, Button, Box,
       ActionCard, ActionIcon,
       cfg, run, selectableIps, getDefaultSelectableIp, serviceBusy,
       s3WindowsModeOptions, s3WindowsDockerSupported, s3WindowsDockerReason,
       s3ConsoleUrl, s3ApiUrl, s3LoginText, s3Services,
       isScopeLoading, loadS3Info, loadS3Services,
       hasStoppedServices, batchServiceAction, copyText,
-      isServiceRunningStatus, formatServiceState, onServiceAction,
+      onServiceAction,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
       OpenCompassStyleIcon, TryOpenCompassIcon, CopyCompassIcon,
-      setPage, setFileManagerPath,
     } = p;
+    const { ServiceListCard, ServiceRow, PageDescription } = ns.shared || {};
+
+    const s3ExtraActions = (
+      <>
+        {!!s3ConsoleUrl && (
+          <ActionIcon title="Open S3 Dashboard" disabled={serviceBusy} onClick={() => window.open(s3ConsoleUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
+        )}
+        {!!s3ApiUrl && (
+          <ActionIcon title="Open S3 API" disabled={serviceBusy} onClick={() => window.open(s3ApiUrl, "_blank", "noopener,noreferrer")} IconComp={TryOpenCompassIcon} fallback="API" />
+        )}
+        {!!s3LoginText && (
+          <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
+        )}
+        <Button
+          variant="outlined"
+          color={hasStoppedServices(s3Services) ? "success" : "error"}
+          disabled={serviceBusy || s3Services.length === 0}
+          onClick={() => batchServiceAction(s3Services, "S3", hasStoppedServices(s3Services) ? "start" : "stop")}
+          sx={{ textTransform: "none" }}
+        >
+          {hasStoppedServices(s3Services) ? "Start All S3" : "Stop All S3"}
+        </Button>
+      </>
+    );
+
+    const s3UrlDisplay = (!!s3ConsoleUrl || !!s3ApiUrl) ? (
+      <Box sx={{ mb: 1 }}>
+        {!!s3ConsoleUrl && <Typography variant="body2">Dashboard URL: {s3ConsoleUrl}</Typography>}
+        {!!s3ApiUrl && <Typography variant="body2">API URL: {s3ApiUrl}</Typography>}
+      </Box>
+    ) : null;
+
+    const s3ServiceRows = s3Services.map((svc) => (
+      <ServiceRow
+        key={`s3-${svc.kind}-${svc.name}`}
+        svc={svc}
+        serviceBusy={serviceBusy}
+        onServiceAction={onServiceAction}
+        renderServiceUrls={renderServiceUrls}
+        renderServicePorts={renderServicePorts}
+        renderServiceStatus={renderServiceStatus}
+        renderFolderIcon={renderFolderIcon}
+        showRestart={false}
+      />
+    ));
 
     if (cfg.os === "windows") {
       return (
         <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <PageDescription title="S3-Compatible Object Storage">
+              <Typography variant="body2">
+                MinIO provides Amazon S3-compatible object storage you can run locally. Store files, images, backups, and application data using the standard S3 API. Access your storage through the MinIO Console web UI or connect from any S3-compatible client or SDK.
+              </Typography>
+            </PageDescription>
+          </Grid>
           <Grid item xs={12} md={8}>
             <ActionCard
               title="Install S3 (Windows)"
@@ -57,67 +108,18 @@
             />
           </Grid>
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
-              <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>S3 Services</Typography>
-                  <Box sx={{ flexGrow: 1 }} />
-                  {!!s3ConsoleUrl && (
-                    <ActionIcon title="Open S3 Dashboard" disabled={serviceBusy} onClick={() => window.open(s3ConsoleUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
-                  )}
-                  {!!s3ApiUrl && (
-                    <ActionIcon title="Open S3 API" disabled={serviceBusy} onClick={() => window.open(s3ApiUrl, "_blank", "noopener,noreferrer")} IconComp={TryOpenCompassIcon} fallback="API" />
-                  )}
-                  {!!s3LoginText && (
-                    <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
-                  )}
-                  <Button variant="outlined" disabled={isScopeLoading("s3")} onClick={() => Promise.all([loadS3Info.current(), loadS3Services.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
-                  <Button
-                    variant="outlined"
-                    color={hasStoppedServices(s3Services) ? "success" : "error"}
-                    disabled={serviceBusy || s3Services.length === 0}
-                    onClick={() => batchServiceAction(s3Services, "S3", hasStoppedServices(s3Services) ? "start" : "stop")}
-                    sx={{ textTransform: "none" }}
-                  >
-                    {hasStoppedServices(s3Services) ? "Start All S3" : "Stop All S3"}
-                  </Button>
-                </Stack>
-                {(!!s3ConsoleUrl || !!s3ApiUrl) && (
-                  <Box sx={{ mt: 1 }}>
-                    {!!s3ConsoleUrl && <Typography variant="body2">Dashboard URL: {s3ConsoleUrl}</Typography>}
-                    {!!s3ApiUrl && <Typography variant="body2">API URL: {s3ApiUrl}</Typography>}
-                  </Box>
-                )}
-                <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
-                  {s3Services.length === 0 && <Typography variant="body2">No S3-related services found.</Typography>}
-                  {s3Services.map((svc) => (
-                    <Paper key={`s3-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                        <Box sx={{ minWidth: 250 }}>
-                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
-                          {renderServiceUrls(svc)}
-                          {renderServicePorts(svc)}
-                        </Box>
-                        {renderServiceStatus(svc)}
-                        <Box sx={{ flexGrow: 1 }} />
-                        {renderFolderIcon(svc)}
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                          disabled={serviceBusy}
-                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                        </Button>
-                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Box>
-              </CardContent>
-            </Card>
+            <ServiceListCard
+              title="S3 Services"
+              services={s3Services}
+              emptyText="No S3-related services found."
+              loading={isScopeLoading("s3")}
+              onRefresh={() => Promise.all([loadS3Info.current(), loadS3Services.current()])}
+              serviceBusy={serviceBusy}
+              extraActions={s3ExtraActions}
+            >
+              {s3UrlDisplay}
+              {s3ServiceRows}
+            </ServiceListCard>
           </Grid>
         </Grid>
       );
@@ -125,6 +127,13 @@
     if (cfg.os === "linux" || cfg.os === "darwin") {
       return (
         <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <PageDescription title="S3-Compatible Object Storage">
+              <Typography variant="body2">
+                MinIO provides Amazon S3-compatible object storage you can run locally. Store files, images, backups, and application data using the standard S3 API. Access your storage through the MinIO Console web UI or connect from any S3-compatible client or SDK.
+              </Typography>
+            </PageDescription>
+          </Grid>
           <Grid item xs={12} md={8}>
             <ActionCard
               title="Install S3 (Linux/macOS)"
@@ -147,67 +156,18 @@
             />
           </Grid>
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
-              <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>S3 Services</Typography>
-                  <Box sx={{ flexGrow: 1 }} />
-                  {!!s3ConsoleUrl && (
-                    <ActionIcon title="Open S3 Dashboard" disabled={serviceBusy} onClick={() => window.open(s3ConsoleUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
-                  )}
-                  {!!s3ApiUrl && (
-                    <ActionIcon title="Open S3 API" disabled={serviceBusy} onClick={() => window.open(s3ApiUrl, "_blank", "noopener,noreferrer")} IconComp={TryOpenCompassIcon} fallback="API" />
-                  )}
-                  {!!s3LoginText && (
-                    <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
-                  )}
-                  <Button variant="outlined" disabled={isScopeLoading("s3")} onClick={() => Promise.all([loadS3Info.current(), loadS3Services.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
-                  <Button
-                    variant="outlined"
-                    color={hasStoppedServices(s3Services) ? "success" : "error"}
-                    disabled={serviceBusy || s3Services.length === 0}
-                    onClick={() => batchServiceAction(s3Services, "S3", hasStoppedServices(s3Services) ? "start" : "stop")}
-                    sx={{ textTransform: "none" }}
-                  >
-                    {hasStoppedServices(s3Services) ? "Start All S3" : "Stop All S3"}
-                  </Button>
-                </Stack>
-                {(!!s3ConsoleUrl || !!s3ApiUrl) && (
-                  <Box sx={{ mt: 1 }}>
-                    {!!s3ConsoleUrl && <Typography variant="body2">Dashboard URL: {s3ConsoleUrl}</Typography>}
-                    {!!s3ApiUrl && <Typography variant="body2">API URL: {s3ApiUrl}</Typography>}
-                  </Box>
-                )}
-                <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
-                  {s3Services.length === 0 && <Typography variant="body2">No S3-related services found.</Typography>}
-                  {s3Services.map((svc) => (
-                    <Paper key={`s3-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                        <Box sx={{ minWidth: 250 }}>
-                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
-                          {renderServiceUrls(svc)}
-                          {renderServicePorts(svc)}
-                        </Box>
-                        {renderServiceStatus(svc)}
-                        <Box sx={{ flexGrow: 1 }} />
-                        {renderFolderIcon(svc)}
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                          disabled={serviceBusy}
-                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                        </Button>
-                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Box>
-              </CardContent>
-            </Card>
+            <ServiceListCard
+              title="S3 Services"
+              services={s3Services}
+              emptyText="No S3-related services found."
+              loading={isScopeLoading("s3")}
+              onRefresh={() => Promise.all([loadS3Info.current(), loadS3Services.current()])}
+              serviceBusy={serviceBusy}
+              extraActions={s3ExtraActions}
+            >
+              {s3UrlDisplay}
+              {s3ServiceRows}
+            </ServiceListCard>
           </Grid>
         </Grid>
       );
