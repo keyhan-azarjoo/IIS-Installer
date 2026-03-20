@@ -1853,8 +1853,15 @@ function App() {
     return (
       <Button
         fullWidth
-        variant={isActive ? "contained" : "outlined"}
-        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: isActive ? undefined : "#dbeafe", borderColor: "rgba(219,234,254,.35)", justifyContent: "flex-start", px: collapsed ? 1 : 2 }}
+        variant={isActive ? "contained" : "text"}
+        sx={{
+          textTransform: "none", fontWeight: isActive ? 700 : 600, borderRadius: 2, mt: 0.5, py: 0.9,
+          color: isActive ? "#fff" : "#c2d6f0",
+          bgcolor: isActive ? "rgba(37,99,235,.85)" : "transparent",
+          justifyContent: "flex-start", px: collapsed ? 1 : 2,
+          "&:hover": { bgcolor: isActive ? "rgba(37,99,235,.95)" : "rgba(96,165,250,.12)", color: "#fff" },
+          transition: "all 0.15s ease",
+        }}
         onClick={() => { if (opts.onClick) opts.onClick(); else setPage(targetPage); if (isMobile) setMobileOpen(false); }}
       >
         {collapsed ? (shortLabel || label.slice(0, 4)) : label}
@@ -1862,28 +1869,32 @@ function App() {
     );
   };
 
+  const sidebarSection = (label) => (
+    !collapsed && <Typography variant="caption" sx={{ mt: 2, mb: 0.3, ml: 1, opacity: 0.4, fontWeight: 700, letterSpacing: 1.2, fontSize: 10, textTransform: "uppercase" }}>{label}</Typography>
+  );
+
   const sidebar = (
-    <Box sx={{ height: "100%", background: "linear-gradient(180deg,#081726,#132d4b)", color: "#deebff", p: 1.5, display: "flex", flexDirection: "column" }}>
+    <Box sx={{ height: "100%", background: "linear-gradient(180deg,#081726 0%,#0f2744 50%,#132d4b 100%)", color: "#deebff", p: 1.5, display: "flex", flexDirection: "column", overflowY: "auto", overflowX: "hidden" }}>
       <Stack direction="row" alignItems="center" sx={{ px: 1, pb: 1.5, pt: 1 }}>
         {!collapsed && (
           <Box>
-            <Typography variant="h6" fontWeight={800}>Server Installer</Typography>
-            <Typography variant="caption" sx={{ opacity: 0.8 }}>Control Panel</Typography>
+            <Typography variant="h6" fontWeight={800} sx={{ letterSpacing: -0.3 }}>Server Installer</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.6 }}>Control Panel</Typography>
           </Box>
         )}
       </Stack>
-      {!collapsed && <Chip label={cfg.os_label} size="small" sx={{ mb: 0.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }} />}
+      {!collapsed && <Chip label={cfg.os_label} size="small" sx={{ mb: 1, ml: 1, bgcolor: "rgba(96,165,250,.15)", color: "#93c5fd", border: "1px solid rgba(147,197,253,.3)", fontWeight: 600 }} />}
 
       {sidebarBtn("OS Info", "SI", "sysinfo")}
       {sidebarBtn("Dashboard", "Home", "home")}
       {sidebarBtn("File Manager", "Files", "files", { onClick: () => { setPage("files"); setFileManagerData(null); } })}
 
-      {!collapsed && <Typography variant="caption" sx={{ mt: 2, mb: 0.5, ml: 1, opacity: 0.5, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Services</Typography>}
+      {sidebarSection("Services")}
       {sidebarBtn("Platform Services", "Plat", "platform-services", { activePages: ["platform-services", "api", "dotnet", "s3", "mongo", "python", "proxy", "website", "ssl"] })}
       {sidebarBtn("AI & ML Services", "AI", "ai-ml", { activePages: ["ai-ml", "ai-"] })}
       {sidebarBtn("Docker", "Dock", "docker")}
 
-      {!collapsed && <Typography variant="caption" sx={{ mt: 2, mb: 0.5, ml: 1, opacity: 0.5, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Tools</Typography>}
+      {sidebarSection("Tools")}
       {sidebarBtn("Web Terminal", "Term", "terminal", { onClick: () => { setTermOpen(true); setTermMin(false); } })}
       {sidebarBtn("Logs", "Logs", "logs")}
 
@@ -1892,7 +1903,7 @@ function App() {
         <Button
           fullWidth
           variant="outlined"
-          sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: "#fde68a", borderColor: "rgba(253,230,138,.5)" }}
+          sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: "#fde68a", borderColor: "rgba(253,230,138,.4)", "&:hover": { borderColor: "#fde68a", bgcolor: "rgba(253,230,138,.1)" } }}
           onClick={runDashboardUpdate}
         >
           {collapsed ? "Upd" : "Update Dashboard"}

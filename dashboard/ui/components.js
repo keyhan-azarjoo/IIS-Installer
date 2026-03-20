@@ -544,3 +544,77 @@ function NavCard({ title, text, onClick, outlined }) {
 
 window.ServerInstallerUI = window.ServerInstallerUI || {};
 window.ServerInstallerUI.components = { Field, ActionCard, NavCard };
+
+// ── Shared Service Components ──────────────────────────────────────────────
+(() => {
+  const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
+  const { Box: SBox, Button: SBtn, Card: SCard, CardContent: SCC, Chip: SChip, Paper: SPaper, Stack: SStack, Typography: STypo } = MaterialUI;
+  const { isServiceRunningStatus } = ns.actions || {};
+
+  function PageDescription({ title, children }) {
+    return (
+      <SCard sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+        <SCC>
+          <STypo variant="h6" fontWeight={800} sx={{ mb: 1 }}>{title}</STypo>
+          {children}
+        </SCC>
+      </SCard>
+    );
+  }
+
+  function ServiceListCard({ title, services, emptyText, loading, onRefresh, extraActions, children }) {
+    const svcs = services || [];
+    return (
+      <SCard sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+        <SCC sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
+          <SStack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+            <STypo variant="h6" fontWeight={800}>{title}</STypo>
+            <SBox sx={{ flexGrow: 1 }} />
+            {extraActions}
+            {onRefresh && (
+              <SBtn variant="outlined" disabled={!!loading} onClick={onRefresh} sx={{ textTransform: "none" }}>
+                {loading ? "Refreshing..." : "Refresh"}
+              </SBtn>
+            )}
+          </SStack>
+          <SBox sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
+            {svcs.length === 0 && <STypo variant="body2" color="text.secondary">{emptyText || "No services found."}</STypo>}
+            {children}
+          </SBox>
+        </SCC>
+      </SCard>
+    );
+  }
+
+  function ServiceRow({ svc, serviceBusy, onServiceAction, renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon, renderEditServiceIcon, showRestart = true, showDelete = true, extraButtons }) {
+    if (!svc) return null;
+    const running = isServiceRunningStatus(svc.status, svc.sub_status);
+    return (
+      <SPaper variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+        <SStack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+          <SBox sx={{ minWidth: 250 }}>
+            <SStack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
+              <STypo variant="body2"><b>{svc.form_name || svc.name}</b></STypo>
+              <SChip label={svc.kind || "service"} size="small" variant="outlined" sx={{ fontSize: 11, height: 20 }} />
+            </SStack>
+            {svc.image && <STypo variant="caption" color="text.secondary">Image: {svc.image}</STypo>}
+            {typeof renderServiceUrls === "function" && renderServiceUrls(svc)}
+            {typeof renderServicePorts === "function" && renderServicePorts(svc)}
+          </SBox>
+          {typeof renderServiceStatus === "function" && renderServiceStatus(svc)}
+          <SBox sx={{ flexGrow: 1 }} />
+          {typeof renderFolderIcon === "function" && renderFolderIcon(svc)}
+          {typeof renderEditServiceIcon === "function" && renderEditServiceIcon(svc)}
+          {extraButtons}
+          <SBtn size="small" variant="outlined" color={running ? "error" : "success"} disabled={!!serviceBusy} onClick={() => onServiceAction(running ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
+            {running ? "Stop" : "Start"}
+          </SBtn>
+          {showRestart && <SBtn size="small" variant="outlined" disabled={!!serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</SBtn>}
+          {showDelete && <SBtn size="small" variant="outlined" color="error" disabled={!!serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</SBtn>}
+        </SStack>
+      </SPaper>
+    );
+  }
+
+  ns.shared = { ServiceListCard, ServiceRow, PageDescription };
+})();
