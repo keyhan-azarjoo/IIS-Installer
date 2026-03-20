@@ -2,31 +2,34 @@
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
-  ns.pages["dotnet-iis"] = function renderDotnetIisPage(p) {
+  function DotnetIisInner(p) {
     const {
       Grid, Card, CardContent, Typography, Divider, ActionCard,
       Stack, Button, Box, Paper,
       cfg, run, serviceBusy,
-      dotnetServices, services, loadServices,
-      isScopeLoading, loadDotnetServices, loadDotnetInfo,
-      hasStoppedServices, batchServiceAction,
       isServiceRunningStatus, onServiceAction,
+      hasStoppedServices, batchServiceAction,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon, renderEditServiceIcon,
     } = p;
 
-    if (cfg.os !== "windows") return null;
+    const [iisServices, setIisServices] = React.useState([]);
+    const [loading, setLoading] = React.useState(false);
 
-    // Show ALL IIS sites — from both dotnet-scoped and all-scoped service lists
-    // (sites deployed with custom names like "windows" won't match the dotnet name pattern)
-    const allSources = [...(dotnetServices || []), ...(services || [])];
-    const seen = new Set();
-    const iisServices = allSources.filter((s) => {
-      if (String(s.kind || "").toLowerCase() !== "iis_site") return false;
-      const key = s.name;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    const loadIisServices = React.useCallback(async () => {
+      setLoading(true);
+      try {
+        const r = await fetch("/api/system/services?scope=all", { headers: { "X-Requested-With": "fetch" } });
+        const j = await r.json();
+        if (j.ok && Array.isArray(j.services)) {
+          setIisServices(j.services.filter((s) => String(s.kind || "").toLowerCase() === "iis_site"));
+        }
+      } catch (_) {}
+      setLoading(false);
+    }, []);
+
+    React.useEffect(() => { loadIisServices(); }, [loadIisServices]);
+
+    if (cfg.os !== "windows") return null;
 
     return (
       <Grid container spacing={2}>
@@ -56,7 +59,7 @@
               <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>IIS Deploy Target</Typography>
               <Typography variant="body2" sx={{ mb: 1 }}>Run <b>Install IIS</b> first to enable IIS features and the ASP.NET Core Module.</Typography>
               <Divider sx={{ my: 1 }} />
-              <Typography variant="body2" sx={{ mb: 1 }}><b>Source Path or URL</b> — a published .NET folder, a <code>.zip</code> archive, or a GitHub URL. Point to your <code>publish</code> output directory.</Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}><b>Source Path or URL</b> — a published .NET folder, a <code>.zip</code> archive, or a GitHub URL.</Typography>
               <Divider sx={{ my: 1 }} />
               <Typography variant="body2" sx={{ mb: 1 }}><b>.NET Channel</b> — runtime version, e.g. <code>8.0</code> or <code>9.0</code>.</Typography>
               <Divider sx={{ my: 1 }} />
@@ -71,15 +74,17 @@
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
             <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                <Typography variant="h6" fontWeight={800}>IIS DotNet Services</Typography>
+                <Typography variant="h6" fontWeight={800}>IIS Sites</Typography>
                 <Box sx={{ flexGrow: 1 }} />
-                <Button variant="outlined" disabled={isScopeLoading("dotnet") || isScopeLoading("all")} onClick={() => { loadDotnetServices.current(); loadDotnetInfo.current(); loadServices.current(); }} sx={{ textTransform: "none" }}>Refresh</Button>
+                <Button variant="outlined" disabled={loading} onClick={loadIisServices} sx={{ textTransform: "none" }}>
+                  {loading ? "Refreshing..." : "Refresh"}
+                </Button>
                 {iisServices.length > 0 && (
                   <Button
                     variant="outlined"
                     color={hasStoppedServices(iisServices) ? "success" : "error"}
                     disabled={serviceBusy}
-                    onClick={() => batchServiceAction(iisServices, "DotNet", hasStoppedServices(iisServices) ? "start" : "stop")}
+                    onClick={() => batchServiceAction(iisServices, "IIS", hasStoppedServices(iisServices) ? "start" : "stop")}
                     sx={{ textTransform: "none" }}
                   >
                     {hasStoppedServices(iisServices) ? "Start All" : "Stop All"}
@@ -87,14 +92,20 @@
                 )}
               </Stack>
               <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
-                {iisServices.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">No IIS DotNet services found. Deploy an app above to see services here.</Typography>
+                {iisServices.length === 0 && !loading && (
+                  <Typography variant="body2" color="text.secondary">No IIS sites found. Deploy an app above to see sites here.</Typography>
+                )}
+                {loading && iisServices.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">Loading IIS sites...</Typography>
                 )}
                 {iisServices.map((svc) => (
-                  <Paper key={`iis-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                  <Paper key={`iis-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                     <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                       <Box sx={{ minWidth: 250 }}>
-                        <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "service"})</Typography></Typography>
+                        <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "iis_site"})</Typography></Typography>
+                        {svc.display_name && svc.display_name !== svc.name && (
+                          <Typography variant="caption" color="text.secondary" sx={{ display: "block", wordBreak: "break-all" }}>{svc.display_name}</Typography>
+                        )}
                         {renderServiceUrls(svc)}
                         {renderServicePorts(svc)}
                       </Box>
@@ -123,5 +134,9 @@
         </Grid>
       </Grid>
     );
+  }
+
+  ns.pages["dotnet-iis"] = function renderDotnetIisPage(p) {
+    return React.createElement(DotnetIisInner, p);
   };
 })();
