@@ -2091,6 +2091,9 @@ function App() {
               <Typography variant="caption" sx={{ color: "#93c5fd" }}>{termState}</Typography>
             </Box>
             <Stack direction="row" spacing={1}>
+              <Button size="small" variant="outlined" sx={{ color: "#dbeafe", borderColor: "#334155", minWidth: 60 }} onClick={() => setTermText("")}>
+                Clear
+              </Button>
               <Button size="small" variant="outlined" sx={{ color: "#dbeafe", borderColor: "#334155", minWidth: 80 }} onClick={() => setTermMin((v) => !v)}>
                 {termMin ? "Expand" : "Minimize"}
               </Button>
