@@ -6065,7 +6065,7 @@ def filter_service_items(scope):
     if scope == "s3":
         return [x for x in items if _is_locals3_name(x.get("name", "")) or _is_locals3_name(x.get("display_name", ""))]
     if scope == "dotnet":
-        return [x for x in items if _is_dotnet_name(x.get("name", "")) or _is_dotnet_name(x.get("display_name", ""))]
+        return [x for x in items if x.get("kind") == "iis_site" or _is_dotnet_name(x.get("name", "")) or _is_dotnet_name(x.get("display_name", ""))]
     if scope == "proxy":
         proxy_info = get_proxy_info()
         proxy_items = proxy_info.get("services") or []

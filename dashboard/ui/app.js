@@ -270,6 +270,7 @@ function App() {
     if (targetPage === "dotnet" || targetPage === "dotnet-docker" || targetPage === "dotnet-linux") return Promise.all([loadDotnetServices.current(), loadDockerServices.current()]);
     if (targetPage === "dotnet-iis") return Promise.all([loadDotnetServices.current(), loadServices.current()]);
     if (String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
+    if (targetPage === "api") return Promise.all([loadDotnetServices.current(), loadDockerServices.current(), loadPythonServices.current()]);
     return Promise.resolve();
   }, []);
 
@@ -290,13 +291,13 @@ function App() {
   }, [refreshPageServices, refreshPageStatus]);
 
   React.useEffect(() => {
-    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-")) {
+    if (page === "api" || page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-")) {
       refreshPageContext(page);
     }
   }, [page, refreshPageContext]);
 
   React.useEffect(() => {
-    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-"))) {
+    if (!(page === "api" || page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-"))) {
       return undefined;
     }
     const t = setInterval(() => {
