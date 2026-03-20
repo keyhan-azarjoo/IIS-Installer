@@ -5614,7 +5614,8 @@ def get_service_items():
                     name = str(s.get("Name", "")).strip()
                     if not name:
                         continue
-                    if not managed_patterns.search(name):
+                    # Include all IIS sites except the built-in default
+                    if name.lower() == "default web site":
                         continue
                     urls = []
                     ports = []
