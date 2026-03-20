@@ -283,9 +283,46 @@ function ActionCard({ title, description, action, fields, onRun, color, runDisab
     }
   }, [portFields]);
 
+  // Auto-find free ports on mount: if a default port is busy, scan upward to find the next available one.
+  const autoResolvedRef = React.useRef(false);
   React.useEffect(() => {
     if (portFields.length === 0) return;
-    validatePorts(initialPortValues);
+    if (autoResolvedRef.current) {
+      validatePorts(initialPortValues);
+      return;
+    }
+    autoResolvedRef.current = true;
+    (async () => {
+      const resolved = { ...initialPortValues };
+      const usedInForm = new Set();
+      for (const field of portFields) {
+        const raw = String(resolved[field.name] || "").trim();
+        if (!raw || !/^\d+$/.test(raw)) continue;
+        let port = Number(raw);
+        if (port < 1 || port > 65535) continue;
+        // Check if this port is available
+        let found = false;
+        for (let attempt = 0; attempt < 20; attempt++) {
+          if (usedInForm.has(port)) { port++; continue; }
+          try {
+            const fd = new FormData();
+            fd.append("port", String(port));
+            fd.append("protocol", "tcp");
+            const r = await fetch("/api/system/port_check", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+            const j = await r.json();
+            if (j.ok && !j.busy) { found = true; break; }
+            if (j.ok && j.busy && j.managed_owner) { found = true; break; }
+            port++;
+          } catch (_) { found = true; break; }
+        }
+        if (found && port !== Number(raw)) {
+          resolved[field.name] = String(port);
+        }
+        usedInForm.add(port);
+      }
+      setPortValues(resolved);
+      validatePorts(resolved);
+    })();
   }, [initialPortValues, portFields.length, validatePorts]);
 
   const doUpload = async () => {
