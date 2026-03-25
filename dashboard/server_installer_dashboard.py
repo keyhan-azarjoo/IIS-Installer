@@ -5362,6 +5362,16 @@ const db = globalThis.db.getSiblingDB({json.dumps(db_name)});
     return run_windows_mongosh_json(body_js, timeout=60, username=username, password=password)
 
 
+def _resolve_service_host(service_name, fallback):
+    """Return the user-selected host stored in website state for *service_name*,
+    falling back to *fallback* when no stored host is available."""
+    payload = _website_state_payload(service_name)
+    stored = str(payload.get("host") or "").strip()
+    if stored and stored not in ("localhost", "127.0.0.1"):
+        return stored
+    return fallback
+
+
 def get_service_items():
     items = []
     managed_patterns = re.compile(
@@ -5643,7 +5653,13 @@ def get_service_items():
                                 if port and str(port).isdigit():
                                     ports.append({"port": int(port), "protocol": "tcp"})
                                     scheme = "https" if proto == "https" else "http"
-                                    host = preferred_host
+                                    bind_parts = bind.split(":")
+                                    bind_ip_part = bind_parts[0].strip() if bind_parts else ""
+                                    host = (
+                                        bind_ip_part
+                                        if bind_ip_part and bind_ip_part not in ("*", "0.0.0.0", "::")
+                                        else _resolve_service_host(name, preferred_host)
+                                    )
                                     if int(port) in (80, 443):
                                         urls.append(f"{scheme}://{host}")
                                     else:
@@ -5701,15 +5717,21 @@ def get_service_items():
                                 rest = part[slash + 1:]
                                 segments = rest.split(":")
                                 if len(segments) >= 2:
+                                    bind_ip_part = segments[0].strip() if len(segments) >= 3 else ""
                                     port_str = segments[-2] if len(segments) >= 3 else segments[-1]
                                     if port_str.isdigit():
                                         port_num = int(port_str)
                                         ports.append({"port": port_num, "protocol": "tcp"})
                                         scheme = "https" if proto == "https" else "http"
+                                        appcmd_host = (
+                                            bind_ip_part
+                                            if bind_ip_part and bind_ip_part not in ("*", "0.0.0.0", "::")
+                                            else _resolve_service_host(name, preferred_host)
+                                        )
                                         if port_num in (80, 443):
-                                            urls.append(f"{scheme}://{preferred_host}")
+                                            urls.append(f"{scheme}://{appcmd_host}")
                                         else:
-                                            urls.append(f"{scheme}://{preferred_host}:{port_num}")
+                                            urls.append(f"{scheme}://{appcmd_host}:{port_num}")
                         # Deduplicate
                         seen_ports = set()
                         deduped_ports = []
@@ -5787,7 +5809,7 @@ def get_service_items():
                         if not any(p.get("port") == mp["port"] for p in ports):
                             ports.append(mp)
                 else:
-                    urls, ports = _urls_from_nginx_conf(f"/etc/nginx/conf.d/{base_name}.conf", preferred_host=preferred_host)
+                    urls, ports = _urls_from_nginx_conf(f"/etc/nginx/conf.d/{base_name}.conf", preferred_host=_resolve_service_host(name, preferred_host))
                 items.append(
                     {
                         "kind": "service",
@@ -5837,6 +5859,7 @@ def get_service_items():
                 # Keep backwards-compat alias
                 nginx_https_port_str = str(container_labels.get("com.serverinstaller.https_port", "") or "").strip()
                 urls = []
+                docker_host = _resolve_service_host(name, preferred_host)
                 for p in ports:
                     p_port = p.get("port")
                     scheme = "https" if (
@@ -5844,7 +5867,7 @@ def get_service_items():
                         p_port in https_ports_set or
                         container_labels.get("com.localmongo.role") == "https"
                     ) else "http"
-                    host = preferred_host
+                    host = docker_host
                     if container_labels.get("com.localmongo.role") == "mongodb":
                         continue
                     if p_port in (80, 443):
