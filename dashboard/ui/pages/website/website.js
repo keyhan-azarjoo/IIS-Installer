@@ -61,14 +61,21 @@
 
     const kindOptions = ["auto", "static", "next-export", "nextjs", "flutter", "php"];
 
+    const hasAnyPort = !!(port.trim() || httpsPort.trim());
+
     const handleDeploy = React.useCallback((e, target) => {
+      if (!port.trim() && !httpsPort.trim()) {
+        e.preventDefault();
+        setPortResults({ _error: { label: "Ports", ok: false, error: "At least one port (HTTP or HTTPS) is required." } });
+        return;
+      }
       if (hiddenTargetRef.current) hiddenTargetRef.current.value = target;
       if (!source.trim()) {
         const def = defaultWebsiteDirForOs(cfg.os);
         setSource(def);
       }
       run(e, "/run/website_deploy", `Deploy Website → ${target}`, formRef.current);
-    }, [run, source, cfg.os]);
+    }, [run, source, cfg.os, port, httpsPort]);
 
     // ── Port conflict check ───────────────────────────────────────────────
     const checkPorts = React.useCallback(async () => {
@@ -106,7 +113,7 @@
       setUploadStatus(null);
     }, []);
 
-    // ── Upload staged files to source path ────────────────────────────────
+    // ── Upload staged files to server (using web terminal like other pages) ─
     const handleFolderUpload = React.useCallback(async () => {
       const files = selectedFiles;
       if (!files.length) return;
@@ -115,8 +122,17 @@
         targetDir = defaultWebsiteDirForOs(cfg.os);
         setSource(targetDir);
       }
+      const fileCount = files.length;
+      const totalBytes = files.reduce((sum, f) => sum + Number(f.size || 0), 0);
       setUploadBusy(true);
       setUploadStatus(null);
+      if (window.ServerInstallerTerminalHook) {
+        window.ServerInstallerTerminalHook({
+          open: true,
+          state: "Uploading for: Website",
+          line: `[${new Date().toLocaleTimeString()}] Upload started for Website (${fileCount} file(s), ${totalBytes} bytes)`,
+        });
+      }
       try {
         const fd = new FormData();
         fd.append("target", targetDir);
@@ -134,16 +150,28 @@
             const sep = targetDir.includes("/") ? "/" : "\\";
             const updated = targetDir.replace(/[\\/]$/, "") + sep + folderName;
             setSource(updated);
+            targetDir = updated;
           }
+          if (window.ServerInstallerTerminalHook) {
+            window.ServerInstallerTerminalHook({
+              open: true,
+              state: "Uploading for: Website",
+              line: `[${new Date().toLocaleTimeString()}] Upload completed. Server path: ${targetDir}`,
+            });
+          }
+          setUploadStatus({ ok: true, text: `Uploaded ${j.written ?? fileCount} file(s) to ${targetDir}.` });
+        } else {
+          throw new Error(j.error || "Upload failed.");
         }
-        setUploadStatus({
-          ok: j.ok,
-          text: j.ok
-            ? `Uploaded ${j.written ?? files.length} file(s) to ${targetDir}.`
-            : (j.error || "Upload failed."),
-        });
       } catch (ex) {
-        setUploadStatus({ ok: false, text: String(ex) });
+        const message = String(ex);
+        setUploadStatus({ ok: false, text: message });
+        if (window.ServerInstallerTerminalHook) {
+          window.ServerInstallerTerminalHook({
+            open: true, state: "Error",
+            line: `[${new Date().toLocaleTimeString()}] Upload failed: ${message}`,
+          });
+        }
       } finally {
         setUploadBusy(false);
       }
@@ -220,16 +248,23 @@
                   {/* Ports row */}
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                     <TextField
-                      label="HTTP Port" size="small" fullWidth required
+                      label="HTTP Port" size="small" fullWidth
                       name="WEBSITE_PORT" value={port} placeholder="8088"
                       onChange={(e) => { setPort(e.target.value); setPortResults(null); }}
+                      error={!hasAnyPort}
                     />
                     <TextField
-                      label="HTTPS Port (optional)" size="small" fullWidth
+                      label="HTTPS Port" size="small" fullWidth
                       name="WEBSITE_HTTPS_PORT" value={httpsPort} placeholder="8443"
                       onChange={(e) => { setHttpsPort(e.target.value); setPortResults(null); }}
+                      error={!hasAnyPort}
                     />
                   </Stack>
+                  {!hasAnyPort && (
+                    <Alert severity="warning" sx={{ py: 0.25, fontSize: 12 }}>
+                      At least one port (HTTP or HTTPS) is required.
+                    </Alert>
+                  )}
 
                   {/* SSL cert dropdown — shown when HTTPS port is set */}
                   {httpsPort.trim() && (
@@ -378,7 +413,7 @@
                 )}
                 <Button
                   variant="contained"
-                  disabled={serviceBusy || !available || !bindIp}
+                  disabled={serviceBusy || !available || !bindIp || !hasAnyPort}
                   onClick={(e) => handleDeploy(e, target)}
                   sx={{
                     textTransform: "none", bgcolor: color, fontWeight: 700,

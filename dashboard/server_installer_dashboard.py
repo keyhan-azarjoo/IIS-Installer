@@ -2277,12 +2277,12 @@ def _prepare_website_deployment(form=None, live_cb=None):
     target = (form.get("WEBSITE_TARGET", ["auto"])[0] or "auto").strip().lower()
     bind_ip = (form.get("WEBSITE_BIND_IP", [""])[0] or "").strip() or "*"
     host = bind_ip if bind_ip not in ("", "*", "0.0.0.0") else choose_service_host()
-    port_text = (form.get("WEBSITE_PORT", ["8088"])[0] or "8088").strip()
-    if not port_text.isdigit() or not (1 <= int(port_text) <= 65535):
-        raise RuntimeError("Website port must be a number between 1 and 65535.")
-    site_port = int(port_text)
+    port_text = (form.get("WEBSITE_PORT", [""])[0] or "").strip()
+    site_port = int(port_text) if port_text.isdigit() and 1 <= int(port_text) <= 65535 else 0
     https_port_text = (form.get("WEBSITE_HTTPS_PORT", [""])[0] or "").strip()
     https_port = int(https_port_text) if https_port_text.isdigit() and 1 <= int(https_port_text) <= 65535 else 0
+    if not site_port and not https_port:
+        raise RuntimeError("At least one port (HTTP or HTTPS) is required.")
     ssl_cert_name = (form.get("WEBSITE_SSL_CERT", ["self_signed"])[0] or "self_signed").strip()
     deploy_root = WEBSITE_STATE_DIR / site_key
     if requested_kind == "auto":
@@ -3071,6 +3071,7 @@ def run_windows_website_iis(form=None, live_cb=None):
     dns_name = deploy['host']
 
     # Build HTTPS binding commands if an HTTPS port was specified
+    http_port = deploy["site_port"]
     https_ps_lines = []
     if https_port:
         https_ps_lines = [
@@ -3082,31 +3083,49 @@ def run_windows_website_iis(form=None, live_cb=None):
             "New-Item ('IIS:\\SslBindings\\' + $bindingPath) -Thumbprint $cert.Thumbprint -SSLFlags 0 | Out-Null",
         ]
 
+    # When only HTTPS is set (no HTTP port), create the site on the HTTPS port with SSL;
+    # when only HTTP is set, create normally; when both, create on HTTP and add HTTPS binding.
+    initial_port = http_port if http_port else https_port
+    initial_protocol_args = "-Ssl" if (not http_port and https_port) else ""
+
     ps = "\n".join([
         "Import-Module WebAdministration",
         f"$siteName = {_ps_single_quote(deploy['site_name'])}",
         f"$appPool = {_ps_single_quote(deploy['site_name'])}",
         f"$physicalPath = {_ps_single_quote(deploy['deploy_root'])}",
         f"$ip = {_ps_single_quote(bind_ip)}",
-        f"$port = {int(deploy['site_port'])}",
+        f"$port = {int(initial_port)}",
         "if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) { Stop-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null; Remove-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null }",
         "if (Test-Path ('IIS:\\AppPools\\' + $appPool)) { Stop-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null; Remove-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null }",
         "New-WebAppPool -Name $appPool | Out-Null",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name managedRuntimeVersion -Value ''",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name processModel.identityType -Value 4",
-        "New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip -ApplicationPool $appPool | Out-Null",
-        *https_ps_lines,
+        f"New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip {initial_protocol_args} -ApplicationPool $appPool | Out-Null".replace("  ", " "),
+        *(https_ps_lines if http_port else []),
         "Start-Website -Name $siteName | Out-Null",
     ])
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
     if rc != 0:
         return 1, out or f"Failed to create IIS website '{deploy['site_name']}'."
-    manage_firewall_port("open", deploy["site_port"], "tcp", host=deploy.get("host"))
+    if http_port:
+        manage_firewall_port("open", http_port, "tcp", host=deploy.get("host"))
     if https_port:
         manage_firewall_port("open", https_port, "tcp", host=deploy.get("host"))
-    http_url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
-    https_url = f"https://{deploy['host']}:{https_port}" if https_port else ""
-    url = http_url
+
+    # Build URLs
+    urls = []
+    if http_port:
+        http_url = f"http://{deploy['host']}" if http_port == 80 else f"http://{deploy['host']}:{http_port}"
+        urls.append(http_url)
+    else:
+        http_url = ""
+    if https_port:
+        https_url = f"https://{deploy['host']}" if https_port == 443 else f"https://{deploy['host']}:{https_port}"
+        urls.append(https_url)
+    else:
+        https_url = ""
+    url = urls[0] if urls else ""
+
     _write_website_state_entry({
         "name": deploy["site_name"],
         "form_name": deploy["site_name"],
@@ -3118,14 +3137,16 @@ def run_windows_website_iis(form=None, live_cb=None):
         "https_url": https_url,
         "bind_ip": deploy["bind_ip"],
         "host": deploy["host"],
-        "port": deploy["site_port"],
+        "port": http_port,
         "https_port": https_port,
         "deploy_root": deploy["deploy_root"],
         "source_root": deploy["source_root"],
         "publish_root": deploy["publish_root"],
         "publish_rel": deploy["publish_rel"],
     })
-    result_lines = [f"Website IIS deployment completed.", f"Site: {deploy['site_name']}", f"HTTP: {http_url}"]
+    result_lines = [f"Website IIS deployment completed.", f"Site: {deploy['site_name']}"]
+    if http_url:
+        result_lines.append(f"HTTP: {http_url}")
     if https_url:
         result_lines.append(f"HTTPS: {https_url}")
     result_lines.append(f"Content: {deploy['publish_root']}")
