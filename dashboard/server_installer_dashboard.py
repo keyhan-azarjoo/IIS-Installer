@@ -8046,6 +8046,17 @@ def run_sam3_download_model(form=None, live_cb=None):
     # Ensure models directory exists
     Path(model_dir).parent.mkdir(parents=True, exist_ok=True)
 
+    # Ensure OpenCV system dependencies are installed (libGL.so.1)
+    if os.name != "nt":
+        if live_cb:
+            live_cb("[INFO] Ensuring system dependencies (libGL)...\n")
+        if command_exists("apt-get"):
+            run_process(["apt-get", "install", "-y", "libgl1", "libglib2.0-0"], live_cb=live_cb)
+        elif command_exists("dnf"):
+            run_process(["dnf", "install", "-y", "mesa-libGL", "glib2"], live_cb=live_cb)
+        elif command_exists("yum"):
+            run_process(["yum", "install", "-y", "mesa-libGL", "glib2"], live_cb=live_cb)
+
     if live_cb:
         live_cb("Downloading SAM3 model (sam3.pt ~3.4 GB)... This may take a while.\n")
     # Download using ultralytics - chdir to models dir so it saves there
