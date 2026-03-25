@@ -2282,10 +2282,16 @@ def _prepare_website_deployment(form=None, live_cb=None):
         raise RuntimeError("Website port must be a number between 1 and 65535.")
     site_port = int(port_text)
     deploy_root = WEBSITE_STATE_DIR / site_key
-    detected = _detect_website_stack(source_root)
-    detected_kind = str(detected.get("kind") or "static").strip().lower()
-    runtime = str(detected.get("runtime") or "static").strip().lower()
-    stack_label = str(detected.get("stack_label") or "Website").strip()
+    if requested_kind == "auto":
+        detected = _detect_website_stack(source_root)
+        detected_kind = str(detected.get("kind") or "static").strip().lower()
+        runtime = str(detected.get("runtime") or "static").strip().lower()
+        stack_label = str(detected.get("stack_label") or "Website").strip()
+    else:
+        detected_kind = requested_kind
+        runtime_map = {"static": "static", "flutter": "static", "next-export": "static", "nextjs": "node", "php": "php"}
+        runtime = runtime_map.get(requested_kind, "static")
+        stack_label = _website_stack_label(requested_kind)
     effective_kind = detected_kind if requested_kind == "auto" else requested_kind
     if effective_kind in ("static", "flutter", "next-export"):
         publish_root, publish_rel = _detect_static_website_root(source_root, website_kind=effective_kind)
