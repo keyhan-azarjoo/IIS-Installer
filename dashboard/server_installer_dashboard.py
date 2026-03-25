@@ -8008,8 +8008,24 @@ def run_sam3_download_model(form=None, live_cb=None):
     venv_python = str(state.get("python_executable") or "").strip()
     model_dir = str(state.get("model_path") or "").strip()
     install_dir = str(state.get("install_dir") or "").strip()
+
+    # Fallback: try default paths if state file is missing or incomplete
     if not venv_python or not Path(venv_python).exists():
-        return 1, "SAM3 is not installed yet. Install SAM3 first."
+        default_base = SAM3_STATE_DIR / "app"
+        if os.name == "nt":
+            fallback = default_base / "venv" / "Scripts" / "python.exe"
+        else:
+            fallback = default_base / "venv" / "bin" / "python"
+        if fallback.exists():
+            venv_python = str(fallback)
+            if not install_dir:
+                install_dir = str(default_base)
+            if not model_dir:
+                model_dir = str(default_base / "models" / "sam3.pt")
+            if live_cb:
+                live_cb(f"[INFO] Using fallback venv: {venv_python}\n")
+        else:
+            return 1, "SAM3 is not installed yet. Install SAM3 first."
     replace_model = (form.get("SAM3_REPLACE_MODEL", ["no"])[0] or "no").strip().lower()
     if model_dir and Path(model_dir).exists():
         if replace_model not in ("yes", "y", "1", "true"):
@@ -8021,28 +8037,46 @@ def run_sam3_download_model(form=None, live_cb=None):
         except Exception as ex:
             if live_cb:
                 live_cb(f"[WARN] Could not remove old model: {ex}\n")
+    # Set defaults if missing
+    if not install_dir:
+        install_dir = str(SAM3_STATE_DIR / "app")
+    if not model_dir:
+        model_dir = str(Path(install_dir) / "models" / "sam3.pt")
+
+    # Ensure models directory exists
+    Path(model_dir).parent.mkdir(parents=True, exist_ok=True)
+
     if live_cb:
         live_cb("Downloading SAM3 model (sam3.pt ~3.4 GB)... This may take a while.\n")
-    # Run from install_dir so model downloads there
+    # Download using ultralytics - chdir to models dir so it saves there
+    models_dir = str(Path(model_dir).parent)
     dl_env = os.environ.copy()
-    if install_dir:
-        dl_env["PWD"] = install_dir
     code, output = run_process(
         [venv_python, "-c",
-         f"import os; os.chdir({install_dir!r}); from ultralytics import SAM; model = SAM('sam3.pt')"],
+         f"import os; os.chdir({models_dir!r}); from ultralytics import SAM; model = SAM('sam3.pt')"],
         env=dl_env,
         live_cb=live_cb,
     )
     if code == 0:
-        # Move model to proper location
-        default_model = Path(install_dir) / "sam3.pt" if install_dir else None
-        target_model = Path(model_dir) if model_dir else None
-        if default_model and default_model.exists() and target_model and not target_model.exists():
-            target_model.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(default_model), str(target_model))
-        state["model_downloaded"] = True
+        # Check if model ended up in models dir directly or needs moving
+        target_model = Path(model_dir)
+        if not target_model.exists():
+            # Ultralytics may download to current dir or install_dir
+            for candidate in [Path(models_dir) / "sam3.pt", Path(install_dir) / "sam3.pt"]:
+                if candidate.exists() and str(candidate) != str(target_model):
+                    target_model.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(candidate), str(target_model))
+                    break
+        state["model_downloaded"] = target_model.exists()
+        state["model_path"] = str(target_model)
+        state["install_dir"] = install_dir
+        state["python_executable"] = venv_python
+        SAM3_STATE_DIR.mkdir(parents=True, exist_ok=True)
         _write_json_file(SAM3_STATE_FILE, state)
-        output = f"{output.rstrip()}\nSAM3 model downloaded successfully."
+        if target_model.exists():
+            output = f"{output.rstrip()}\nSAM3 model downloaded successfully to {target_model}."
+        else:
+            output = f"{output.rstrip()}\n[WARN] Download completed but model file not found at expected path."
     return code, output
 
 
