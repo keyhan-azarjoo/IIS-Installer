@@ -7954,7 +7954,7 @@ def run_windows_sam3_installer(form=None, live_cb=None):
         return 1, "Windows SAM3 installer can only run on Windows hosts."
     if not is_windows_admin():
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
-    ensure_repo_files(SAM3_WINDOWS_FILES, live_cb=live_cb)
+    ensure_repo_files(SAM3_WINDOWS_FILES, live_cb=live_cb, refresh=False)
     env = os.environ.copy()
     for key in [
         "SAM3_HOST_IP", "SAM3_HTTP_PORT", "SAM3_HTTPS_PORT", "SAM3_DOMAIN",
@@ -7977,7 +7977,7 @@ def run_unix_sam3_installer(form=None, live_cb=None):
     form = form or {}
     if os.name == "nt":
         return 1, "Unix SAM3 installer can only run on Linux or macOS hosts."
-    ensure_repo_files(SAM3_UNIX_FILES, live_cb=live_cb)
+    ensure_repo_files(SAM3_UNIX_FILES, live_cb=live_cb, refresh=False)
     env = os.environ.copy()
     env_keys = [
         "SAM3_HOST_IP", "SAM3_HTTP_PORT", "SAM3_HTTPS_PORT", "SAM3_DOMAIN",
@@ -8059,7 +8059,7 @@ def run_sam3_docker(form=None, live_cb=None):
     if not command_exists("docker"):
         return 1, "Docker is not installed. Please install Docker first."
 
-    ensure_repo_files(SAM3_WINDOWS_FILES if os.name == "nt" else SAM3_UNIX_FILES, live_cb=live_cb)
+    ensure_repo_files(SAM3_WINDOWS_FILES if os.name == "nt" else SAM3_UNIX_FILES, live_cb=live_cb, refresh=False)
 
     common_dir = str(ROOT / "SAM3" / "common")
     sam3_data = str(SAM3_STATE_DIR / "docker-app")

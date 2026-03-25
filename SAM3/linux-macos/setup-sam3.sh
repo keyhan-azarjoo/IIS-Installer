@@ -221,21 +221,29 @@ done
 
 # ── Create Virtual Environment & Install Dependencies ──────
 
-if [ ! -x "${VENV_DIR}/bin/python" ]; then
+create_venv() {
     echo "[INFO] Creating virtual environment..."
     rm -rf "${VENV_DIR}"
-    "${PYTHON_EXE}" -m venv "${VENV_DIR}" || {
-        echo "[INFO] venv failed, trying with --without-pip..."
+    "${PYTHON_EXE}" -m venv "${VENV_DIR}" 2>/dev/null || {
+        echo "[INFO] venv with pip failed, trying --without-pip..."
+        rm -rf "${VENV_DIR}"
         "${PYTHON_EXE}" -m venv --without-pip "${VENV_DIR}"
     }
+}
+
+# Create venv if it does not exist
+if [ ! -x "${VENV_DIR}/bin/python" ]; then
+    create_venv
 fi
 
 VENV_PYTHON="${VENV_DIR}/bin/python"
 VENV_PIP="${VENV_DIR}/bin/pip"
 
-# Bootstrap pip if missing (common on Debian/Ubuntu where ensurepip is not bundled)
+# If pip is missing inside the venv, the venv is broken — recreate then bootstrap
 if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
-    echo "[INFO] pip not found in venv, bootstrapping with get-pip.py..."
+    echo "[INFO] pip not found in venv, recreating..."
+    create_venv
+    echo "[INFO] Bootstrapping pip with get-pip.py..."
     curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
     "${VENV_PYTHON}" /tmp/get-pip.py
     rm -f /tmp/get-pip.py
