@@ -171,16 +171,19 @@
             title="Download SAM3 Model"
             description={modelReady
               ? "The SAM3 model is already downloaded. Click Start to re-download and replace the existing model."
-              : "Download the SAM3 model file (sam3.pt, ~3.4 GB) to the server. Required before SAM3 can perform detections."
+              : "Download the SAM3 model file (~3.4 GB) to the server. Required before SAM3 can perform detections. Paste the direct download URL below."
             }
             action="/run/sam3_download_model"
-            fields={modelReady ? [{
-              name: "SAM3_REPLACE_MODEL",
-              label: "Model exists. Replace it?",
-              type: "select",
-              options: ["no", "yes"],
-              defaultValue: "no",
-            }] : []}
+            fields={[
+              { name: "SAM3_MODEL_URL", label: "Model Download URL", defaultValue: "https://github.com/ultralytics/assets/releases/download/v8.3.0/sam2.1_l.pt", placeholder: "https://...sam3.pt", required: true },
+              ...(modelReady ? [{
+                name: "SAM3_REPLACE_MODEL",
+                label: "Model exists. Replace it?",
+                type: "select",
+                options: ["no", "yes"],
+                defaultValue: "no",
+              }] : []),
+            ]}
             onRun={run}
             color="#059669"
           />

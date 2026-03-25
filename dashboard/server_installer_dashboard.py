@@ -8002,15 +8002,19 @@ def run_unix_sam3_installer(form=None, live_cb=None):
 
 
 def run_sam3_download_model(form=None, live_cb=None):
-    """Download the SAM3 model file using the installed venv."""
+    """Download the SAM3 model file using wget/curl (no Python dependencies needed)."""
     form = form or {}
     state = _read_json_file(SAM3_STATE_FILE)
-    venv_python = str(state.get("python_executable") or "").strip()
-    model_dir = str(state.get("model_path") or "").strip()
     install_dir = str(state.get("install_dir") or "").strip()
+    model_dir = str(state.get("model_path") or "").strip()
+    venv_python = str(state.get("python_executable") or "").strip()
 
-    # Fallback: try default paths if state file is missing or incomplete
-    if not venv_python or not Path(venv_python).exists():
+    # Set defaults if missing
+    if not install_dir:
+        install_dir = str(SAM3_STATE_DIR / "app")
+    if not model_dir:
+        model_dir = str(Path(install_dir) / "models" / "sam3.pt")
+    if not venv_python:
         default_base = SAM3_STATE_DIR / "app"
         if os.name == "nt":
             fallback = default_base / "venv" / "Scripts" / "python.exe"
@@ -8018,76 +8022,68 @@ def run_sam3_download_model(form=None, live_cb=None):
             fallback = default_base / "venv" / "bin" / "python"
         if fallback.exists():
             venv_python = str(fallback)
-            if not install_dir:
-                install_dir = str(default_base)
-            if not model_dir:
-                model_dir = str(default_base / "models" / "sam3.pt")
-            if live_cb:
-                live_cb(f"[INFO] Using fallback venv: {venv_python}\n")
-        else:
-            return 1, "SAM3 is not installed yet. Install SAM3 first."
+
+    # User-provided URL or default
+    model_url = (form.get("SAM3_MODEL_URL", [""])[0] or "").strip()
+    if not model_url:
+        model_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0/sam2.1_l.pt"
+
     replace_model = (form.get("SAM3_REPLACE_MODEL", ["no"])[0] or "no").strip().lower()
-    if model_dir and Path(model_dir).exists():
+    target_model = Path(model_dir)
+    if target_model.exists():
         if replace_model not in ("yes", "y", "1", "true"):
             return 0, "SAM3 model is already downloaded. Select 'yes' to replace."
         if live_cb:
             live_cb("Replacing existing SAM3 model...\n")
         try:
-            Path(model_dir).unlink()
+            target_model.unlink()
         except Exception as ex:
             if live_cb:
                 live_cb(f"[WARN] Could not remove old model: {ex}\n")
-    # Set defaults if missing
-    if not install_dir:
-        install_dir = str(SAM3_STATE_DIR / "app")
-    if not model_dir:
-        model_dir = str(Path(install_dir) / "models" / "sam3.pt")
 
     # Ensure models directory exists
-    Path(model_dir).parent.mkdir(parents=True, exist_ok=True)
-
-    # Ensure OpenCV system dependencies are installed (libGL.so.1)
-    if os.name != "nt":
-        if live_cb:
-            live_cb("[INFO] Ensuring system dependencies (libGL)...\n")
-        if command_exists("apt-get"):
-            run_process(["apt-get", "install", "-y", "libgl1", "libglib2.0-0"], live_cb=live_cb)
-        elif command_exists("dnf"):
-            run_process(["dnf", "install", "-y", "mesa-libGL", "glib2"], live_cb=live_cb)
-        elif command_exists("yum"):
-            run_process(["yum", "install", "-y", "mesa-libGL", "glib2"], live_cb=live_cb)
+    target_model.parent.mkdir(parents=True, exist_ok=True)
 
     if live_cb:
-        live_cb("Downloading SAM3 model (sam3.pt ~3.4 GB)... This may take a while.\n")
-    # Download using ultralytics - chdir to models dir so it saves there
-    models_dir = str(Path(model_dir).parent)
-    dl_env = os.environ.copy()
-    code, output = run_process(
-        [venv_python, "-c",
-         f"import os; os.chdir({models_dir!r}); from ultralytics import SAM; model = SAM('sam3.pt')"],
-        env=dl_env,
-        live_cb=live_cb,
-    )
-    if code == 0:
-        # Check if model ended up in models dir directly or needs moving
-        target_model = Path(model_dir)
-        if not target_model.exists():
-            # Ultralytics may download to current dir or install_dir
-            for candidate in [Path(models_dir) / "sam3.pt", Path(install_dir) / "sam3.pt"]:
-                if candidate.exists() and str(candidate) != str(target_model):
-                    target_model.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(candidate), str(target_model))
-                    break
-        state["model_downloaded"] = target_model.exists()
+        live_cb(f"Downloading SAM3 model from:\n  {model_url}\n  to: {target_model}\nThis may take a while (~3.4 GB)...\n")
+
+    # Download using wget or curl (no Python/OpenCV dependency needed)
+    if os.name == "nt":
+        # Windows: use PowerShell
+        ps_cmd = f'Invoke-WebRequest -Uri "{model_url}" -OutFile "{target_model}" -UseBasicParsing'
+        code, output = run_process(
+            ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
+            live_cb=live_cb,
+        )
+    elif command_exists("wget"):
+        code, output = run_process(
+            ["wget", "-O", str(target_model), "--progress=dot:giga", model_url],
+            live_cb=live_cb,
+        )
+    elif command_exists("curl"):
+        code, output = run_process(
+            ["curl", "-fSL", "-o", str(target_model), "--progress-bar", model_url],
+            live_cb=live_cb,
+        )
+    else:
+        return 1, "Neither wget nor curl is available. Install one and retry."
+
+    if code == 0 and target_model.exists() and target_model.stat().st_size > 1000000:
+        state["model_downloaded"] = True
         state["model_path"] = str(target_model)
         state["install_dir"] = install_dir
-        state["python_executable"] = venv_python
+        if venv_python:
+            state["python_executable"] = venv_python
         SAM3_STATE_DIR.mkdir(parents=True, exist_ok=True)
         _write_json_file(SAM3_STATE_FILE, state)
+        size_mb = target_model.stat().st_size / (1024 * 1024)
+        output = f"{output.rstrip()}\nSAM3 model downloaded successfully ({size_mb:.0f} MB)."
+    elif code == 0:
+        # Download succeeded but file is suspiciously small or missing
         if target_model.exists():
-            output = f"{output.rstrip()}\nSAM3 model downloaded successfully to {target_model}."
-        else:
-            output = f"{output.rstrip()}\n[WARN] Download completed but model file not found at expected path."
+            target_model.unlink(missing_ok=True)
+        output = f"{output.rstrip()}\n[ERROR] Download completed but file is missing or too small. Check the URL."
+        code = 1
     return code, output
 
 
