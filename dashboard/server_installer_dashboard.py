@@ -2500,7 +2500,7 @@ def _website_service_items():
             "website": True,
             "target_page": "website",
             "form_name": str(payload.get("form_name") or name),
-            "project_path": str(payload.get("source_root") or payload.get("deploy_root") or ""),
+            "project_path": str(payload.get("deploy_root") or payload.get("source_root") or ""),
             "deploy_root": str(payload.get("deploy_root") or ""),
             "host": bind_ip if bind_ip and bind_ip != "*" else str(payload.get("host") or ""),
             "port_value": port_text,
