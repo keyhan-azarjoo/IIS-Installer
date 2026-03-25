@@ -112,12 +112,9 @@
         <Grid item xs={12} md={cfg.os === "windows" ? 4 : 6}>
           <ActionCard
             title={`Install SAM3 - OS (${installOsLabel})`}
-            description="Install SAM3 as a managed OS service with systemd (Linux) or scheduled task (Windows). Includes Nginx/IIS HTTPS reverse proxy."
-            action={cfg.os === "windows" ? "/run/sam3_windows" : "/run/sam3_linux"}
-            fields={[
-              ...commonFields,
-              { name: "SAM3_DEPLOY_MODE", type: "hidden", defaultValue: "os" },
-            ]}
+            description="Install SAM3 as a managed OS service with systemd (Linux) or scheduled task (Windows). Includes Nginx HTTPS reverse proxy."
+            action={cfg.os === "windows" ? "/run/sam3_windows_os" : "/run/sam3_linux_os"}
+            fields={commonFields}
             onRun={run}
             color="#7c3aed"
           />
@@ -129,10 +126,7 @@
             title="Install SAM3 - Docker"
             description="Deploy SAM3 as a Docker container with GPU passthrough. Requires Docker and nvidia-container-toolkit for GPU support."
             action="/run/sam3_docker"
-            fields={[
-              ...commonFields,
-              { name: "SAM3_DEPLOY_MODE", type: "hidden", defaultValue: "docker" },
-            ]}
+            fields={commonFields}
             onRun={run}
             color="#0891b2"
           />
@@ -144,11 +138,8 @@
             <ActionCard
               title="Install SAM3 - IIS"
               description="Install SAM3 with IIS reverse proxy. The service runs as an OS process with IIS forwarding HTTPS traffic."
-              action="/run/sam3_windows"
-              fields={[
-                ...commonFields,
-                { name: "SAM3_DEPLOY_MODE", type: "hidden", defaultValue: "iis" },
-              ]}
+              action="/run/sam3_windows_iis"
+              fields={commonFields}
               onRun={run}
               color="#d97706"
             />
@@ -241,13 +232,13 @@
                             size="small"
                             variant="outlined"
                             color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                            disabled={serviceBusy}
+                            disabled={serviceBusy || (!modelReady && !isServiceRunningStatus(svc.status, svc.sub_status))}
                             onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
                             sx={{ textTransform: "none" }}
                           >
                             {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
                           </Button>
-                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy || !modelReady} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
                         </>
                       )}
                       {svc.deletable && (

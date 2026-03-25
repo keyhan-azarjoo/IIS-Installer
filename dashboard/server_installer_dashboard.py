@@ -8103,7 +8103,7 @@ def run_sam3_docker(form=None, live_cb=None):
     gpu_base = "nvidia/cuda:12.4.0-runtime-ubuntu22.04" if gpu_device in ("cuda", "auto") else "python:3.12-slim"
     dockerfile_content = f"""FROM {gpu_base}
 
-RUN apt-get update && apt-get install -y python3 python3-pip python3-venv git curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y python3 python3-pip python3-venv git curl libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY . /app/
@@ -12011,8 +12011,10 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_linux_s3_stop()
                 self.respond_run_result(title, code, output)
             return
-        if self.path == "/run/sam3_windows":
-            title = "SAM3 Installer (Windows)"
+        if self.path in ("/run/sam3_windows", "/run/sam3_windows_os", "/run/sam3_windows_iis"):
+            mode = "iis" if self.path == "/run/sam3_windows_iis" else "os"
+            form["SAM3_DEPLOY_MODE"] = [mode]
+            title = f"SAM3 Installer (Windows {mode.upper()})"
             if self.is_fetch():
                 job_id = start_live_job(title, lambda cb: run_windows_sam3_installer(form, live_cb=cb))
                 self.write_json({"job_id": job_id, "title": title})
@@ -12020,7 +12022,8 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_windows_sam3_installer(form)
                 self.respond_run_result(title, code, output)
             return
-        if self.path == "/run/sam3_linux":
+        if self.path in ("/run/sam3_linux", "/run/sam3_linux_os"):
+            form["SAM3_DEPLOY_MODE"] = ["os"]
             title = "SAM3 Installer (Linux/macOS)"
             if self.is_fetch():
                 job_id = start_live_job(title, lambda cb: run_unix_sam3_installer(form, live_cb=cb))

@@ -129,17 +129,17 @@ ensure_python() {
     if has_cmd apt-get; then
         export DEBIAN_FRONTEND=noninteractive
         apt-get update >&2
-        apt-get install -y "python${major_minor}" "python${major_minor}-venv" "python${major_minor}-dev" python3-pip nginx openssl ca-certificates curl git >&2 || \
-            apt-get install -y python3 python3-venv python3-dev python3-pip nginx openssl ca-certificates curl git >&2
+        apt-get install -y "python${major_minor}" "python${major_minor}-venv" "python${major_minor}-dev" python3-pip nginx openssl ca-certificates curl git libgl1 libglib2.0-0 >&2 || \
+            apt-get install -y python3 python3-venv python3-dev python3-pip nginx openssl ca-certificates curl git libgl1 libglib2.0-0 >&2
     elif has_cmd dnf; then
-        dnf install -y "python${major_minor}" python3-pip python3-devel nginx openssl ca-certificates curl git >&2 || \
-            dnf install -y python3 python3-pip python3-devel nginx openssl ca-certificates curl git >&2
+        dnf install -y "python${major_minor}" python3-pip python3-devel nginx openssl ca-certificates curl git mesa-libGL glib2 >&2 || \
+            dnf install -y python3 python3-pip python3-devel nginx openssl ca-certificates curl git mesa-libGL glib2 >&2
     elif has_cmd yum; then
-        yum install -y python3 python3-pip python3-devel nginx openssl ca-certificates curl git >&2
+        yum install -y python3 python3-pip python3-devel nginx openssl ca-certificates curl git mesa-libGL glib2 >&2
     elif has_cmd zypper; then
-        zypper --non-interactive install python3 python3-pip python3-devel nginx openssl ca-certificates curl git >&2
+        zypper --non-interactive install python3 python3-pip python3-devel nginx openssl ca-certificates curl git libGL1 libglib-2_0-0 >&2
     elif has_cmd pacman; then
-        pacman -Sy --noconfirm python python-pip nginx openssl ca-certificates curl git >&2
+        pacman -Sy --noconfirm python python-pip nginx openssl ca-certificates curl git mesa glib2 >&2
     elif has_cmd brew; then
         brew install "python@${major_minor}" nginx openssl curl git || true
     else
@@ -446,11 +446,6 @@ if [ "$(uname -s)" != "Darwin" ] && has_cmd nginx; then
     fi
 
     cat > "${NGINX_CONF}" <<EOF
-map \$http_upgrade \$connection_upgrade {
-    default upgrade;
-    '' close;
-}
-
 server {
     listen ${HTTPS_PORT} ssl;
     server_name _;
@@ -466,7 +461,7 @@ ${AUTH_BLOCK}
         proxy_pass http://127.0.0.1:${HTTP_PORT};
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_set_header Host \$http_host;
         proxy_set_header X-Forwarded-Host \$http_host;
         proxy_set_header X-Forwarded-Port \$server_port;
@@ -482,10 +477,17 @@ ${AUTH_BLOCK}
 }
 EOF
 
-    nginx -t >/dev/null 2>&1
-    systemctl enable nginx >/dev/null 2>&1 || true
-    systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx
-    echo "[INFO] Nginx HTTPS proxy configured on port ${HTTPS_PORT}."
+    if nginx -t >/dev/null 2>&1; then
+        systemctl enable nginx >/dev/null 2>&1 || true
+        systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx
+        echo "[INFO] Nginx HTTPS proxy configured on port ${HTTPS_PORT}."
+    else
+        echo "[WARN] Nginx config test failed. HTTPS proxy may not work."
+        echo "[WARN] Check: nginx -t    and   journalctl -xeu nginx.service"
+        # Remove broken config so nginx can still run
+        rm -f "${NGINX_CONF}"
+        systemctl reload nginx >/dev/null 2>&1 || true
+    fi
 fi
 
 # ── Open Firewall ──────────────────────────────────────────
