@@ -176,6 +176,7 @@
             action="/run/sam3_download_model"
             fields={[
               { name: "SAM3_MODEL_URL", label: "Model Download URL", defaultValue: "https://github.com/ultralytics/assets/releases/download/v8.3.0/sam2.1_l.pt", placeholder: "https://...sam3.pt", required: true },
+              { name: "SAM3_DL_TOKEN", label: "Auth Token (optional)", defaultValue: "", placeholder: "HuggingFace token or Bearer token if login required" },
               ...(modelReady ? [{
                 name: "SAM3_REPLACE_MODEL",
                 label: "Model exists. Replace it?",

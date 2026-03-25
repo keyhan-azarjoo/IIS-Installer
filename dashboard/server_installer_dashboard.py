@@ -8028,6 +8028,9 @@ def run_sam3_download_model(form=None, live_cb=None):
     if not model_url:
         model_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0/sam2.1_l.pt"
 
+    # Auth token for gated models (e.g. HuggingFace)
+    dl_token = (form.get("SAM3_DL_TOKEN", [""])[0] or "").strip()
+
     replace_model = (form.get("SAM3_REPLACE_MODEL", ["no"])[0] or "no").strip().lower()
     target_model = Path(model_dir)
     if target_model.exists():
@@ -8048,23 +8051,31 @@ def run_sam3_download_model(form=None, live_cb=None):
         live_cb(f"Downloading SAM3 model from:\n  {model_url}\n  to: {target_model}\nThis may take a while (~3.4 GB)...\n")
 
     # Download using wget or curl (no Python/OpenCV dependency needed)
+    # Build auth header if token provided
+    auth_header = f"Authorization: Bearer {dl_token}" if dl_token else ""
+
     if os.name == "nt":
         # Windows: use PowerShell
-        ps_cmd = f'Invoke-WebRequest -Uri "{model_url}" -OutFile "{target_model}" -UseBasicParsing'
+        headers_arg = ""
+        if auth_header:
+            headers_arg = f' -Headers @{{"Authorization"="Bearer {dl_token}"}}'
+        ps_cmd = f'Invoke-WebRequest -Uri "{model_url}" -OutFile "{target_model}" -UseBasicParsing{headers_arg}'
         code, output = run_process(
             ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
             live_cb=live_cb,
         )
     elif command_exists("wget"):
-        code, output = run_process(
-            ["wget", "-O", str(target_model), "--progress=dot:giga", model_url],
-            live_cb=live_cb,
-        )
+        cmd = ["wget", "-O", str(target_model), "--progress=dot:giga"]
+        if auth_header:
+            cmd += ["--header", auth_header]
+        cmd.append(model_url)
+        code, output = run_process(cmd, live_cb=live_cb)
     elif command_exists("curl"):
-        code, output = run_process(
-            ["curl", "-fSL", "-o", str(target_model), "--progress-bar", model_url],
-            live_cb=live_cb,
-        )
+        cmd = ["curl", "-fSL", "-o", str(target_model), "--progress-bar"]
+        if auth_header:
+            cmd += ["-H", auth_header]
+        cmd.append(model_url)
+        code, output = run_process(cmd, live_cb=live_cb)
     else:
         return 1, "Neither wget nor curl is available. Install one and retry."
 
