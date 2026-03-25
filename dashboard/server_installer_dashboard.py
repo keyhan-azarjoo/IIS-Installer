@@ -108,6 +108,11 @@ PYTHON_IGNORED_FILE = PYTHON_STATE_DIR / "ignored-python.json"
 PYTHON_API_STATE_FILE = PYTHON_STATE_DIR / "python-api-state.json"
 WEBSITE_STATE_DIR = SERVER_INSTALLER_DATA / "websites"
 WEBSITE_STATE_FILE = WEBSITE_STATE_DIR / "websites-state.json"
+SAM3_WINDOWS_INSTALLER = ROOT / "SAM3" / "windows" / "setup-sam3.ps1"
+SAM3_LINUX_INSTALLER = ROOT / "SAM3" / "linux-macos" / "setup-sam3.sh"
+SAM3_STATE_DIR = SERVER_INSTALLER_DATA / "sam3"
+SAM3_STATE_FILE = SAM3_STATE_DIR / "sam3-state.json"
+SAM3_SYSTEMD_SERVICE = "serverinstaller-sam3"
 JUPYTER_SYSTEMD_SERVICE = "serverinstaller-jupyter.service"
 WINDOWS_LOCALS3_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "install-state.json"
 REPO_RAW_BASE = os.environ.get(
@@ -421,6 +426,36 @@ PYTHON_WINDOWS_FILES = [
 PYTHON_UNIX_FILES = [
     "Python/linux-macos/setup-python.sh",
     "Python/common/serverinstaller_python_api_host.py",
+]
+
+SAM3_WINDOWS_FILES = [
+    "SAM3/windows/setup-sam3.ps1",
+    "SAM3/common/app.py",
+    "SAM3/common/requirements.txt",
+    "SAM3/common/core/detector.py",
+    "SAM3/common/core/video_processor.py",
+    "SAM3/common/core/tracker.py",
+    "SAM3/common/core/exporter.py",
+    "SAM3/common/core/utils.py",
+    "SAM3/common/core/__init__.py",
+    "SAM3/common/web/templates/index.html",
+    "SAM3/common/web/static/js/dashboard.js",
+    "SAM3/common/web/static/css/dashboard.css",
+]
+
+SAM3_UNIX_FILES = [
+    "SAM3/linux-macos/setup-sam3.sh",
+    "SAM3/common/app.py",
+    "SAM3/common/requirements.txt",
+    "SAM3/common/core/detector.py",
+    "SAM3/common/core/video_processor.py",
+    "SAM3/common/core/tracker.py",
+    "SAM3/common/core/exporter.py",
+    "SAM3/common/core/utils.py",
+    "SAM3/common/core/__init__.py",
+    "SAM3/common/web/templates/index.html",
+    "SAM3/common/web/static/js/dashboard.js",
+    "SAM3/common/web/static/css/dashboard.css",
 ]
 
 PROXY_FILES = [
@@ -6148,6 +6183,84 @@ def get_proxy_info():
     return info
 
 
+def _is_sam3_name(name):
+    low = str(name or "").lower()
+    return "sam3" in low or "serverinstaller-sam3" in low
+
+
+def get_sam3_info():
+    state = _read_json_file(SAM3_STATE_FILE)
+    info = {
+        "installed": bool(state.get("install_dir")),
+        "service_name": str(state.get("service_name") or "").strip(),
+        "install_dir": str(state.get("install_dir") or "").strip(),
+        "venv_dir": str(state.get("venv_dir") or "").strip(),
+        "python_executable": str(state.get("python_executable") or "").strip(),
+        "model_path": str(state.get("model_path") or "").strip(),
+        "model_downloaded": bool(state.get("model_downloaded")),
+        "device": str(state.get("device") or "cpu").strip(),
+        "detected_gpus": state.get("detected_gpus") or [],
+        "detected_gpu_type": str(state.get("detected_gpu_type") or "").strip(),
+        "detected_gpu_name": str(state.get("detected_gpu_name") or "").strip(),
+        "detected_gpu_vram": str(state.get("detected_gpu_vram") or "").strip(),
+        "host": str(state.get("host") or "").strip(),
+        "domain": str(state.get("domain") or "").strip(),
+        "http_port": str(state.get("http_port") or "5000").strip(),
+        "https_port": str(state.get("https_port") or "5443").strip(),
+        "http_url": str(state.get("http_url") or "").strip(),
+        "https_url": str(state.get("https_url") or "").strip(),
+        "deploy_mode": str(state.get("deploy_mode") or "os").strip(),
+        "auth_enabled": bool(state.get("auth_enabled")),
+        "auth_username": str(state.get("auth_username") or "").strip(),
+        "use_os_auth": bool(state.get("use_os_auth")),
+        "cert_path": str(state.get("cert_path") or "").strip(),
+        "key_path": str(state.get("key_path") or "").strip(),
+        "running": bool(state.get("running")),
+        "services": [],
+    }
+    # Check systemd service status on Linux
+    if os.name != "nt" and info["installed"] and command_exists("systemctl"):
+        service_status = _linux_systemd_unit_status(f"{SAM3_SYSTEMD_SERVICE}.service")
+        info["running"] = bool(service_status.get("running"))
+        info["service_sub_status"] = str(service_status.get("active") or "")
+        info["service_autostart"] = bool(service_status.get("autostart"))
+        if info["running"]:
+            info["services"].append({
+                "name": SAM3_SYSTEMD_SERVICE,
+                "display_name": "SAM3 AI Detection Service",
+                "kind": "systemd",
+                "status": "running" if service_status.get("running") else "stopped",
+                "sub_status": str(service_status.get("active") or ""),
+                "manageable": True,
+                "ports": [info["http_port"], info["https_port"]],
+                "urls": [u for u in [info["http_url"], info["https_url"]] if u],
+            })
+    # Check Windows scheduled task / NSSM service
+    elif os.name == "nt" and info["installed"]:
+        svc_name = str(state.get("service_name") or "ServerInstaller-SAM3")
+        try:
+            rc, out = run_capture(["sc.exe", "query", svc_name], timeout=10)
+            if rc == 0 and "RUNNING" in out.upper():
+                info["running"] = True
+        except Exception:
+            pass
+        if info.get("running") or state.get("running"):
+            info["services"].append({
+                "name": svc_name,
+                "display_name": "SAM3 AI Detection Service",
+                "kind": "service",
+                "status": "running" if info.get("running") else "stopped",
+                "manageable": True,
+                "ports": [info["http_port"], info["https_port"]],
+                "urls": [u for u in [info["http_url"], info["https_url"]] if u],
+            })
+    # Check model file
+    model_path = info["model_path"]
+    if model_path and Path(model_path).exists():
+        info["model_downloaded"] = True
+    return info
+
+
 def filter_service_items(scope):
     scope = str(scope or "all").strip().lower()
     items = get_service_items()
@@ -6175,6 +6288,12 @@ def filter_service_items(scope):
         if python_items:
             return python_items
         return [x for x in items if _is_python_name(x.get("name", "")) or _is_python_name(x.get("display_name", ""))]
+    if scope == "sam3":
+        sam3_info = get_sam3_info()
+        sam3_items = sam3_info.get("services") or []
+        if sam3_items:
+            return sam3_items
+        return [x for x in items if _is_sam3_name(x.get("name", "")) or _is_sam3_name(x.get("display_name", ""))]
     return items
 
 
@@ -6787,6 +6906,8 @@ def get_system_status(scope="all"):
         software["website"] = get_website_info()
         if os.name == "nt":
             software["iis"] = get_iis_info()
+    if scope in ("all", "sam3"):
+        software["sam3_service"] = get_sam3_info()
 
     status = {
         "hostname": socket.gethostname(),
@@ -7815,6 +7936,246 @@ def run_linux_installer(form, live_cb=None, require_source=True):
             env[key] = value
 
     return run_process(installer_cmd, env=env, live_cb=live_cb)
+
+
+def run_windows_sam3_installer(form=None, live_cb=None):
+    form = form or {}
+    if os.name != "nt":
+        return 1, "Windows SAM3 installer can only run on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    ensure_repo_files(SAM3_WINDOWS_FILES, live_cb=live_cb)
+    env = os.environ.copy()
+    for key in [
+        "SAM3_HOST_IP", "SAM3_HTTP_PORT", "SAM3_HTTPS_PORT", "SAM3_DOMAIN",
+        "SAM3_USERNAME", "SAM3_PASSWORD", "SAM3_USE_OS_AUTH",
+        "SAM3_GPU_DEVICE", "SAM3_DOWNLOAD_MODEL", "SAM3_DEPLOY_MODE",
+    ]:
+        val = (form.get(key, [""])[0] or "").strip()
+        if val:
+            env[key] = val
+    env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
+    code, output = run_process(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SAM3_WINDOWS_INSTALLER)],
+        env=env,
+        live_cb=live_cb,
+    )
+    return code, output
+
+
+def run_unix_sam3_installer(form=None, live_cb=None):
+    form = form or {}
+    if os.name == "nt":
+        return 1, "Unix SAM3 installer can only run on Linux or macOS hosts."
+    ensure_repo_files(SAM3_UNIX_FILES, live_cb=live_cb)
+    env = os.environ.copy()
+    env_keys = [
+        "SAM3_HOST_IP", "SAM3_HTTP_PORT", "SAM3_HTTPS_PORT", "SAM3_DOMAIN",
+        "SAM3_USERNAME", "SAM3_PASSWORD", "SAM3_USE_OS_AUTH",
+        "SAM3_GPU_DEVICE", "SAM3_DOWNLOAD_MODEL", "SAM3_DEPLOY_MODE",
+    ]
+    for key in env_keys:
+        val = (form.get(key, [""])[0] or "").strip()
+        if val:
+            env[key] = val
+    env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
+    cmd = ["bash", str(SAM3_LINUX_INSTALLER)]
+    if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
+        cmd = ["sudo", "env"]
+        for key in env_keys + ["SERVER_INSTALLER_DATA_DIR"]:
+            value = env.get(key, "").strip()
+            if value:
+                cmd.append(f"{key}={value}")
+        cmd += ["bash", str(SAM3_LINUX_INSTALLER)]
+    code, output = run_process(cmd, env=env, live_cb=live_cb)
+    return code, output
+
+
+def run_sam3_download_model(form=None, live_cb=None):
+    """Download the SAM3 model file using the installed venv."""
+    state = _read_json_file(SAM3_STATE_FILE)
+    venv_python = str(state.get("python_executable") or "").strip()
+    model_dir = str(state.get("model_path") or "").strip()
+    install_dir = str(state.get("install_dir") or "").strip()
+    if not venv_python or not Path(venv_python).exists():
+        return 1, "SAM3 is not installed yet. Install SAM3 first."
+    if model_dir and Path(model_dir).exists():
+        return 0, "SAM3 model is already downloaded."
+    if live_cb:
+        live_cb("Downloading SAM3 model (sam3.pt ~3.4 GB)... This may take a while.\n")
+    code, output = run_process(
+        [venv_python, "-c", "from ultralytics import SAM; model = SAM('sam3.pt')"],
+        cwd=install_dir or None,
+        live_cb=live_cb,
+        timeout=1800,
+    )
+    if code == 0:
+        # Move model to proper location
+        default_model = Path(install_dir) / "sam3.pt" if install_dir else None
+        target_model = Path(model_dir) if model_dir else None
+        if default_model and default_model.exists() and target_model and not target_model.exists():
+            import shutil
+            target_model.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(default_model), str(target_model))
+        state["model_downloaded"] = True
+        _write_json_file(SAM3_STATE_FILE, state)
+        output = f"{output.rstrip()}\nSAM3 model downloaded successfully."
+    return code, output
+
+
+def run_sam3_docker(form=None, live_cb=None):
+    """Deploy SAM3 as a Docker container."""
+    form = form or {}
+    host_ip = (form.get("SAM3_HOST_IP", [""])[0] or "").strip()
+    http_port = (form.get("SAM3_HTTP_PORT", ["5000"])[0] or "5000").strip()
+    https_port = (form.get("SAM3_HTTPS_PORT", ["5443"])[0] or "5443").strip()
+    gpu_device = (form.get("SAM3_GPU_DEVICE", ["auto"])[0] or "auto").strip()
+    username = (form.get("SAM3_USERNAME", [""])[0] or "").strip()
+    password = (form.get("SAM3_PASSWORD", [""])[0] or "").strip()
+
+    if not command_exists("docker"):
+        return 1, "Docker is not installed. Please install Docker first."
+
+    ensure_repo_files(SAM3_WINDOWS_FILES if os.name == "nt" else SAM3_UNIX_FILES, live_cb=live_cb)
+
+    common_dir = str(ROOT / "SAM3" / "common")
+    sam3_data = str(SAM3_STATE_DIR / "docker-app")
+    Path(sam3_data).mkdir(parents=True, exist_ok=True)
+
+    # Create Dockerfile
+    gpu_base = "nvidia/cuda:12.4.0-runtime-ubuntu22.04" if gpu_device in ("cuda", "auto") else "python:3.12-slim"
+    dockerfile_content = f"""FROM {gpu_base}
+
+RUN apt-get update && apt-get install -y python3 python3-pip python3-venv git curl && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . /app/
+
+RUN python3 -m venv /app/venv && \\
+    /app/venv/bin/pip install --upgrade pip setuptools wheel && \\
+    /app/venv/bin/pip install torch torchvision{'  --index-url https://download.pytorch.org/whl/cu124' if gpu_device in ('cuda', 'auto') else ' --index-url https://download.pytorch.org/whl/cpu'} && \\
+    /app/venv/bin/pip install -r /app/requirements.txt && \\
+    /app/venv/bin/pip install "git+https://github.com/ultralytics/CLIP.git" || true
+
+RUN mkdir -p /app/models /app/temp/videos
+
+ENV SAM3_MODEL_PATH=/app/models/sam3.pt
+ENV SAM3_DEVICE={gpu_device}
+ENV SAM3_HOST=0.0.0.0
+ENV SAM3_PORT={http_port}
+ENV SAM3_USERNAME={username}
+ENV SAM3_PASSWORD={password}
+
+EXPOSE {http_port}
+
+CMD ["/app/venv/bin/python", "/app/app.py"]
+"""
+    dockerfile_path = Path(sam3_data) / "Dockerfile"
+    dockerfile_path.write_text(dockerfile_content, encoding="utf-8")
+
+    # Copy app files to docker build context
+    import shutil
+    for item in Path(common_dir).rglob("*"):
+        if item.is_file() and "__pycache__" not in str(item) and "venv" not in str(item):
+            rel = item.relative_to(common_dir)
+            dest = Path(sam3_data) / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(item), str(dest))
+
+    container_name = "serverinstaller-sam3"
+    image_name = "serverinstaller/sam3:latest"
+
+    # Stop and remove existing container
+    run_process(["docker", "stop", container_name], live_cb=live_cb, timeout=30)
+    run_process(["docker", "rm", container_name], live_cb=live_cb, timeout=15)
+
+    # Build image
+    if live_cb:
+        live_cb("Building SAM3 Docker image...\n")
+    code, output = run_process(
+        ["docker", "build", "-t", image_name, str(sam3_data)],
+        live_cb=live_cb,
+        timeout=600,
+    )
+    if code != 0:
+        return code, output
+
+    # Run container
+    docker_cmd = ["docker", "run", "-d", "--name", container_name, "--restart", "unless-stopped"]
+    docker_cmd += ["-p", f"{http_port}:{http_port}"]
+    if gpu_device in ("cuda", "auto"):
+        docker_cmd += ["--gpus", "all"]
+    docker_cmd += ["-v", f"{str(SAM3_STATE_DIR / 'models')}:/app/models"]
+    docker_cmd.append(image_name)
+
+    if live_cb:
+        live_cb("Starting SAM3 Docker container...\n")
+    code2, output2 = run_process(docker_cmd, live_cb=live_cb, timeout=60)
+
+    combined = f"{output.rstrip()}\n{output2}".strip()
+    if code2 == 0:
+        if not host_ip:
+            host_ip = choose_service_host()
+        state = _read_json_file(SAM3_STATE_FILE)
+        state.update({
+            "service_name": container_name,
+            "deploy_mode": "docker",
+            "host": host_ip,
+            "http_port": http_port,
+            "https_port": https_port,
+            "http_url": f"http://{host_ip}:{http_port}",
+            "https_url": f"https://{host_ip}:{https_port}",
+            "device": gpu_device,
+            "running": True,
+        })
+        _write_json_file(SAM3_STATE_FILE, state)
+    return code2, combined
+
+
+def run_sam3_stop(live_cb=None):
+    """Stop the SAM3 service."""
+    state = _read_json_file(SAM3_STATE_FILE)
+    deploy_mode = str(state.get("deploy_mode") or "os").strip()
+    service_name = str(state.get("service_name") or "").strip()
+
+    if deploy_mode == "docker":
+        code, output = run_process(["docker", "stop", service_name or "serverinstaller-sam3"], live_cb=live_cb, timeout=30)
+    elif os.name == "nt":
+        nssm = shutil.which("nssm")
+        if nssm:
+            code, output = run_process([nssm, "stop", service_name or "ServerInstaller-SAM3"], live_cb=live_cb, timeout=30)
+        else:
+            code, output = run_process(["schtasks", "/End", "/TN", service_name or "ServerInstaller-SAM3"], live_cb=live_cb, timeout=30)
+    else:
+        code, output = run_process(["systemctl", "stop", f"{service_name or SAM3_SYSTEMD_SERVICE}.service"], live_cb=live_cb, timeout=30)
+
+    if code == 0:
+        state["running"] = False
+        _write_json_file(SAM3_STATE_FILE, state)
+    return code, output
+
+
+def run_sam3_start(live_cb=None):
+    """Start the SAM3 service."""
+    state = _read_json_file(SAM3_STATE_FILE)
+    deploy_mode = str(state.get("deploy_mode") or "os").strip()
+    service_name = str(state.get("service_name") or "").strip()
+
+    if deploy_mode == "docker":
+        code, output = run_process(["docker", "start", service_name or "serverinstaller-sam3"], live_cb=live_cb, timeout=30)
+    elif os.name == "nt":
+        nssm = shutil.which("nssm")
+        if nssm:
+            code, output = run_process([nssm, "start", service_name or "ServerInstaller-SAM3"], live_cb=live_cb, timeout=30)
+        else:
+            code, output = run_process(["schtasks", "/Run", "/TN", service_name or "ServerInstaller-SAM3"], live_cb=live_cb, timeout=30)
+    else:
+        code, output = run_process(["systemctl", "start", f"{service_name or SAM3_SYSTEMD_SERVICE}.service"], live_cb=live_cb, timeout=30)
+
+    if code == 0:
+        state["running"] = True
+        _write_json_file(SAM3_STATE_FILE, state)
+    return code, output
 
 
 def run_windows_s3_installer(form, live_cb=None, mode="iis"):
@@ -9547,6 +9908,8 @@ def run_dashboard_update(live_cb=None):
             "dashboard/ui/pages/python/python-docker.js",
             "dashboard/ui/pages/python/python-iis.js",
             "dashboard/ui/pages/website/website.js",
+            "dashboard/ui/pages/ai/ai.js",
+            "dashboard/ui/pages/ai/sam3.js",
             "dashboard/ui/pages/files/files.js",
             "dashboard/ui/app.js",
         ]
@@ -11596,6 +11959,60 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_linux_s3_stop()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/sam3_windows":
+            title = "SAM3 Installer (Windows)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_sam3_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_sam3_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/sam3_linux":
+            title = "SAM3 Installer (Linux/macOS)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_unix_sam3_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_unix_sam3_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/sam3_download_model":
+            title = "SAM3 Model Download"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_sam3_download_model(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_sam3_download_model(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/sam3_docker":
+            title = "SAM3 Docker Deploy"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_sam3_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_sam3_docker(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/sam3_stop":
+            title = "SAM3 Stop"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_sam3_stop(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_sam3_stop()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/sam3_start":
+            title = "SAM3 Start"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_sam3_start(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_sam3_start()
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/dashboard_update":

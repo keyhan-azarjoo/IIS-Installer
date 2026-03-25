@@ -57,8 +57,8 @@ function App() {
   const [portProtocol, setPortProtocol] = React.useState("tcp");
   const [portBusy, setPortBusy] = React.useState(false);
   const [serviceBusy, setServiceBusy] = React.useState(false);
-  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, docker: false, proxy: false, python: false, website: false });
-  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", docker: "", proxy: "", python: "", website: "" });
+  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, docker: false, proxy: false, python: false, website: false, sam3: false });
+  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", docker: "", proxy: "", python: "", website: "", sam3: "" });
   const [serviceFilter, setServiceFilter] = React.useState("");
   const [services, setServices] = React.useState([]);
   const [mongoPageServices, setMongoPageServices] = React.useState([]);
@@ -68,6 +68,7 @@ function App() {
   const [proxyPageServices, setProxyPageServices] = React.useState([]);
   const [pythonPageServices, setPythonPageServices] = React.useState([]);
   const [websitePageServices, setWebsitePageServices] = React.useState([]);
+  const [sam3PageServices, setSam3PageServices] = React.useState([]);
   const [mongoInfoState, setMongoInfoState] = React.useState(null);
   const [s3InfoState, setS3InfoState] = React.useState(null);
   const [dotnetInfoState, setDotnetInfoState] = React.useState(null);
@@ -75,6 +76,7 @@ function App() {
   const [proxyInfoState, setProxyInfoState] = React.useState(null);
   const [pythonInfoState, setPythonInfoState] = React.useState(null);
   const [websiteInfoState, setWebsiteInfoState] = React.useState(null);
+  const [sam3InfoState, setSam3InfoState] = React.useState(null);
   const [pythonApiEditor, setPythonApiEditor] = React.useState(null);
   const [pythonApiEditorSeed, setPythonApiEditorSeed] = React.useState(0);
   const [serviceEditDlg, setServiceEditDlg] = React.useState(null);
@@ -204,6 +206,7 @@ function App() {
   const loadProxyServices = React.useRef(async () => {});
   const loadPythonServices = React.useRef(async () => {});
   const loadWebsiteServices = React.useRef(async () => {});
+  const loadSam3Services = React.useRef(async () => {});
   const loadMongoInfo = React.useRef(async () => {});
   const loadS3Info = React.useRef(async () => {});
   const loadDotnetInfo = React.useRef(async () => {});
@@ -211,6 +214,7 @@ function App() {
   const loadProxyInfo = React.useRef(async () => {});
   const loadPythonInfo = React.useRef(async () => {});
   const loadWebsiteInfo = React.useRef(async () => {});
+  const loadSam3Info = React.useRef(async () => {});
 
   const loadServiceScope = React.useCallback(async (scope, setter) => {
     setScopeLoadingFlag(scope, true);
@@ -251,6 +255,7 @@ function App() {
   loadProxyServices.current = async () => loadServiceScope("proxy", setProxyPageServices);
   loadPythonServices.current = async () => loadServiceScope("python", setPythonPageServices);
   loadWebsiteServices.current = async () => loadServiceScope("website", setWebsitePageServices);
+  loadSam3Services.current = async () => loadServiceScope("sam3", setSam3PageServices);
   loadMongoInfo.current = async () => loadScopedStatus("mongo", setMongoInfoState);
   loadS3Info.current = async () => loadScopedStatus("s3", setS3InfoState);
   loadDotnetInfo.current = async () => loadScopedStatus("dotnet", setDotnetInfoState);
@@ -258,6 +263,7 @@ function App() {
   loadProxyInfo.current = async () => loadScopedStatus("proxy", setProxyInfoState);
   loadPythonInfo.current = async () => loadScopedStatus("python", setPythonInfoState);
   loadWebsiteInfo.current = async () => loadScopedStatus("website", setWebsiteInfoState);
+  loadSam3Info.current = async () => loadScopedStatus("sam3", setSam3InfoState);
 
   const refreshPageServices = React.useCallback((targetPage) => {
     if (targetPage === "services") return loadServices.current();
@@ -267,6 +273,7 @@ function App() {
     if (targetPage === "proxy") return loadProxyServices.current();
     if (targetPage === "python" || String(targetPage || "").startsWith("python-")) return loadPythonServices.current();
     if (targetPage === "website") return loadWebsiteServices.current();
+    if (String(targetPage || "").startsWith("ai-sam3")) return loadSam3Services.current();
     if (targetPage === "dotnet" || targetPage === "dotnet-docker" || targetPage === "dotnet-linux") return Promise.all([loadDotnetServices.current(), loadDockerServices.current()]);
     if (targetPage === "dotnet-iis") return Promise.all([loadDotnetServices.current(), loadServices.current()]);
     if (String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
@@ -281,6 +288,7 @@ function App() {
     if (targetPage === "proxy") return loadProxyInfo.current();
     if (targetPage === "python" || String(targetPage || "").startsWith("python-")) return loadPythonInfo.current();
     if (targetPage === "website") return loadWebsiteInfo.current();
+    if (String(targetPage || "").startsWith("ai-sam3")) return loadSam3Info.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetInfo.current();
     if (targetPage === "home" || targetPage === "api" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
     return Promise.resolve();
@@ -291,13 +299,13 @@ function App() {
   }, [refreshPageServices, refreshPageStatus]);
 
   React.useEffect(() => {
-    if (page === "api" || page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-")) {
+    if (page === "api" || page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-") || String(page).startsWith("ai-sam3")) {
       refreshPageContext(page);
     }
   }, [page, refreshPageContext]);
 
   React.useEffect(() => {
-    if (!(page === "api" || page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-"))) {
+    if (!(page === "api" || page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-") || String(page).startsWith("ai-sam3"))) {
       return undefined;
     }
     const t = setInterval(() => {
@@ -605,6 +613,7 @@ function App() {
     if (page === "ai-ollama") return "AI > Ollama";
     if (page === "ai-tgwui") return "AI > Text Generation WebUI";
     if (page === "ai-comfyui") return "AI > ComfyUI";
+    if (page === "ai-sam3") return "AI > SAM3";
     if (page === "ai-custom") return "AI > Custom Model";
     if (page === "logs") return "System Logs";
     return "Dashboard";
@@ -1200,6 +1209,7 @@ function App() {
   const proxySoftware = proxyStatusInfo?.software || {};
   const pythonSoftware = pythonStatusInfo?.software || {};
   const websiteSoftware = websiteStatusInfo?.software || {};
+  const sam3Software = sam3InfoState?.software || {};
   const dotnet = dotnetSoftware.dotnet || software.dotnet || {};
   const docker = dockerSoftware.docker || software.docker || {};
   const mongoDocker = mongoSoftware.docker || software.docker || {};
@@ -1208,6 +1218,7 @@ function App() {
   const proxy = proxySoftware.proxy || software.proxy || {};
   const pythonService = pythonSoftware.python_service || software.python_service || {};
   const websiteInfo = websiteSoftware.website || software.website || {};
+  const sam3Service = sam3Software.sam3_service || software.sam3_service || {};
   const listeningPorts = systemInfo?.listening_ports || [];
 
   // Compute set of port numbers that belong to services managed by this installer
@@ -1768,7 +1779,7 @@ function App() {
     scopeLoading, scopeErrors,
     serviceFilter, setServiceFilter,
     services, mongoPageServices, s3PageServices, dotnetPageServices,
-    dockerPageServices, proxyPageServices, pythonPageServices, websitePageServices,
+    dockerPageServices, proxyPageServices, pythonPageServices, websitePageServices, sam3PageServices,
     mongoInfoState, s3InfoState, dotnetInfoState, dockerInfoState,
     proxyInfoState, pythonInfoState, websiteInfoState,
     pythonApiEditor, pythonApiEditorSeed,
@@ -1784,7 +1795,7 @@ function App() {
     software, mongoStatusInfo, dotnetStatusInfo, dockerStatusInfo, proxyStatusInfo,
     pythonStatusInfo, websiteStatusInfo,
     mongoSoftware, dotnetSoftware, dockerSoftware, proxySoftware, pythonSoftware, websiteSoftware,
-    dotnet, docker, mongoDocker, iis, mongo, proxy, pythonService, websiteInfo,
+    dotnet, docker, mongoDocker, iis, mongo, proxy, pythonService, websiteInfo, sam3Service,
     listeningPorts, managedPortSet, cpuPercent, memoryPercent, netBps, netPercent,
     apiAddressList, filteredServices,
     dotnetServices, s3Services, mongoServices, proxyServices, pythonServices, websiteServices,
@@ -1799,9 +1810,9 @@ function App() {
     clientOs,
     // Refs
     loadSystem, loadServices, loadMongoServices, loadS3Services, loadDotnetServices,
-    loadDockerServices, loadProxyServices, loadPythonServices, loadWebsiteServices,
+    loadDockerServices, loadProxyServices, loadPythonServices, loadWebsiteServices, loadSam3Services,
     loadMongoInfo, loadS3Info, loadDotnetInfo, loadDockerInfo, loadProxyInfo,
-    loadPythonInfo, loadWebsiteInfo,
+    loadPythonInfo, loadWebsiteInfo, loadSam3Info,
     // Callbacks and handlers
     append, setScopeLoadingFlag, setScopeErrorText, isScopeLoading,
     loadScopedStatus, loadServiceScope,
@@ -1833,6 +1844,7 @@ function App() {
     if (page === "proxy") return "proxy";
     if (page === "python" || String(page).startsWith("python-")) return "python";
     if (page === "website") return "website";
+    if (String(page).startsWith("ai-sam3")) return "sam3";
     if (page === "dotnet" || String(page).startsWith("dotnet-")) return "dotnet";
     return null;
   })();

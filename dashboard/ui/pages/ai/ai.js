@@ -26,7 +26,7 @@
                 Deploy and manage AI models, inference servers, and machine learning workloads on your server.
               </Typography>
               <Typography variant="body2" sx={{ mb: 0.5 }}>
-                <b>Supported frameworks:</b> Ollama, vLLM, llama.cpp, Text Generation WebUI, ComfyUI
+                <b>Supported frameworks:</b> SAM3, Ollama, vLLM, llama.cpp, Text Generation WebUI, ComfyUI
               </Typography>
               <Alert severity="info" sx={{ mt: 1, borderRadius: 2 }}>
                 Most AI/ML workloads benefit from a dedicated GPU. CPU-only inference is supported but will be significantly slower for large models.
@@ -37,6 +37,13 @@
         </Grid>
 
         {/* ── Service NavCards ───────────────────────────────────────────────── */}
+        <Grid item xs={12} md={6}>
+          <NavCard
+            title="SAM3 - Segment Anything"
+            text="Advanced AI object detection & segmentation. Supports GPU/TPU, text/point/box prompts, video tracking, and live camera."
+            onClick={() => setPage("ai-sam3")}
+          />
+        </Grid>
         <Grid item xs={12} md={6}>
           <NavCard
             title="Ollama"

@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAM3 Professional Dashboard</title>
+
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <nav class="navbar navbar-dark bg-primary shadow-sm">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="fas fa-robot me-2"></i>SAM3 Professional Dashboard
+            </span>
+            <div class="d-flex align-items-center">
+                <span class="badge bg-light text-dark me-2">
+                    <i class="fas fa-microchip me-1"></i>CPU Mode
+                </span>
+                <span class="badge bg-success">
+                    <i class="fas fa-check-circle me-1"></i>Online
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Container with Sidebar -->
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <nav id="sidebar" class="col-md-2 col-lg-2 d-md-block bg-light sidebar">
+                <div class="position-sticky pt-3">
+                    <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                        <span>DETECTION MODES</span>
+                    </h6>
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#" data-section="text-search">
+                                <i class="fas fa-search me-2"></i>
+                                Search by Text
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-section="point-search">
+                                <i class="fas fa-mouse-pointer me-2"></i>
+                                Point & Click
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-section="box-search">
+                                <i class="fas fa-vector-square me-2"></i>
+                                Draw Box
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-section="exemplar-search">
+                                <i class="fas fa-clone me-2"></i>
+                                Find Similar
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-section="video-search">
+                                <i class="fas fa-video me-2"></i>
+                                Video Tracking
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-section="object-tracker">
+                                <i class="fas fa-crosshairs me-2"></i>
+                                Object Tracker
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-section="live-camera">
+                                <i class="fas fa-camera me-2"></i>
+                                Live Camera
+                            </a>
+                        </li>
+                    </ul>
+
+                    <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                        <span>TOOLS</span>
+                    </h6>
+                    <ul class="nav flex-column mb-2">
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-section="export-tools">
+                                <i class="fas fa-download me-2"></i>
+                                Export Masks
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link disabled" href="#">
+                                <i class="fas fa-images me-2"></i>
+                                Batch Process
+                                <span class="badge bg-secondary ms-2">Soon</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- Main Content -->
+            <main class="col-md-10 ms-sm-auto col-lg-10 px-md-4">
+                <div class="mt-4">
+                    <!-- Text Search Mode Section (Default) -->
+                    <div id="text-search-section" class="mode-section">
+                    <div class="row g-4">
+                        <!-- Left Panel: Upload & Detection Controls -->
+                        <div class="col-lg-5">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-white border-bottom">
+                        <h5 class="mb-0">
+                            <i class="fas fa-upload me-2 text-primary"></i>Upload & Detection
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="detectionForm" enctype="multipart/form-data">
+                            <!-- Drag and Drop Area -->
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">Image Upload</label>
+                                <div id="dropArea" class="drop-area text-center p-4 border border-2 border-dashed rounded">
+                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                    <p class="mb-2">Drag & drop your image here</p>
+                                    <p class="text-muted small mb-3">or</p>
+                                    <input type="file" id="imageInput" name="image" accept="image/*" class="d-none" required>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="document.getElementById('imageInput').click()">
+                                        <i class="fas fa-folder-open me-1"></i>Browse Files
+                                    </button>
+                                    <p class="text-muted small mt-2 mb-0">Supported: JPG, PNG (Max 10MB)</p>
+                                </div>
+                                <div id="imagePreview" class="mt-3 d-none">
+                                    <img id="previewImg" src="" alt="Preview" class="img-fluid rounded shadow-sm">
+                                    <button type="button" class="btn btn-sm btn-danger mt-2" onclick="clearImage()">
+                                        <i class="fas fa-times me-1"></i>Remove
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Text Prompt Input (Multiple Prompts Supported) -->
+                            <div class="mb-4">
+                                <label for="textPrompt" class="form-label fw-bold">
+                                    Object Detection Prompts
+                                    <span class="badge bg-info ms-2">Multi-Prompt</span>
+                                </label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                    <input type="text" class="form-control" id="textPrompt" name="text_prompt"
+                                           placeholder="e.g., person, car, dog..." required>
+                                </div>
+                                <small class="text-muted">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Enter one or multiple objects separated by commas (e.g., "person, car, building")
+                                </small>
+                            </div>
+
+                            <!-- Advanced Settings (Collapsible) -->
+                            <div class="accordion mb-4" id="advancedSettings">
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#settingsPanel">
+                                            <i class="fas fa-cog me-2"></i>Advanced Settings
+                                        </button>
+                                    </h2>
+                                    <div id="settingsPanel" class="accordion-collapse collapse" data-bs-parent="#advancedSettings">
+                                        <div class="accordion-body">
+                                            <!-- Confidence Threshold -->
+                                            <div class="mb-3">
+                                                <label for="confidenceSlider" class="form-label">
+                                                    Confidence Threshold: <strong id="confidenceValue">0.25</strong>
+                                                </label>
+                                                <input type="range" class="form-range" id="confidenceSlider" name="confidence"
+                                                       min="0.1" max="0.9" step="0.05" value="0.25">
+                                                <small class="text-muted">Higher values = more strict detection</small>
+                                            </div>
+
+                                            <!-- Reset Button -->
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetSettings()">
+                                                <i class="fas fa-undo me-1"></i>Reset to Defaults
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Submit Button -->
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+                                    <i class="fas fa-search me-2"></i>Detect Objects
+                                </button>
+                            </div>
+                        </form>
+
+                        <!-- Loading Spinner -->
+                        <div id="loadingSpinner" class="text-center mt-4 d-none">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Processing image... This may take a few seconds</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Results Display -->
+            <div class="col-lg-7">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-white border-bottom">
+                        <h5 class="mb-0">
+                            <i class="fas fa-image me-2 text-primary"></i>Detection Results
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Initial State -->
+                        <div id="noResults" class="text-center py-5">
+                            <i class="fas fa-image fa-5x text-muted mb-3"></i>
+                            <h5 class="text-muted">No Results Yet</h5>
+                            <p class="text-muted">Upload an image and enter a prompt to begin detection</p>
+                        </div>
+
+                        <!-- Results Container -->
+                        <div id="resultsContainer" class="d-none">
+                            <!-- Tabs for Original/Detected -->
+                            <ul class="nav nav-tabs mb-3" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="original-tab" data-bs-toggle="tab"
+                                            data-bs-target="#original-panel" type="button" role="tab">
+                                        <i class="fas fa-file-image me-1"></i>Original Image
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="detected-tab" data-bs-toggle="tab"
+                                            data-bs-target="#detected-panel" type="button" role="tab">
+                                        <i class="fas fa-crosshairs me-1"></i>Detected Objects
+                                    </button>
+                                </li>
+                            </ul>
+
+                            <!-- Tab Content -->
+                            <div class="tab-content">
+                                <div class="tab-pane fade show active" id="original-panel" role="tabpanel">
+                                    <div class="image-viewer">
+                                        <img id="originalImage" src="" alt="Original" class="img-fluid rounded shadow-sm">
+                                    </div>
+                                </div>
+                                <div class="tab-pane fade" id="detected-panel" role="tabpanel">
+                                    <!-- Interactive Canvas View -->
+                                    <div class="position-relative" id="canvasContainer">
+                                        <img id="detectedImage" src="" alt="Detected" class="img-fluid rounded shadow-sm" style="display: block;">
+                                        <canvas id="maskCanvas" class="position-absolute top-0 start-0" style="cursor: crosshair;"></canvas>
+                                    </div>
+
+                                    <!-- Global Opacity Control -->
+                                    <div class="mt-3 p-3 bg-light rounded">
+                                        <label for="globalOpacity" class="form-label small fw-bold mb-2">
+                                            <i class="fas fa-adjust me-1"></i>Global Opacity: <span id="globalOpacityValue">0.6</span>
+                                        </label>
+                                        <input type="range" class="form-range" id="globalOpacity" min="0" max="1" step="0.1" value="0.6">
+                                    </div>
+
+                                    <!-- Detected Objects List -->
+                                    <div class="mt-3">
+                                        <h6 class="fw-bold mb-2">
+                                            <i class="fas fa-list me-1"></i>Detected Objects (<span id="objectCount">0</span>)
+                                        </h6>
+                                        <div id="objectsList" class="list-group">
+                                            <!-- Objects will be populated here by JavaScript -->
+                                        </div>
+                                    </div>
+
+                                    <!-- Detection Metadata -->
+                                    <div class="alert alert-info mt-3" id="detectionInfo">
+                                        <h6 class="alert-heading">
+                                            <i class="fas fa-info-circle me-1"></i>Detection Information
+                                        </h6>
+                                        <div class="row g-2 small">
+                                            <div class="col-md-4">
+                                                <strong>Objects Found:</strong> <span id="objectCountInfo">-</span>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <strong>Processing Time:</strong> <span id="processTime">-</span>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <strong>Avg Confidence:</strong> <span id="avgConfidence">-</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+        <!-- End Text Search Section -->
+
+        <!-- Point & Click Mode Section (Hidden by default) -->
+        <div id="point-search-section" class="mode-section d-none">
+            <div class="row g-4">
+                <!-- Point & Click Panel -->
+                <div class="col-lg-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-mouse-pointer me-2 text-primary"></i>Point & Click Selection
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Instructions -->
+                            <div class="alert alert-info mb-4">
+                                <h6 class="alert-heading">
+                                    <i class="fas fa-info-circle me-1"></i>How to Use
+                                </h6>
+                                <ul class="mb-0 small">
+                                    <li><strong>Left-click</strong> on the image to add a <span class="badge bg-success">Positive Point</span> (foreground/object)</li>
+                                    <li><strong>Right-click</strong> to add a <span class="badge bg-danger">Negative Point</span> (background/not object)</li>
+                                    <li>Add multiple points to refine the segmentation</li>
+                                    <li>Click "Detect Object" when ready</li>
+                                </ul>
+                            </div>
+
+                            <!-- Image Upload -->
+                            <div class="mb-3">
+                                <label for="pointImageInput" class="form-label fw-bold">Upload Image</label>
+                                <input type="file" class="form-control" id="pointImageInput" accept="image/*">
+                            </div>
+
+                            <!-- Canvas for Point Selection -->
+                            <div class="canvas-wrapper mb-3" style="max-width: 100%; overflow: auto;">
+                                <canvas id="pointCanvas" style="border: 2px solid #dee2e6; border-radius: 8px; cursor: crosshair; max-width: 100%;"></canvas>
+                            </div>
+
+                            <!-- Points List -->
+                            <div class="mb-3">
+                                <h6 class="fw-bold">
+                                    <i class="fas fa-map-marker-alt me-1"></i>Points Added
+                                </h6>
+                                <div id="pointsList">
+                                    <p class="text-muted small">No points added yet</p>
+                                </div>
+                            </div>
+
+                            <!-- Confidence -->
+                            <div class="mb-3">
+                                <label for="pointConfidenceSlider" class="form-label fw-bold">
+                                    Confidence Threshold: <strong id="pointConfidenceValue">0.25</strong>
+                                </label>
+                                <input type="range" class="form-range" id="pointConfidenceSlider"
+                                       min="0.05" max="0.90" step="0.05" value="0.25">
+                                <small class="text-muted">Higher values = stricter detection</small>
+                            </div>
+
+                            <!-- Controls -->
+                            <div class="d-flex gap-2 mb-4">
+                                <button id="detectPointBtn" class="btn btn-primary" disabled>
+                                    <i class="fas fa-search me-1"></i>Detect Object
+                                </button>
+                                <button id="clearPointsBtn" class="btn btn-secondary">
+                                    <i class="fas fa-eraser me-1"></i>Clear Points
+                                </button>
+                            </div>
+
+                            <!-- Detection Results -->
+                            <div id="pointResultsContainer" class="d-none">
+                                <hr class="my-4">
+                                <h6 class="fw-bold mb-3">
+                                    <i class="fas fa-crosshairs me-1"></i>Detection Results
+                                </h6>
+
+                                <!-- Interactive Canvas View -->
+                                <div class="position-relative mb-3" id="pointCanvasContainer">
+                                    <img id="pointDetectedImage" src="" alt="Detected" class="img-fluid rounded shadow-sm" style="display: block;">
+                                    <canvas id="pointMaskCanvas" class="position-absolute top-0 start-0" style="cursor: crosshair;"></canvas>
+                                </div>
+
+                                <!-- Global Opacity Control -->
+                                <div class="mb-3 p-3 bg-light rounded">
+                                    <label for="pointGlobalOpacity" class="form-label small fw-bold mb-2">
+                                        <i class="fas fa-adjust me-1"></i>Global Opacity: <span id="pointGlobalOpacityValue">0.6</span>
+                                    </label>
+                                    <input type="range" class="form-range" id="pointGlobalOpacity" min="0" max="1" step="0.1" value="0.6">
+                                </div>
+
+                                <!-- Detected Objects List -->
+                                <div class="mb-3">
+                                    <h6 class="fw-bold mb-2">
+                                        <i class="fas fa-list me-1"></i>Detected Objects (<span id="pointObjectCount">0</span>)
+                                    </h6>
+                                    <div id="pointObjectsList" class="list-group">
+                                        <!-- Objects will be populated here by JavaScript -->
+                                    </div>
+                                </div>
+
+                                <!-- Detection Metadata -->
+                                <div class="alert alert-info">
+                                    <h6 class="alert-heading">
+                                        <i class="fas fa-info-circle me-1"></i>Detection Information
+                                    </h6>
+                                    <div class="row g-2 small">
+                                        <div class="col-md-4">
+                                            <strong>Objects Found:</strong> <span id="pointObjectCountInfo">-</span>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <strong>Processing Time:</strong> <span id="pointProcessTime">-</span>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <strong>Avg Confidence:</strong> <span id="pointAvgConfidence">-</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End Point & Click Section -->
+
+        <!-- Video Tracking Mode Section (Hidden by default) -->
+        <div id="video-search-section" class="mode-section d-none">
+            <div class="row g-4">
+                <div class="col-lg-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-video me-2 text-primary"></i>Video Object Tracking
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Instructions -->
+                            <div class="alert alert-info mb-4">
+                                <h6 class="alert-heading">
+                                    <i class="fas fa-info-circle me-1"></i>How to Use
+                                </h6>
+                                <ol class="mb-0 small">
+                                    <li>Upload a video file (MP4, AVI, MOV, WebM - Max 100MB)</li>
+                                    <li>Enter text prompts for objects to track (e.g., "person, car")</li>
+                                    <li>Click "Start Tracking" to process the video</li>
+                                    <li>Watch real-time progress as frames are processed</li>
+                                    <li>Use the video player to review tracked objects</li>
+                                </ol>
+                            </div>
+
+                            <!-- Video Upload -->
+                            <div class="mb-3">
+                                <label for="videoInput" class="form-label fw-bold">Upload Video</label>
+                                <input type="file" class="form-control" id="videoInput" accept="video/mp4,video/avi,video/mov,video/webm">
+                                <small class="text-muted">Supported: MP4, AVI, MOV, WebM (Max 100MB)</small>
+                            </div>
+
+                            <!-- Video Info (Hidden initially) -->
+                            <div id="videoInfo" class="alert alert-success d-none mb-3">
+                                <strong><i class="fas fa-check-circle me-1"></i>Video Uploaded Successfully</strong>
+                                <ul class="mb-0 mt-2 small">
+                                    <li>Duration: <span id="videoDuration">-</span></li>
+                                    <li>FPS: <span id="videoFps">-</span></li>
+                                    <li>Resolution: <span id="videoResolution">-</span></li>
+                                    <li>Total Frames: <span id="videoFrames">-</span></li>
+                                </ul>
+                            </div>
+
+                            <!-- Text Prompt for Tracking -->
+                            <div class="mb-3">
+                                <label for="videoTextPrompt" class="form-label fw-bold">Objects to Track</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                    <input type="text" class="form-control" id="videoTextPrompt" placeholder="e.g., person, car, dog...">
+                                </div>
+                                <small class="text-muted">Enter one or multiple objects separated by commas</small>
+                            </div>
+
+                            <!-- Processing Options -->
+                            <div class="row g-3 mb-3">
+                                <!-- FPS Selection -->
+                                <div class="col-md-6">
+                                    <label for="videoFpsOption" class="form-label fw-bold">
+                                        <i class="fas fa-film me-1"></i>Processing FPS
+                                    </label>
+                                    <select class="form-select" id="videoFpsOption">
+                                        <option value="1">1 FPS (Every 1 second)</option>
+                                        <option value="5">5 FPS (Every 0.2 seconds)</option>
+                                        <option value="10" selected>10 FPS (Every 0.1 seconds)</option>
+                                        <option value="15">15 FPS (Every 0.067 seconds)</option>
+                                        <option value="30">30 FPS (All frames)</option>
+                                    </select>
+                                    <small class="text-muted">Lower FPS = Faster processing</small>
+                                </div>
+
+                                <!-- Quality Selection -->
+                                <div class="col-md-6">
+                                    <label for="videoQualityOption" class="form-label fw-bold">
+                                        <i class="fas fa-compress me-1"></i>Processing Quality
+                                    </label>
+                                    <select class="form-select" id="videoQualityOption">
+                                        <option value="100">Original (100%)</option>
+                                        <option value="75">High (75%)</option>
+                                        <option value="50" selected>Medium (50%)</option>
+                                        <option value="25">Low (25%)</option>
+                                        <option value="10">Very Low (10%)</option>
+                                        <option value="5">Ultra Low (5%)</option>
+                                    </select>
+                                    <small class="text-muted">Lower quality = Faster processing</small>
+                                </div>
+                            </div>
+
+                            <!-- Processing Controls -->
+                            <div class="d-flex gap-2 mb-3">
+                                <button id="processVideoBtn" class="btn btn-primary" disabled>
+                                    <i class="fas fa-play me-1"></i>Start Tracking
+                                </button>
+                                <button id="cancelVideoBtn" class="btn btn-danger d-none">
+                                    <i class="fas fa-stop me-1"></i>Cancel
+                                </button>
+                            </div>
+
+                            <!-- Progress Bar -->
+                            <div id="videoProgress" class="d-none mb-4">
+                                <h6 class="fw-bold"><i class="fas fa-spinner fa-spin me-1"></i>Processing Video...</h6>
+                                <div class="progress" style="height: 30px;">
+                                    <div id="videoProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                         role="progressbar" style="width: 0%">0%</div>
+                                </div>
+                                <p class="text-center mt-2 small">
+                                    Frame <span id="currentFrame">0</span> / <span id="totalFrames">0</span>
+                                </p>
+                            </div>
+
+                            <!-- Video Player (Hidden initially) -->
+                            <div id="videoResultsContainer" class="d-none">
+                                <h6 class="fw-bold mb-3">
+                                    <i class="fas fa-film me-1"></i>Tracking Results
+                                </h6>
+
+                                <div class="row">
+                                    <!-- Video Player Column (Left) -->
+                                    <div class="col-lg-7">
+                                        <!-- Video Player with Canvas Overlay -->
+                                        <div class="video-player-wrapper mb-3" style="background: #000; border-radius: 8px; overflow: hidden; max-width: 100%; position: relative;">
+                                            <!-- Original Video Element -->
+                                            <video id="videoElement" style="width: 100%; height: auto; display: block; max-width: 100%;" preload="auto"></video>
+
+                                            <!-- Canvas Overlay for Masks -->
+                                            <canvas id="videoResultCanvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></canvas>
+                                        </div>
+
+                                        <!-- Playback Controls -->
+                                        <div class="video-controls bg-light p-3 rounded">
+                                            <div class="d-flex align-items-center gap-2 mb-2">
+                                                <button id="playBtn" class="btn btn-sm btn-success">
+                                                    <i class="fas fa-play"></i> Play
+                                                </button>
+                                                <button id="pauseBtn" class="btn btn-sm btn-warning">
+                                                    <i class="fas fa-pause"></i> Pause
+                                                </button>
+                                                <span class="ms-auto small">
+                                                    Time: <span id="videoTimeInfo">0:00 / 0:00</span>
+                                                </span>
+                                            </div>
+                                            <input type="range" class="form-range" id="videoSeekSlider" min="0" max="100" value="0" step="0.1">
+                                        </div>
+                                    </div>
+
+                                    <!-- Objects List Column (Right) -->
+                                    <div class="col-lg-5">
+                                        <div class="card border-0 shadow-sm" style="max-height: 600px; overflow-y: auto;">
+                                            <div class="card-header bg-primary text-white">
+                                                <h6 class="mb-0">
+                                                    <i class="fas fa-layer-group me-1"></i>Detected Objects
+                                                    <span class="badge bg-light text-dark ms-2" id="videoObjectCount">0</span>
+                                                </h6>
+                                            </div>
+                                            <div class="card-body p-0">
+                                                <!-- Global Opacity Control -->
+                                                <div class="p-3 border-bottom bg-light">
+                                                    <label class="form-label small mb-1 fw-bold">
+                                                        Global Opacity: <span id="videoGlobalOpacityValue">0.6</span>
+                                                    </label>
+                                                    <input type="range" class="form-range form-range-sm" id="videoGlobalOpacity"
+                                                           min="0" max="1" step="0.1" value="0.6">
+                                                </div>
+
+                                                <!-- Objects List -->
+                                                <div class="list-group list-group-flush" id="videoObjectsList">
+                                                    <!-- Objects will be populated here -->
+                                                    <div class="text-center p-4 text-muted">
+                                                        <i class="fas fa-info-circle fa-2x mb-2"></i>
+                                                        <p>No objects detected yet</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End Video Section -->
+
+        <!-- Draw Box Mode Section (Hidden by default) -->
+        <div id="box-search-section" class="mode-section d-none">
+            <div class="row g-4">
+                <div class="col-lg-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-vector-square me-2 text-primary"></i>Draw Bounding Box
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info mb-4">
+                                <h6 class="alert-heading"><i class="fas fa-info-circle me-1"></i>How to Use</h6>
+                                <ul class="mb-0 small">
+                                    <li>Upload an image, then <strong>click and drag</strong> to draw a bounding box around the object</li>
+                                    <li>Draw multiple boxes to detect several objects at once</li>
+                                    <li>Click "Detect Objects" when ready</li>
+                                </ul>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="boxImageInput" class="form-label fw-bold">Upload Image</label>
+                                <input type="file" class="form-control" id="boxImageInput" accept="image/*">
+                            </div>
+
+                            <div class="canvas-wrapper mb-3" style="max-width: 100%; overflow: auto;">
+                                <canvas id="boxCanvas" style="border: 2px solid #dee2e6; border-radius: 8px; cursor: crosshair; max-width: 100%;"></canvas>
+                            </div>
+
+                            <div class="mb-3">
+                                <h6 class="fw-bold"><i class="fas fa-vector-square me-1"></i>Boxes Drawn</h6>
+                                <div id="boxesList"><p class="text-muted small">No boxes drawn yet</p></div>
+                            </div>
+
+                            <!-- Confidence -->
+                            <div class="mb-3">
+                                <label for="boxConfidenceSlider" class="form-label fw-bold">
+                                    Confidence Threshold: <strong id="boxConfidenceValue">0.25</strong>
+                                </label>
+                                <input type="range" class="form-range" id="boxConfidenceSlider"
+                                       min="0.05" max="0.90" step="0.05" value="0.25">
+                                <small class="text-muted">Higher values = stricter detection</small>
+                            </div>
+
+                            <div class="d-flex gap-2 mb-4">
+                                <button id="detectBoxBtn" class="btn btn-primary" disabled>
+                                    <i class="fas fa-search me-1"></i>Detect Objects
+                                </button>
+                                <button id="clearBoxesBtn" class="btn btn-secondary">
+                                    <i class="fas fa-eraser me-1"></i>Clear Boxes
+                                </button>
+                            </div>
+
+                            <!-- Detection Results -->
+                            <div id="boxResultsContainer" class="d-none">
+                                <hr class="my-4">
+                                <h6 class="fw-bold mb-3"><i class="fas fa-crosshairs me-1"></i>Detection Results</h6>
+                                <div class="position-relative mb-3" id="boxCanvasContainer">
+                                    <img id="boxDetectedImage" src="" alt="Detected" class="img-fluid rounded shadow-sm" style="display: block;">
+                                    <canvas id="boxMaskCanvas" class="position-absolute top-0 start-0" style="cursor: crosshair;"></canvas>
+                                </div>
+                                <div class="mb-3 p-3 bg-light rounded">
+                                    <label for="boxGlobalOpacity" class="form-label small fw-bold mb-2">
+                                        <i class="fas fa-adjust me-1"></i>Global Opacity: <span id="boxGlobalOpacityValue">0.6</span>
+                                    </label>
+                                    <input type="range" class="form-range" id="boxGlobalOpacity" min="0" max="1" step="0.1" value="0.6">
+                                </div>
+                                <div class="mb-3">
+                                    <h6 class="fw-bold mb-2"><i class="fas fa-list me-1"></i>Detected Objects (<span id="boxObjectCount">0</span>)</h6>
+                                    <div id="boxObjectsList" class="list-group"></div>
+                                </div>
+                                <div class="alert alert-info">
+                                    <div class="row g-2 small">
+                                        <div class="col-md-4"><strong>Objects Found:</strong> <span id="boxObjectCountInfo">-</span></div>
+                                        <div class="col-md-4"><strong>Processing Time:</strong> <span id="boxProcessTime">-</span></div>
+                                        <div class="col-md-4"><strong>Avg Confidence:</strong> <span id="boxAvgConfidence">-</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End Draw Box Section -->
+
+        <!-- Find Similar (Exemplar) Mode Section (Hidden by default) -->
+        <div id="exemplar-search-section" class="mode-section d-none">
+            <div class="row g-4">
+                <div class="col-lg-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-clone me-2 text-primary"></i>Find Similar Objects
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info mb-4">
+                                <h6 class="alert-heading"><i class="fas fa-info-circle me-1"></i>How to Use</h6>
+                                <ul class="mb-0 small">
+                                    <li>Upload an image</li>
+                                    <li><strong>Draw a box</strong> around the reference object you want SAM3 to segment</li>
+                                    <li>Click "Find &amp; Segment" — SAM3 will segment the selected region</li>
+                                </ul>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="exemplarImageInput" class="form-label fw-bold">Upload Image</label>
+                                <input type="file" class="form-control" id="exemplarImageInput" accept="image/*">
+                            </div>
+
+                            <div class="canvas-wrapper mb-3" style="max-width: 100%; overflow: auto;">
+                                <canvas id="exemplarCanvas" style="border: 2px solid #dee2e6; border-radius: 8px; cursor: crosshair; max-width: 100%;"></canvas>
+                            </div>
+
+                            <div id="exemplarRefPreview" class="d-none mb-3">
+                                <h6 class="fw-bold">Reference Region</h6>
+                                <canvas id="exemplarRefCanvas" style="border: 1px solid #ccc; border-radius: 4px; max-height: 120px;"></canvas>
+                                <p class="text-muted small mt-1" id="exemplarRefInfo"></p>
+                            </div>
+
+                            <!-- Confidence -->
+                            <div class="mb-3">
+                                <label for="exemplarConfidenceSlider" class="form-label fw-bold">
+                                    Confidence Threshold: <strong id="exemplarConfidenceValue">0.25</strong>
+                                </label>
+                                <input type="range" class="form-range" id="exemplarConfidenceSlider"
+                                       min="0.05" max="0.90" step="0.05" value="0.25">
+                                <small class="text-muted">Higher values = stricter detection</small>
+                            </div>
+
+                            <div class="d-flex gap-2 mb-4">
+                                <button id="detectExemplarBtn" class="btn btn-primary" disabled>
+                                    <i class="fas fa-clone me-1"></i>Find Similar Objects
+                                </button>
+                                <button id="clearExemplarBtn" class="btn btn-secondary">
+                                    <i class="fas fa-eraser me-1"></i>Clear Selection
+                                </button>
+                            </div>
+
+                            <!-- Detection Results -->
+                            <div id="exemplarResultsContainer" class="d-none">
+                                <hr class="my-4">
+                                <h6 class="fw-bold mb-3"><i class="fas fa-crosshairs me-1"></i>Detection Results</h6>
+                                <div class="position-relative mb-3" id="exemplarCanvasContainer">
+                                    <img id="exemplarDetectedImage" src="" alt="Detected" class="img-fluid rounded shadow-sm" style="display: block;">
+                                    <canvas id="exemplarMaskCanvas" class="position-absolute top-0 start-0" style="cursor: crosshair;"></canvas>
+                                </div>
+                                <div class="mb-3 p-3 bg-light rounded">
+                                    <label for="exemplarGlobalOpacity" class="form-label small fw-bold mb-2">
+                                        <i class="fas fa-adjust me-1"></i>Global Opacity: <span id="exemplarGlobalOpacityValue">0.6</span>
+                                    </label>
+                                    <input type="range" class="form-range" id="exemplarGlobalOpacity" min="0" max="1" step="0.1" value="0.6">
+                                </div>
+                                <div class="mb-3">
+                                    <h6 class="fw-bold mb-2"><i class="fas fa-list me-1"></i>Detected Objects (<span id="exemplarObjectCount">0</span>)</h6>
+                                    <div id="exemplarObjectsList" class="list-group"></div>
+                                </div>
+                                <!-- CLIP Identification Banner -->
+                                <div id="exemplarClipInfo" class="alert alert-success d-none mb-3">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <i class="fas fa-brain fa-lg"></i>
+                                        <div>
+                                            <strong>CLIP identified:</strong>
+                                            <span class="badge bg-success fs-6 ms-1" id="exemplarClipLabel">-</span>
+                                            <span class="text-muted small ms-2">confidence <span id="exemplarClipScore">-</span></span>
+                                        </div>
+                                    </div>
+                                    <div class="mt-1 small text-muted">
+                                        SAM3 searched for all <em id="exemplarClipLabelRepeat">-</em> objects in the image.
+                                    </div>
+                                </div>
+
+                                <div class="alert alert-info">
+                                    <div class="row g-2 small">
+                                        <div class="col-md-3"><strong>Objects Found:</strong> <span id="exemplarObjectCountInfo">-</span></div>
+                                        <div class="col-md-3"><strong>Processing Time:</strong> <span id="exemplarProcessTime">-</span></div>
+                                        <div class="col-md-3"><strong>Avg Confidence:</strong> <span id="exemplarAvgConfidence">-</span></div>
+                                        <div class="col-md-3"><strong>Image Size:</strong> <span id="exemplarImageSize">-</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End Exemplar Section -->
+
+        <!-- Export Tools Section (Hidden by default) -->
+        <div id="export-tools-section" class="mode-section d-none">
+            <div class="row g-4">
+                <div class="col-lg-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-download me-2 text-primary"></i>Export Masks
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="exportNoData" class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle me-1"></i>
+                                No detection results available. Please run a detection first (Text Search, Point &amp; Click, or Draw Box), then come back here to export.
+                            </div>
+
+                            <div id="exportDataAvailable" class="d-none">
+                                <div class="alert alert-success mb-4">
+                                    <i class="fas fa-check-circle me-1"></i>
+                                    Detection results loaded — <strong><span id="exportObjectCount">0</span> objects</strong> available for export.
+                                </div>
+
+                                <!-- Format Selection -->
+                                <h6 class="fw-bold mb-3">Select Export Format</h6>
+                                <div class="row g-3 mb-4">
+                                    <div class="col-md-3">
+                                        <div class="card border-2 export-format-card" data-format="png" style="cursor: pointer;">
+                                            <div class="card-body text-center p-3">
+                                                <i class="fas fa-file-image fa-2x text-primary mb-2"></i>
+                                                <h6 class="mb-1">PNG</h6>
+                                                <small class="text-muted">Single mask with transparency</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card border-2 export-format-card" data-format="zip" style="cursor: pointer;">
+                                            <div class="card-body text-center p-3">
+                                                <i class="fas fa-file-archive fa-2x text-warning mb-2"></i>
+                                                <h6 class="mb-1">PNG ZIP</h6>
+                                                <small class="text-muted">All masks as ZIP archive</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card border-2 export-format-card" data-format="json" style="cursor: pointer;">
+                                            <div class="card-body text-center p-3">
+                                                <i class="fas fa-file-code fa-2x text-success mb-2"></i>
+                                                <h6 class="mb-1">JSON</h6>
+                                                <small class="text-muted">Structured detection data</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="card border-2 export-format-card" data-format="coco" style="cursor: pointer;">
+                                            <div class="card-body text-center p-3">
+                                                <i class="fas fa-database fa-2x text-danger mb-2"></i>
+                                                <h6 class="mb-1">COCO</h6>
+                                                <small class="text-muted">COCO annotation format</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Object Selection (for PNG single export) -->
+                                <div id="exportObjectSelection" class="d-none mb-4">
+                                    <h6 class="fw-bold mb-2">Select Object to Export</h6>
+                                    <div id="exportObjectsList" class="list-group"></div>
+                                </div>
+
+                                <button id="exportBtn" class="btn btn-primary btn-lg" disabled>
+                                    <i class="fas fa-download me-2"></i>Export
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End Export Section -->
+
+        <!-- Object Tracker Section (Hidden by default) -->
+        <div id="object-tracker-section" class="mode-section d-none">
+            <div class="row g-4">
+                <!-- Left Panel: Upload & Frame Selection -->
+                <div class="col-lg-5">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-header bg-white border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-crosshairs me-2 text-primary"></i>Object Tracker
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Instructions -->
+                            <div class="alert alert-info mb-3">
+                                <h6 class="alert-heading">
+                                    <i class="fas fa-info-circle me-1"></i>How to Use
+                                </h6>
+                                <ol class="mb-0 small">
+                                    <li>Upload a video file</li>
+                                    <li>Drag the scrubber to find your object</li>
+                                    <li>Draw a box around the object on the frame</li>
+                                    <li>Click <strong>Track Object</strong></li>
+                                    <li>Watch the object being tracked through the video</li>
+                                </ol>
+                            </div>
+
+                            <!-- Step 1: Upload Video -->
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-upload me-1 text-primary"></i>Step 1: Upload Video
+                                </label>
+                                <input type="file" id="trackerVideoInput" class="form-control"
+                                       accept="video/mp4,video/avi,video/quicktime,video/webm">
+                            </div>
+
+                            <!-- Video Info -->
+                            <div id="trackerVideoInfo" class="alert alert-success d-none mb-3">
+                                <div class="row text-center small">
+                                    <div class="col-3">
+                                        <strong>Duration</strong><br>
+                                        <span id="trackerDuration">-</span>s
+                                    </div>
+                                    <div class="col-3">
+                                        <strong>FPS</strong><br>
+                                        <span id="trackerFps">-</span>
+                                    </div>
+                                    <div class="col-3">
+                                        <strong>Frames</strong><br>
+                                        <span id="trackerFrameCount">-</span>
+                                    </div>
+                                    <div class="col-3">
+                                        <strong>Resolution</strong><br>
+                                        <span id="trackerResolution">-</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 2: Scrub to frame -->
+                            <div id="trackerScrubPanel" class="d-none mb-3">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-sliders-h me-1 text-primary"></i>Step 2: Select Frame
+                                </label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="range" id="trackerFrameScrubber" class="form-range flex-grow-1"
+                                           min="0" value="0" step="1">
+                                    <span class="text-muted small" style="white-space:nowrap">
+                                        Frame <span id="trackerCurrentFrameNum">0</span>
+                                    </span>
+                                </div>
+                                <div class="text-center mt-1">
+                                    <small class="text-muted">
+                                        <i class="fas fa-clock me-1"></i>
+                                        Time: <span id="trackerCurrentTime">0.00</span>s
+                                    </small>
+                                </div>
+                            </div>
+
+                            <!-- Step 3: Draw box instruction -->
+                            <div id="trackerDrawPanel" class="d-none mb-3">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-vector-square me-1 text-primary"></i>Step 3: Draw Box Around Object
+                                </label>
+                                <div class="alert alert-warning small py-2 mb-2">
+                                    <i class="fas fa-hand-pointer me-1"></i>
+                                    Drag on the frame preview to draw a bounding box
+                                </div>
+                                <div id="trackerBoxInfo" class="d-none text-success small">
+                                    <i class="fas fa-check-circle me-1"></i>
+                                    Box: <span id="trackerBoxCoords">-</span>
+                                </div>
+                            </div>
+
+                            <!-- Confidence -->
+                            <div id="trackerConfPanel" class="d-none mb-3">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-sliders-h me-1 text-primary"></i>Confidence Threshold
+                                </label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="range" id="trackerConfidence" min="0.05" max="0.95"
+                                           step="0.05" value="0.25" class="form-range flex-grow-1">
+                                    <span id="trackerConfidenceValue" class="text-muted small">0.25</span>
+                                </div>
+                            </div>
+
+                            <!-- Quality -->
+                            <div id="trackerQualPanel" class="d-none mb-3">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-tachometer-alt me-1 text-primary"></i>Processing Quality
+                                </label>
+                                <select id="trackerQuality" class="form-select form-select-sm">
+                                    <option value="75">High (75%)</option>
+                                    <option value="50" selected>Medium (50%)</option>
+                                    <option value="25">Low (25%)</option>
+                                    <option value="10">Very Low (10%)</option>
+                                </select>
+                            </div>
+
+                            <!-- Track Button -->
+                            <button id="trackObjectBtn" class="btn btn-primary w-100 d-none" disabled>
+                                <i class="fas fa-crosshairs me-2"></i>Track Object
+                            </button>
+
+                            <!-- Progress -->
+                            <div id="trackerProgress" class="d-none mt-3">
+                                <div class="d-flex justify-content-between small text-muted mb-1">
+                                    <span>Processing frames...</span>
+                                    <span>
+                                        Frame <span id="trackerProgFrame">0</span> /
+                                        <span id="trackerProgTotal">0</span>
+                                    </span>
+                                </div>
+                                <div class="progress" style="height:20px">
+                                    <div id="trackerProgressBar"
+                                         class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                                         role="progressbar" style="width:0%">0%</div>
+                                </div>
+                            </div>
+
+                            <!-- Stats after tracking -->
+                            <div id="trackerStats" class="d-none mt-3">
+                                <div class="card bg-light border-0">
+                                    <div class="card-body py-2 small">
+                                        <div class="row text-center">
+                                            <div class="col-4">
+                                                <strong>Frames Tracked</strong><br>
+                                                <span id="trackerStatFrames" class="text-primary">-</span>
+                                            </div>
+                                            <div class="col-4">
+                                                <strong>Time</strong><br>
+                                                <span id="trackerStatTime" class="text-primary">-</span>
+                                            </div>
+                                            <div class="col-4">
+                                                <strong>Found</strong><br>
+                                                <span id="trackerStatFound" class="text-success">-</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Frame Preview & Tracked Video -->
+                <div class="col-lg-7">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-film me-2 text-primary"></i>Frame Preview & Tracking Result
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Frame selector canvas (for drawing bbox) -->
+                            <div id="trackerFramePreview" class="d-none mb-3">
+                                <div class="text-muted small mb-1">
+                                    <i class="fas fa-draw-polygon me-1"></i>
+                                    Draw a box around the object you want to track:
+                                </div>
+                                <div class="canvas-wrapper" style="position:relative;display:inline-block;width:100%">
+                                    <canvas id="trackerSelectCanvas"
+                                            style="cursor:crosshair;display:block;max-width:100%;border:2px solid #dee2e6;border-radius:8px">
+                                    </canvas>
+                                </div>
+                            </div>
+
+                            <!-- Tracking playback -->
+                            <div id="trackerPlayback" class="d-none">
+                                <div class="canvas-wrapper" style="position:relative;display:inline-block;width:100%">
+                                    <canvas id="trackerResultCanvas"
+                                            style="display:block;max-width:100%;border-radius:8px;background:#000">
+                                    </canvas>
+                                </div>
+
+                                <!-- Playback Controls -->
+                                <div class="video-controls mt-2 p-2 rounded bg-light">
+                                    <div class="d-flex align-items-center gap-2 mb-2">
+                                        <button id="trackerPlayBtn" class="btn btn-sm btn-success">
+                                            <i class="fas fa-play"></i>
+                                        </button>
+                                        <button id="trackerPauseBtn" class="btn btn-sm btn-secondary">
+                                            <i class="fas fa-pause"></i>
+                                        </button>
+                                        <input type="range" id="trackerPlaybackSlider" class="form-range flex-grow-1"
+                                               min="0" value="0" step="1">
+                                        <small class="text-muted" style="white-space:nowrap">
+                                            <span id="trackerPlayFrame">0</span> /
+                                            <span id="trackerPlayTotal">0</span>
+                                        </small>
+                                    </div>
+                                    <!-- Opacity -->
+                                    <div class="d-flex align-items-center gap-2">
+                                        <small class="text-muted">Mask Opacity:</small>
+                                        <input type="range" id="trackerMaskOpacity" min="0" max="1"
+                                               step="0.1" value="0.6" class="form-range flex-grow-1">
+                                        <small id="trackerMaskOpacityVal" class="text-muted">0.6</small>
+                                    </div>
+                                </div>
+
+                                <!-- Tracking Info per Frame -->
+                                <div id="trackerFrameInfo" class="mt-2 small text-muted"></div>
+                            </div>
+
+                            <!-- Empty state -->
+                            <div id="trackerEmpty" class="text-center py-5 text-muted">
+                                <i class="fas fa-crosshairs fa-3x mb-3 opacity-25"></i>
+                                <p>Upload a video and draw a box around an object to start tracking</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End Object Tracker Section -->
+
+        <!-- Live Camera Detection Section -->
+        <div id="live-camera-section" class="mode-section d-none">
+            <div class="row g-4">
+                <!-- Left Panel: Camera Controls -->
+                <div class="col-lg-4">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-header bg-white border-bottom">
+                            <h5 class="mb-0">
+                                <i class="fas fa-camera me-2 text-primary"></i>Live Camera Detection
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Instructions -->
+                            <div class="alert alert-info mb-3">
+                                <h6 class="alert-heading">
+                                    <i class="fas fa-info-circle me-1"></i>How to Use
+                                </h6>
+                                <ol class="mb-0 small">
+                                    <li>Enter objects to detect (e.g., "person, cup")</li>
+                                    <li>Click <strong>Start Camera</strong> to begin</li>
+                                    <li>Detection runs continuously on each frame</li>
+                                    <li>Adjust quality for speed vs accuracy tradeoff</li>
+                                </ol>
+                            </div>
+
+                            <!-- Text Prompt -->
+                            <div class="mb-3">
+                                <label for="liveTextPrompt" class="form-label fw-bold">Objects to Detect</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                    <input type="text" class="form-control" id="liveTextPrompt"
+                                           placeholder="e.g., person, car, dog...">
+                                </div>
+                                <small class="text-muted">Separate multiple objects with commas</small>
+                            </div>
+
+                            <!-- Confidence -->
+                            <div class="mb-3">
+                                <label for="liveConfidenceSlider" class="form-label fw-bold">
+                                    Confidence: <strong id="liveConfidenceValue">0.25</strong>
+                                </label>
+                                <input type="range" class="form-range" id="liveConfidenceSlider"
+                                       min="0.05" max="0.90" step="0.05" value="0.25">
+                            </div>
+
+                            <!-- Quality Scale -->
+                            <div class="mb-3">
+                                <label for="liveQualitySelect" class="form-label fw-bold">
+                                    <i class="fas fa-compress me-1"></i>Frame Quality
+                                </label>
+                                <select class="form-select" id="liveQualitySelect">
+                                    <option value="100">Full (100%) - Slowest</option>
+                                    <option value="75">High (75%)</option>
+                                    <option value="50" selected>Medium (50%) - Recommended</option>
+                                    <option value="25">Low (25%) - Fastest</option>
+                                </select>
+                                <small class="text-muted">Lower quality = faster detection</small>
+                            </div>
+
+                            <!-- Camera Selection -->
+                            <div class="mb-3">
+                                <label for="liveCameraSelect" class="form-label fw-bold">
+                                    <i class="fas fa-video me-1"></i>Camera
+                                </label>
+                                <select class="form-select" id="liveCameraSelect">
+                                    <option value="">Default Camera</option>
+                                </select>
+                            </div>
+
+                            <!-- Controls -->
+                            <div class="d-flex gap-2 mb-3">
+                                <button id="liveStartBtn" class="btn btn-success flex-fill">
+                                    <i class="fas fa-play me-1"></i>Start Camera
+                                </button>
+                                <button id="liveStopBtn" class="btn btn-danger flex-fill d-none">
+                                    <i class="fas fa-stop me-1"></i>Stop
+                                </button>
+                            </div>
+
+                            <!-- Position Tracker Mode -->
+                            <div class="mb-3">
+                                <label class="form-label fw-bold" for="liveGridMode">
+                                    <i class="fas fa-crosshairs me-1"></i>Position Tracker
+                                </label>
+                                <select class="form-select form-select-sm" id="liveGridMode">
+                                    <option value="off">Off</option>
+                                    <option value="3">3 x 3</option>
+                                    <option value="10">10 x 10</option>
+                                    <option value="20">20 x 20</option>
+                                </select>
+                                <div><small class="text-muted">Track object positions on a grid overlay</small></div>
+                            </div>
+
+                            <!-- Live Stats -->
+                            <div id="liveStats" class="d-none">
+                                <div class="card bg-light border-0">
+                                    <div class="card-body py-2 small">
+                                        <div class="row text-center">
+                                            <div class="col-4">
+                                                <strong>FPS</strong><br>
+                                                <span id="liveFpsDisplay" class="text-primary fw-bold">-</span>
+                                            </div>
+                                            <div class="col-4">
+                                                <strong>Objects</strong><br>
+                                                <span id="liveObjectCount" class="text-success fw-bold">0</span>
+                                            </div>
+                                            <div class="col-4">
+                                                <strong>Latency</strong><br>
+                                                <span id="liveLatency" class="text-info fw-bold">-</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Camera Feed + Detection Overlay -->
+                <div class="col-lg-8">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-eye me-2 text-primary"></i>Camera Feed
+                            </h5>
+                            <span id="liveStatusBadge" class="badge bg-secondary">
+                                <i class="fas fa-circle me-1"></i>Inactive
+                            </span>
+                        </div>
+                        <div class="card-body p-0">
+                            <!-- Camera Container -->
+                            <div id="liveCameraContainer" class="live-camera-container">
+                                <!-- Video element (source for frame capture) -->
+                                <video id="liveVideo" autoplay playsinline muted
+                                       style="width:100%;display:block;background:#1a1a2e;"></video>
+                                <!-- Overlay canvas for bounding boxes -->
+                                <canvas id="liveOverlayCanvas"
+                                        style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></canvas>
+                                <!-- FPS overlay -->
+                                <div id="liveFpsOverlay" class="live-fps-overlay d-none">
+                                    <span id="liveFpsOverlayText">0.0 FPS</span>
+                                </div>
+                                <!-- Click-to-track hint -->
+                                <div id="liveTrackHint" class="live-track-hint d-none">
+                                    <i class="fas fa-mouse-pointer me-1"></i>Click an object to track it
+                                </div>
+                                <!-- Inactive placeholder -->
+                                <div id="livePlaceholder" class="text-center py-5">
+                                    <i class="fas fa-camera fa-4x text-muted mb-3 opacity-25"></i>
+                                    <p class="text-muted">Enter a detection prompt and click Start Camera</p>
+                                </div>
+                            </div>
+
+                            <!-- Detected Objects List -->
+                            <div id="liveObjectsList" class="p-3 d-none">
+                                <h6 class="fw-bold mb-2">
+                                    <i class="fas fa-list me-1"></i>Detected Objects
+                                </h6>
+                                <div id="liveObjectsListContent" class="d-flex flex-wrap gap-2">
+                                </div>
+                            </div>
+
+                            <!-- Position Tracker Panel -->
+                            <div id="livePositionPanel" class="p-3 d-none">
+                                <h6 class="fw-bold mb-2">
+                                    <i class="fas fa-crosshairs me-1"></i>Position Tracker
+                                </h6>
+                                <div class="row g-3">
+                                    <div id="livePositionGridCol" class="col-5">
+                                        <div id="livePositionGrid" class="live-position-grid"></div>
+                                    </div>
+                                    <div id="livePositionTextCol" class="col-7">
+                                        <textarea id="livePositionText" class="form-control live-position-text"
+                                                  rows="5" readonly placeholder="No objects tracked"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- End Live Camera Section -->
+
+        <!-- Statistics Panel (Bottom) -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h6 class="card-title mb-3">
+                            <i class="fas fa-chart-line me-2 text-primary"></i>Session Statistics
+                        </h6>
+                        <div class="row text-center g-4">
+                            <div class="col-md-3">
+                                <div class="stat-card">
+                                    <i class="fas fa-clock fa-2x text-primary mb-2"></i>
+                                    <h4 class="mb-0" id="stat-proc-time">-</h4>
+                                    <small class="text-muted">Processing Time</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="stat-card">
+                                    <i class="fas fa-bullseye fa-2x text-success mb-2"></i>
+                                    <h4 class="mb-0" id="stat-obj-count">-</h4>
+                                    <small class="text-muted">Objects Detected</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="stat-card">
+                                    <i class="fas fa-percentage fa-2x text-info mb-2"></i>
+                                    <h4 class="mb-0" id="stat-avg-conf">-</h4>
+                                    <small class="text-muted">Avg Confidence</small>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="stat-card">
+                                    <i class="fas fa-brain fa-2x text-warning mb-2"></i>
+                                    <h4 class="mb-0">SAM3</h4>
+                                    <small class="text-muted">AI Model</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="errorToast" class="toast align-items-center text-bg-danger border-0" role="alert">
+            <div class="d-flex">
+                <div class="toast-body" id="toastMessage">
+                    Error message here
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Custom Dashboard JS -->
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

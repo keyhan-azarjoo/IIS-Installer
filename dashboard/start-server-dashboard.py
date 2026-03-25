@@ -53,6 +53,8 @@ SYNC_DASHBOARD_FILES = [
     "dashboard/ui/pages/python/python-docker.js",
     "dashboard/ui/pages/python/python-iis.js",
     "dashboard/ui/pages/website/website.js",
+    "dashboard/ui/pages/ai/ai.js",
+    "dashboard/ui/pages/ai/sam3.js",
     "dashboard/ui/pages/ssl/ssl.js",
     "dashboard/ui/pages/files/files.js",
     "dashboard/ui/app.js",

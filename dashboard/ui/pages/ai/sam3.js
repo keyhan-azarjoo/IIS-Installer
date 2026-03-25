@@ -1,0 +1,270 @@
+(() => {
+  const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
+  ns.pages = ns.pages || {};
+
+  ns.pages["ai-sam3"] = function renderAiSam3Page(p) {
+    const {
+      Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip, Alert,
+      ActionCard, NavCard,
+      cfg, run, selectableIps, serviceBusy,
+      isScopeLoading, scopeErrors,
+      isServiceRunningStatus, formatServiceState, onServiceAction,
+      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+      setPage, setInfoMessage,
+      sam3Service, sam3PageServices,
+      loadSam3Info, loadSam3Services,
+    } = p;
+
+    const sam3 = sam3Service || {};
+    const services = sam3PageServices || [];
+    const httpUrl = String(sam3.http_url || "").trim();
+    const httpsUrl = String(sam3.https_url || "").trim();
+    const httpPort = String(sam3.http_port || "5000").trim();
+    const httpsPort = String(sam3.https_port || "5443").trim();
+    const hostIp = String(sam3.host || "").trim();
+    const device = String(sam3.device || "cpu").trim();
+    const modelReady = !!sam3.model_downloaded;
+    const deployMode = String(sam3.deploy_mode || "os").trim();
+    const authEnabled = !!sam3.auth_enabled;
+    const authUser = String(sam3.auth_username || "").trim();
+    const useOsAuth = !!sam3.use_os_auth;
+    const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
+
+    // Build GPU options from detected GPUs
+    const gpuOptions = [{ label: "Auto-detect", value: "auto" }, { label: "CPU Only", value: "cpu" }];
+    if (sam3.detected_gpus && Array.isArray(sam3.detected_gpus)) {
+      sam3.detected_gpus.forEach((gpu) => {
+        if (gpu.type === "cuda") gpuOptions.push({ label: `NVIDIA: ${gpu.name} (${gpu.vram_gb} GB)`, value: "cuda" });
+        else if (gpu.type === "rocm") gpuOptions.push({ label: `AMD: ${gpu.name}`, value: "rocm" });
+        else if (gpu.type === "mps") gpuOptions.push({ label: `Apple Silicon: ${gpu.name}`, value: "mps" });
+        else if (gpu.type === "tpu") gpuOptions.push({ label: "Google TPU", value: "tpu" });
+      });
+    } else {
+      gpuOptions.push({ label: "NVIDIA CUDA", value: "cuda" });
+      gpuOptions.push({ label: "AMD ROCm", value: "rocm" });
+      if (cfg.os === "darwin") gpuOptions.push({ label: "Apple Silicon (MPS)", value: "mps" });
+    }
+
+    const deployModeOptions = [
+      { label: "OS Service", value: "os" },
+      { label: "Docker", value: "docker" },
+    ];
+    if (cfg.os === "windows") {
+      deployModeOptions.push({ label: "IIS Reverse Proxy", value: "iis" });
+    }
+
+    return (
+      <Grid container spacing={2}>
+        {/* ── Page Description ──────────────────────────────────── */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5, color: "#6d28d9" }}>
+                SAM3 - Segment Anything Model 3
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Deploy Meta's Segment Anything Model 3 for advanced object detection and segmentation.
+                Supports text, point, bounding-box, and visual exemplar prompts. Includes video processing
+                with object tracking, live camera detection, and multiple export formats.
+              </Typography>
+              <Alert severity="info" sx={{ mt: 1, borderRadius: 2 }}>
+                SAM3 requires ~4 GB disk space for the model file and benefits greatly from a dedicated GPU.
+                CPU-only mode is supported but will be significantly slower. The model file (sam3.pt) can be
+                downloaded after installation from this page.
+              </Alert>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* ── Install SAM3 ─────────────────────────────────────── */}
+        <Grid item xs={12} md={8}>
+          <ActionCard
+            title={`Install SAM3 (${installOsLabel})`}
+            description="Install SAM3 AI detection service with GPU support, authentication, and HTTPS. Select your preferred deployment mode and GPU device."
+            action={cfg.os === "windows" ? "/run/sam3_windows" : "/run/sam3_linux"}
+            fields={[
+              {
+                name: "SAM3_HOST_IP",
+                label: "Host IP",
+                type: "select",
+                options: selectableIps,
+                defaultValue: hostIp,
+                required: true,
+                disabled: selectableIps.length === 0,
+                placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
+              },
+              { name: "SAM3_HTTP_PORT", label: "HTTP Port", defaultValue: httpPort || "5000", required: true, checkPort: true },
+              { name: "SAM3_HTTPS_PORT", label: "HTTPS Port", defaultValue: httpsPort || "5443", required: true, checkPort: true, certSelect: "SSL_CERT_NAME" },
+              { name: "SAM3_DOMAIN", label: "Domain (optional)", defaultValue: sam3.domain || "", placeholder: "e.g. sam3.example.com" },
+              {
+                name: "SAM3_GPU_DEVICE",
+                label: "GPU / Accelerator",
+                type: "select",
+                options: gpuOptions.map((o) => typeof o === "string" ? o : o.value),
+                optionLabels: gpuOptions.reduce((acc, o) => { if (typeof o !== "string") acc[o.value] = o.label; return acc; }, {}),
+                defaultValue: device || "auto",
+              },
+              {
+                name: "SAM3_DEPLOY_MODE",
+                label: "Deploy Mode",
+                type: "select",
+                options: deployModeOptions.map((o) => o.value),
+                optionLabels: deployModeOptions.reduce((acc, o) => { acc[o.value] = o.label; return acc; }, {}),
+                defaultValue: deployMode || "os",
+              },
+              { name: "SAM3_USERNAME", label: "Username", defaultValue: authUser || "", placeholder: "Leave empty for no auth" },
+              { name: "SAM3_PASSWORD", label: "Password", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
+              {
+                name: "SAM3_USE_OS_AUTH",
+                label: "Use OS Login",
+                type: "select",
+                options: ["no", "yes"],
+                defaultValue: useOsAuth ? "yes" : "no",
+              },
+              {
+                name: "SAM3_DOWNLOAD_MODEL",
+                label: "Download Model Now (~3.4 GB)",
+                type: "select",
+                options: ["no", "yes"],
+                defaultValue: "no",
+              },
+            ]}
+            onRun={run}
+            color="#7c3aed"
+          />
+        </Grid>
+
+        {/* ── Status Card ──────────────────────────────────────── */}
+        <Grid item xs={12} md={4}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 1, color: "#7c3aed" }}>SAM3 Status</Typography>
+              <Typography variant="body2">Device: <b>{device}</b></Typography>
+              <Typography variant="body2">Model: <Chip size="small" label={modelReady ? "Ready" : "Not Downloaded"} color={modelReady ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>
+              <Typography variant="body2">Deploy Mode: <b>{deployMode}</b></Typography>
+              <Typography variant="body2">Auth: {authEnabled ? (useOsAuth ? "OS Login" : `User: ${authUser}`) : "Disabled"}</Typography>
+              <Typography variant="body2">Host: {hostIp || "-"}</Typography>
+              <Typography variant="body2">HTTP Port: {httpPort}</Typography>
+              <Typography variant="body2">HTTPS Port: {httpsPort}</Typography>
+              {sam3.detected_gpu_name && <Typography variant="body2">GPU: {sam3.detected_gpu_name}</Typography>}
+              {!!httpUrl && <Typography variant="body2" sx={{ mt: 1, wordBreak: "break-all" }}>HTTP: <a href={httpUrl} target="_blank" rel="noopener">{httpUrl}</a></Typography>}
+              {!!httpsUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>HTTPS: <a href={httpsUrl} target="_blank" rel="noopener">{httpsUrl}</a></Typography>}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* ── Download Model Card ──────────────────────────────── */}
+        <Grid item xs={12} md={6}>
+          <ActionCard
+            title="Download SAM3 Model"
+            description="Download the SAM3 model file (sam3.pt, ~3.4 GB) to the server. This is required before SAM3 can perform detections. The download uses the Ultralytics library."
+            action="/run/sam3_download_model"
+            fields={[]}
+            onRun={run}
+            color="#059669"
+          />
+        </Grid>
+
+        {/* ── Docker Deploy Card ───────────────────────────────── */}
+        <Grid item xs={12} md={6}>
+          <ActionCard
+            title="Deploy SAM3 (Docker)"
+            description="Deploy SAM3 as a Docker container with GPU passthrough. Requires Docker and nvidia-container-toolkit for GPU support."
+            action="/run/sam3_docker"
+            fields={[
+              {
+                name: "SAM3_HOST_IP",
+                label: "Host IP",
+                type: "select",
+                options: selectableIps,
+                defaultValue: hostIp,
+                required: true,
+              },
+              { name: "SAM3_HTTP_PORT", label: "HTTP Port", defaultValue: httpPort || "5000", required: true, checkPort: true },
+              { name: "SAM3_HTTPS_PORT", label: "HTTPS Port", defaultValue: httpsPort || "5443", required: true, checkPort: true },
+              {
+                name: "SAM3_GPU_DEVICE",
+                label: "GPU Device",
+                type: "select",
+                options: ["auto", "cpu", "cuda"],
+                defaultValue: device || "auto",
+              },
+              { name: "SAM3_USERNAME", label: "Username", defaultValue: authUser || "", placeholder: "Leave empty for no auth" },
+              { name: "SAM3_PASSWORD", label: "Password", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
+            ]}
+            onRun={run}
+            color="#0891b2"
+          />
+        </Grid>
+
+        {/* ── SAM3 Services List ───────────────────────────────── */}
+        <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                <Typography variant="h6" fontWeight={800}>SAM3 Services</Typography>
+                <Box sx={{ flexGrow: 1 }} />
+                {!!httpUrl && (
+                  <Button variant="contained" disabled={serviceBusy || !modelReady} onClick={() => window.open(httpUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}>
+                    Open SAM3 Dashboard
+                  </Button>
+                )}
+                <Button
+                  variant="outlined"
+                  disabled={isScopeLoading("sam3")}
+                  onClick={() => { if (loadSam3Info && loadSam3Info.current) loadSam3Info.current(); if (loadSam3Services && loadSam3Services.current) loadSam3Services.current(); }}
+                  sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+                >
+                  {isScopeLoading("sam3") ? "Refreshing..." : "Refresh"}
+                </Button>
+              </Stack>
+              {scopeErrors.sam3 && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.sam3}</Alert>}
+              <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
+                {services.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    No SAM3 services deployed yet. Use the Install card above to deploy SAM3.
+                  </Typography>
+                )}
+                {services.map((svc) => (
+                  <Paper key={`sam3-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                    <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                      <Box sx={{ minWidth: 250 }}>
+                        <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
+                        {svc.display_name && <Typography variant="caption" color="text.secondary">{svc.display_name}</Typography>}
+                        {renderServiceUrls(svc)}
+                        {renderServicePorts(svc)}
+                      </Box>
+                      {renderServiceStatus(svc)}
+                      <Box sx={{ flexGrow: 1 }} />
+                      {renderFolderIcon(svc)}
+                      {svc.manageable !== false && (
+                        <>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                            disabled={serviceBusy}
+                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                          </Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
+                        </>
+                      )}
+                      {svc.deletable && (
+                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
+                          Delete
+                        </Button>
+                      )}
+                    </Stack>
+                  </Paper>
+                ))}
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
+  };
+})();
