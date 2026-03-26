@@ -8140,10 +8140,11 @@ def run_sam3_download_model(form=None, live_cb=None):
                     if live_cb:
                         live_cb(f"[WARN] Could not remove old model after {attempt+1} attempts: {ex}\n")
         if not deleted:
-            # Download to a temp path, then swap later
+            # Download to a temp path, then swap after download
             new_path = str(target_model) + ".new"
             if live_cb:
                 live_cb(f"Downloading to temporary file: {new_path}\n")
+            original_model = target_model
             target_model = Path(new_path)
 
     # Ensure models directory exists
@@ -8194,6 +8195,26 @@ def run_sam3_download_model(form=None, live_cb=None):
             live_cb(f"[ERROR] {output}\n")
 
     if code == 0 and target_model.exists() and target_model.stat().st_size > 1000000:
+        # If downloaded to .new file, swap with original
+        if str(target_model).endswith(".new"):
+            original = Path(str(target_model)[:-4])  # remove .new
+            if live_cb:
+                live_cb(f"Replacing old model with new download...\n")
+            import time as _time
+            # Stop service again to release file lock for swap
+            run_sam3_stop(live_cb=live_cb)
+            _time.sleep(3)
+            try:
+                if original.exists():
+                    original.unlink()
+                os.replace(str(target_model), str(original))
+                target_model = original
+                if live_cb:
+                    live_cb(f"Model replaced successfully.\n")
+            except Exception as swap_ex:
+                if live_cb:
+                    live_cb(f"[WARN] Could not swap files: {swap_ex}. Using .new file.\n")
+
         state["model_downloaded"] = True
         state["model_path"] = str(target_model)
         state["install_dir"] = install_dir
