@@ -8084,36 +8084,48 @@ def run_sam3_download_model(form=None, live_cb=None):
     target_model.parent.mkdir(parents=True, exist_ok=True)
 
     if live_cb:
-        live_cb(f"Downloading SAM3 model from:\n  {model_url}\n  to: {target_model}\nThis may take a while (~3.4 GB)...\n")
+        live_cb(f"Downloading SAM3 model from:\n  {model_url}\n  to: {target_model}\n")
 
-    # Download using wget or curl (no Python/OpenCV dependency needed)
-    # Build auth header if token provided
-    auth_header = f"Authorization: Bearer {dl_token}" if dl_token else ""
-
-    if os.name == "nt":
-        # Windows: use PowerShell
-        headers_arg = ""
-        if auth_header:
-            headers_arg = f' -Headers @{{"Authorization"="Bearer {dl_token}"}}'
-        ps_cmd = f'Invoke-WebRequest -Uri "{model_url}" -OutFile "{target_model}" -UseBasicParsing{headers_arg}'
-        code, output = run_process(
-            ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
-            live_cb=live_cb,
-        )
-    elif command_exists("wget"):
-        cmd = ["wget", "-O", str(target_model), "--progress=dot:giga"]
-        if auth_header:
-            cmd += ["--header", auth_header]
-        cmd.append(model_url)
-        code, output = run_process(cmd, live_cb=live_cb)
-    elif command_exists("curl"):
-        cmd = ["curl", "-fSL", "-o", str(target_model), "--progress-bar"]
-        if auth_header:
-            cmd += ["-H", auth_header]
-        cmd.append(model_url)
-        code, output = run_process(cmd, live_cb=live_cb)
-    else:
-        return 1, "Neither wget nor curl is available. Install one and retry."
+    # Download with progress using Python (works on all platforms, shows progress)
+    try:
+        import urllib.request
+        req = urllib.request.Request(model_url, headers={"User-Agent": "ServerInstaller/1.0"})
+        if dl_token:
+            req.add_header("Authorization", f"Bearer {dl_token}")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            total = int(resp.headers.get("Content-Length", 0))
+            total_mb = total / (1024 * 1024) if total else 0
+            if live_cb:
+                size_str = f"{total_mb:.0f} MB" if total else "unknown size"
+                live_cb(f"File size: {size_str}. Downloading...\n")
+            downloaded = 0
+            last_pct = -1
+            with open(str(target_model), "wb") as fh:
+                while True:
+                    chunk = resp.read(1024 * 1024)  # 1 MB chunks
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if total and live_cb:
+                        pct = int(downloaded * 100 / total)
+                        if pct != last_pct and pct % 5 == 0:
+                            dl_mb = downloaded / (1024 * 1024)
+                            remain_mb = (total - downloaded) / (1024 * 1024)
+                            live_cb(f"  {pct}%  ({dl_mb:.0f} MB / {total_mb:.0f} MB)  remaining: {remain_mb:.0f} MB\n")
+                            last_pct = pct
+                    elif live_cb and downloaded % (50 * 1024 * 1024) < (1024 * 1024):
+                        dl_mb = downloaded / (1024 * 1024)
+                        live_cb(f"  Downloaded: {dl_mb:.0f} MB...\n")
+        code = 0
+        output = f"Download complete: {downloaded / (1024*1024):.0f} MB"
+    except Exception as ex:
+        code = 1
+        output = f"Download failed: {ex}"
+        if target_model.exists() and target_model.stat().st_size < 1000000:
+            target_model.unlink(missing_ok=True)
+        if live_cb:
+            live_cb(f"[ERROR] {output}\n")
 
     if code == 0 and target_model.exists() and target_model.stat().st_size > 1000000:
         state["model_downloaded"] = True
