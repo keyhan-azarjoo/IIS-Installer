@@ -434,18 +434,26 @@ EOF
     echo "[INFO] SAM3 systemd service enabled and started."
 fi
 
-# ── Nginx HTTPS Reverse Proxy ─────────────────────────────
+# ── Nginx HTTPS Reverse Proxy (optional, non-fatal) ───────
 
-if [ "$(uname -s)" != "Darwin" ] && has_cmd nginx; then
+setup_nginx_proxy() {
+    if [ "$(uname -s)" = "Darwin" ] || ! has_cmd nginx; then
+        return 0
+    fi
+    if [ -z "${HTTPS_PORT}" ]; then
+        echo "[INFO] No HTTPS port configured, skipping Nginx proxy."
+        return 0
+    fi
+
     echo "[INFO] Configuring Nginx HTTPS reverse proxy for SAM3..."
 
-    AUTH_BLOCK=""
+    local auth_block=""
     if [ -f "${AUTH_FILE}" ]; then
-        AUTH_BLOCK="    auth_basic \"SAM3 Login\";
+        auth_block="    auth_basic \"SAM3 Login\";
     auth_basic_user_file ${AUTH_FILE};"
     fi
 
-    cat > "${NGINX_CONF}" <<EOF
+    cat > "${NGINX_CONF}" <<NGINXEOF
 server {
     listen ${HTTPS_PORT} ssl;
     server_name _;
@@ -453,7 +461,7 @@ server {
     ssl_certificate ${CERT_FILE};
     ssl_certificate_key ${KEY_FILE};
 
-${AUTH_BLOCK}
+${auth_block}
 
     client_max_body_size 5g;
 
@@ -475,20 +483,21 @@ ${AUTH_BLOCK}
         proxy_send_timeout 600;
     }
 }
-EOF
+NGINXEOF
 
     if nginx -t >/dev/null 2>&1; then
         systemctl enable nginx >/dev/null 2>&1 || true
-        systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx
+        systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
         echo "[INFO] Nginx HTTPS proxy configured on port ${HTTPS_PORT}."
     else
-        echo "[WARN] Nginx config test failed. HTTPS proxy may not work."
-        echo "[WARN] Check: nginx -t    and   journalctl -xeu nginx.service"
-        # Remove broken config so nginx can still run
+        echo "[WARN] Nginx config test failed (port ${HTTPS_PORT} may conflict with another service)."
+        echo "[WARN] SAM3 HTTP is still available at http://${HOST_IP:-localhost}:${HTTP_PORT}"
         rm -f "${NGINX_CONF}"
         systemctl reload nginx >/dev/null 2>&1 || true
     fi
-fi
+}
+
+setup_nginx_proxy || true
 
 # ── Open Firewall ──────────────────────────────────────────
 
@@ -509,6 +518,18 @@ fi
 
 # ── Write State File ──────────────────────────────────────
 
+# Determine auth and HTTPS state
+HAS_AUTH="false"
+if [ -n "${USERNAME}" ]; then HAS_AUTH="true"; fi
+HAS_OS_AUTH="false"
+if echo "${USE_OS_AUTH}" | grep -qiE '^(1|true|yes)$' 2>/dev/null; then HAS_OS_AUTH="true"; HAS_AUTH="true"; fi
+
+# Build URLs - only include HTTPS if nginx conf exists
+HTTP_URL=""
+HTTPS_URL=""
+if [ -n "${HTTP_PORT}" ]; then HTTP_URL="http://${HOST_IP}:${HTTP_PORT}"; fi
+if [ -n "${HTTPS_PORT}" ] && [ -f "${NGINX_CONF}" ]; then HTTPS_URL="https://${HOST_IP}:${HTTPS_PORT}"; fi
+
 cat > "${STATE_FILE}" <<EOF
 {
   "service_name": $(json_escape "${SAM3_SERVICE_NAME}"),
@@ -525,12 +546,12 @@ cat > "${STATE_FILE}" <<EOF
   "domain": $(json_escape "${DOMAIN}"),
   "http_port": $(json_escape "${HTTP_PORT}"),
   "https_port": $(json_escape "${HTTPS_PORT}"),
-  "http_url": $(json_escape "http://${HOST_IP}:${HTTP_PORT}"),
-  "https_url": $(json_escape "https://${HOST_IP}:${HTTPS_PORT}"),
+  "http_url": $(json_escape "${HTTP_URL}"),
+  "https_url": $(json_escape "${HTTPS_URL}"),
   "deploy_mode": $(json_escape "${DEPLOY_MODE}"),
-  "auth_enabled": $([ -n "${USERNAME}" ] || echo "${USE_OS_AUTH}" | grep -qiE '^(1|true|yes)$' && echo "true" || echo "false"),
+  "auth_enabled": ${HAS_AUTH},
   "auth_username": $(json_escape "${USERNAME}"),
-  "use_os_auth": $(echo "${USE_OS_AUTH}" | grep -qiE '^(1|true|yes)$' && echo "true" || echo "false"),
+  "use_os_auth": ${HAS_OS_AUTH},
   "cert_path": $(json_escape "${CERT_FILE}"),
   "key_path": $(json_escape "${KEY_FILE}"),
   "log_path": $(json_escape "${LOG_FILE}"),
@@ -544,8 +565,8 @@ echo "============================================================"
 echo "SAM3 Installation Complete"
 echo "============================================================"
 echo "Device: ${SELECTED_DEVICE}"
-echo "HTTP:   http://${HOST_IP}:${HTTP_PORT}"
-echo "HTTPS:  https://${HOST_IP}:${HTTPS_PORT}"
+if [ -n "${HTTP_URL}" ]; then echo "HTTP:   ${HTTP_URL}"; fi
+if [ -n "${HTTPS_URL}" ]; then echo "HTTPS:  ${HTTPS_URL}"; fi
 echo "Mode:   ${DEPLOY_MODE}"
 if [ -f "${MODEL_PATH}" ]; then
     echo "Model:  Ready"
