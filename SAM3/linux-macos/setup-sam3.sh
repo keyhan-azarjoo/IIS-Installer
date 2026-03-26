@@ -278,9 +278,7 @@ echo "[INFO] Installing CLIP..."
 
 # ── Modify app.py for configurable model path ─────────────
 
-sed -i.bak 's|MODEL_PATH = os.path.join(BASE_DIR, "sam3.pt")|MODEL_PATH = os.environ.get("SAM3_MODEL_PATH", os.path.join(BASE_DIR, "sam3.pt"))|' "${INSTALL_DIR}/app.py" 2>/dev/null || true
-sed -i.bak 's|DEVICE = get_best_device()|DEVICE = os.environ.get("SAM3_DEVICE", get_best_device())|' "${INSTALL_DIR}/app.py" 2>/dev/null || true
-rm -f "${INSTALL_DIR}/app.py.bak"
+# app.py now natively reads SAM3_MODEL_PATH and SAM3_DEVICE env vars - no patching needed
 
 # ── SSL Certificates ──────────────────────────────────────
 

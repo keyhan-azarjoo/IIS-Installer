@@ -50,21 +50,51 @@ app = Flask(
 # ====================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "sam3.pt")
+MODEL_PATH = os.environ.get("SAM3_MODEL_PATH", os.path.join(BASE_DIR, "sam3.pt"))
+# Also check models/ subdirectory as fallback
+if not os.path.exists(MODEL_PATH):
+    alt = os.path.join(BASE_DIR, "models", "sam3.pt")
+    if os.path.exists(alt):
+        MODEL_PATH = alt
 TEMP_VIDEO_DIR = os.path.join(BASE_DIR, "temp", "videos")
-DEVICE = get_best_device()
+DEVICE = os.environ.get("SAM3_DEVICE", get_best_device())
 
 # Create detector instance (loads model once at startup)
-detector = SAM3Detector(
-    model_path=MODEL_PATH,
-    device=DEVICE,
-    default_conf=0.25
-)
+# If model file is missing, detector will fail gracefully on first request
+detector = None
+if os.path.exists(MODEL_PATH):
+    try:
+        detector = SAM3Detector(
+            model_path=MODEL_PATH,
+            device=DEVICE,
+            default_conf=0.25
+        )
+        print(f"Model loaded: {MODEL_PATH} on {DEVICE}")
+    except Exception as e:
+        print(f"Warning: Could not load model: {e}")
+else:
+    print(f"Warning: Model file not found at {MODEL_PATH}. Download it first.")
 
 
 # ====================================
 # Routes
 # ====================================
+
+def _ensure_detector():
+    """Check if detector is loaded; return error response if not."""
+    global detector
+    if detector is not None:
+        return None
+    # Try to load now (model may have been downloaded after startup)
+    if os.path.exists(MODEL_PATH):
+        try:
+            detector = SAM3Detector(model_path=MODEL_PATH, device=DEVICE, default_conf=0.25)
+            print(f"Model loaded on demand: {MODEL_PATH}")
+            return None
+        except Exception as e:
+            return jsonify({"error": f"Model loading failed: {e}"}), 500
+    return jsonify({"error": f"Model not found at {MODEL_PATH}. Download sam3.pt first."}), 503
+
 
 @app.route("/", methods=["GET"])
 def index():
@@ -89,6 +119,8 @@ def detect():
         JSON response with individual object layers and metadata
     """
     try:
+        err = _ensure_detector()
+        if err: return err
         # Get form data
         file = request.files.get("image")
         text_prompt = request.form.get("text_prompt", "").strip()
@@ -153,6 +185,8 @@ def detect_live():
         JSON with objects (bbox + label + confidence only), processing_time
     """
     try:
+        err = _ensure_detector()
+        if err: return err
         file = request.files.get("image")
         text_prompt = request.form.get("text_prompt", "").strip()
         confidence = float(request.form.get("confidence", 0.25))
@@ -243,6 +277,8 @@ def detect_point():
         JSON response with individual object layers and metadata
     """
     try:
+        err = _ensure_detector()
+        if err: return err
         import json
 
         # Get form data
@@ -315,6 +351,8 @@ def detect_box():
         - confidence: Detection confidence threshold (optional)
     """
     try:
+        err = _ensure_detector()
+        if err: return err
         import json
 
         file = request.files.get("image")
@@ -371,6 +409,8 @@ def detect_exemplar():
         - confidence: Detection confidence threshold (optional)
     """
     try:
+        err = _ensure_detector()
+        if err: return err
         import json
 
         file = request.files.get("image")

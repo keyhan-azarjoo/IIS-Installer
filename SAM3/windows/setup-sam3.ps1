@@ -319,13 +319,7 @@ if __name__ == '__main__':
 "@
 Set-Content -Path $startupScript -Value $startupContent -Encoding UTF8
 
-# ── Modify app.py to use configurable model path ──────────
-
-$appPy = Join-Path $installDir "app.py"
-$appContent = Get-Content -Path $appPy -Raw
-$appContent = $appContent -replace 'MODEL_PATH = os\.path\.join\(BASE_DIR, "sam3\.pt"\)', 'MODEL_PATH = os.environ.get("SAM3_MODEL_PATH", os.path.join(BASE_DIR, "sam3.pt"))'
-$appContent = $appContent -replace "DEVICE = get_best_device\(\)", 'DEVICE = os.environ.get("SAM3_DEVICE", get_best_device())'
-Set-Content -Path $appPy -Value $appContent -Encoding UTF8
+# app.py now natively reads SAM3_MODEL_PATH and SAM3_DEVICE env vars - no patching needed
 
 # ── Create Windows Service (NSSM or native) ───────────────
 
