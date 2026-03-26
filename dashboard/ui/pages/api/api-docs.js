@@ -347,5 +347,66 @@
         ]},
       ],
     },
+
+    tgwui: {
+      title: "Text Generation WebUI API",
+      color: "#7c3aed",
+      description: "Oobabooga's Text Generation WebUI provides an API for text generation, chat, and model management.",
+      baseUrl: "http://{host}:5000",
+      sections: [
+        { name: "Chat & Generate", endpoints: [
+          { method: "POST", path: "/api/v1/chat", description: "Chat completion", body: '{ "messages": [{ "role": "user", "content": "Hello" }], "mode": "chat" }', response: '{ "choices": [{ "message": { "content": "Hi!" } }] }' },
+          { method: "POST", path: "/api/v1/generate", description: "Text generation", body: '{ "prompt": "Once upon a time", "max_tokens": 200 }', response: '{ "results": [{ "text": "..." }] }' },
+        ]},
+        { name: "Model Management", endpoints: [
+          { method: "GET", path: "/api/v1/model", description: "Get current model info", response: '{ "result": "llama-2-7b" }' },
+          { method: "POST", path: "/api/v1/model", description: "Load a model", body: '{ "model_name": "llama-2-7b" }', response: '{ "result": "ok" }' },
+        ]},
+      ],
+    },
+
+    comfyui: {
+      title: "ComfyUI API",
+      color: "#7c3aed",
+      description: "ComfyUI provides a REST API for queuing image generation workflows and retrieving results.",
+      baseUrl: "http://{host}:8188",
+      sections: [
+        { name: "Workflow Execution", endpoints: [
+          { method: "POST", path: "/prompt", description: "Queue a workflow for execution", body: '{ "prompt": { "3": { "class_type": "KSampler", ... } } }', response: '{ "prompt_id": "abc123" }' },
+          { method: "GET", path: "/history/{prompt_id}", description: "Get execution history/results", response: '{ "abc123": { "outputs": { ... } } }' },
+          { method: "GET", path: "/view?filename={name}", description: "Download generated image", response: "image/png" },
+        ]},
+        { name: "System", endpoints: [
+          { method: "GET", path: "/system_stats", description: "Get system stats (GPU, VRAM)", response: '{ "system": { "vram_total": 8589934592 } }' },
+          { method: "GET", path: "/object_info", description: "List available nodes/classes", response: '{ "KSampler": { ... } }' },
+        ]},
+      ],
+    },
+
+    whisper: {
+      title: "Whisper STT API",
+      color: "#0d9488",
+      description: "Whisper speech-to-text API. Upload audio files and receive transcriptions.",
+      baseUrl: "http://{host}:9000",
+      sections: [
+        { name: "Transcription", endpoints: [
+          { method: "POST", path: "/transcribe", description: "Transcribe audio file", body: "multipart/form-data: audio (file)", response: '{ "ok": true, "text": "Hello world", "language": "en" }' },
+          { method: "GET", path: "/health", description: "Health check", response: '{ "ok": true, "status": "healthy", "model": "base" }' },
+        ]},
+      ],
+    },
+
+    piper: {
+      title: "Piper TTS API",
+      color: "#b45309",
+      description: "Piper text-to-speech API. Send text and receive audio.",
+      baseUrl: "http://{host}:5500",
+      sections: [
+        { name: "Speech Synthesis", endpoints: [
+          { method: "POST", path: "/tts", description: "Convert text to speech", body: '{ "text": "Hello world", "voice": "en_US-lessac-medium" }', response: "audio/wav binary" },
+          { method: "GET", path: "/health", description: "Health check", response: '{ "ok": true, "status": "healthy", "voice": "en_US-lessac-medium" }' },
+        ]},
+      ],
+    },
   };
 })();

@@ -113,6 +113,26 @@ SAM3_LINUX_INSTALLER = ROOT / "SAM3" / "linux-macos" / "setup-sam3.sh"
 SAM3_STATE_DIR = SERVER_INSTALLER_DATA / "sam3"
 SAM3_STATE_FILE = SAM3_STATE_DIR / "sam3-state.json"
 SAM3_SYSTEMD_SERVICE = "serverinstaller-sam3"
+
+OLLAMA_STATE_DIR = SERVER_INSTALLER_DATA / "ollama"
+OLLAMA_STATE_FILE = OLLAMA_STATE_DIR / "ollama-state.json"
+OLLAMA_SYSTEMD_SERVICE = "serverinstaller-ollama"
+
+TGWUI_STATE_DIR = SERVER_INSTALLER_DATA / "tgwui"
+TGWUI_STATE_FILE = TGWUI_STATE_DIR / "tgwui-state.json"
+TGWUI_SYSTEMD_SERVICE = "serverinstaller-tgwui"
+
+COMFYUI_STATE_DIR = SERVER_INSTALLER_DATA / "comfyui"
+COMFYUI_STATE_FILE = COMFYUI_STATE_DIR / "comfyui-state.json"
+COMFYUI_SYSTEMD_SERVICE = "serverinstaller-comfyui"
+
+WHISPER_STATE_DIR = SERVER_INSTALLER_DATA / "whisper"
+WHISPER_STATE_FILE = WHISPER_STATE_DIR / "whisper-state.json"
+WHISPER_SYSTEMD_SERVICE = "serverinstaller-whisper"
+
+PIPER_STATE_DIR = SERVER_INSTALLER_DATA / "piper"
+PIPER_STATE_FILE = PIPER_STATE_DIR / "piper-state.json"
+PIPER_SYSTEMD_SERVICE = "serverinstaller-piper"
 JUPYTER_SYSTEMD_SERVICE = "serverinstaller-jupyter.service"
 WINDOWS_LOCALS3_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "install-state.json"
 REPO_RAW_BASE = os.environ.get(
@@ -6979,6 +6999,556 @@ def get_sam3_info():
     return info
 
 
+# ── Generic AI service info helper ──────────────────────────────────────────
+def _get_ai_service_info(state_file, state_dir, systemd_service, display_name, default_port="11434"):
+    """Generic info builder for AI services (Ollama, TGWUI, ComfyUI, Whisper, Piper)."""
+    state = _read_json_file(state_file)
+    default_install_dir = str(state_dir / "app")
+    install_dir = str(state.get("install_dir") or "").strip() or default_install_dir
+    _has_service = bool(state.get("service_name")) and bool(state.get("install_dir") or state.get("installed"))
+    if _has_service and os.name != "nt":
+        _has_service = Path(f"/etc/systemd/system/{systemd_service}.service").exists() or bool(state.get("installed"))
+    elif _has_service and os.name == "nt":
+        _has_service = bool(state.get("install_dir")) and Path(str(state.get("install_dir") or "")).exists() or bool(state.get("installed"))
+    # Also check if the binary exists even without state
+    if not _has_service:
+        bin_name = systemd_service.replace("serverinstaller-", "")
+        if command_exists(bin_name):
+            _has_service = True
+    info = {
+        "installed": _has_service,
+        "service_name": str(state.get("service_name") or systemd_service).strip(),
+        "install_dir": install_dir,
+        "host": str(state.get("host") or "").strip(),
+        "domain": str(state.get("domain") or "").strip(),
+        "http_port": str(state.get("http_port") or default_port).strip(),
+        "https_port": str(state.get("https_port") or "").strip(),
+        "http_url": str(state.get("http_url") or "").strip(),
+        "https_url": str(state.get("https_url") or "").strip(),
+        "deploy_mode": str(state.get("deploy_mode") or "os").strip(),
+        "auth_enabled": bool(state.get("auth_enabled")),
+        "auth_username": str(state.get("auth_username") or "").strip(),
+        "running": bool(state.get("running")),
+        "device": str(state.get("device") or "cpu").strip(),
+        "detected_gpu_name": str(state.get("detected_gpu_name") or "").strip(),
+        "model_size": str(state.get("model_size") or "").strip(),
+        "voice": str(state.get("voice") or "").strip(),
+        "version": str(state.get("version") or "").strip(),
+        "services": [],
+    }
+    # Build URL if not set
+    if not info["http_url"] and info["host"] and info["http_port"]:
+        info["http_url"] = f"http://{info['host']}:{info['http_port']}"
+    elif not info["http_url"] and info["http_port"]:
+        info["http_url"] = f"http://127.0.0.1:{info['http_port']}"
+    # Check systemd service status on Linux
+    if os.name != "nt" and info["installed"] and command_exists("systemctl"):
+        svc_status = _linux_systemd_unit_status(f"{systemd_service}.service")
+        info["running"] = bool(svc_status.get("running"))
+        info["services"].append({
+            "name": systemd_service, "display_name": display_name,
+            "kind": "systemd",
+            "status": "running" if svc_status.get("running") else "stopped",
+            "sub_status": str(svc_status.get("active") or ""),
+            "manageable": True, "deletable": True,
+            "project_path": info["install_dir"],
+            "ports": [p for p in [info["http_port"], info["https_port"]] if p],
+            "urls": [u for u in [info["http_url"], info["https_url"]] if u],
+        })
+    elif os.name == "nt" and info["installed"]:
+        svc_name = str(state.get("service_name") or systemd_service.replace("serverinstaller-", "ServerInstaller-").title())
+        # Check if running
+        try:
+            rc, out = run_capture(["sc.exe", "query", svc_name], timeout=10)
+            if rc == 0 and "RUNNING" in out.upper():
+                info["running"] = True
+        except Exception:
+            pass
+        if not info["running"]:
+            try:
+                rc, out = run_capture(["schtasks", "/Query", "/TN", svc_name, "/FO", "CSV"], timeout=10)
+                if rc == 0 and "Running" in out:
+                    info["running"] = True
+            except Exception:
+                pass
+        if not info["running"]:
+            hp = str(state.get("http_port") or "").strip()
+            if hp.isdigit() and is_local_tcp_port_listening(int(hp)):
+                info["running"] = True
+        info["services"].append({
+            "name": svc_name, "display_name": display_name,
+            "kind": "service",
+            "status": "running" if info.get("running") else "stopped",
+            "manageable": True, "deletable": True,
+            "project_path": info["install_dir"],
+            "ports": [p for p in [info["http_port"], info["https_port"]] if p],
+            "urls": [u for u in [info["http_url"], info["https_url"]] if u],
+        })
+    # Also check if port is listening even without service registration
+    if not info["running"] and info["http_port"]:
+        try:
+            if is_local_tcp_port_listening(int(info["http_port"])):
+                info["running"] = True
+                if not info["services"]:
+                    info["services"].append({
+                        "name": systemd_service, "display_name": display_name,
+                        "kind": "process", "status": "running",
+                        "manageable": True, "deletable": False,
+                        "ports": [info["http_port"]],
+                        "urls": [info["http_url"]] if info["http_url"] else [],
+                    })
+        except Exception:
+            pass
+    return info
+
+
+def get_ollama_info():
+    return _get_ai_service_info(OLLAMA_STATE_FILE, OLLAMA_STATE_DIR, OLLAMA_SYSTEMD_SERVICE, "Ollama LLM Service", "11434")
+
+
+def get_tgwui_info():
+    return _get_ai_service_info(TGWUI_STATE_FILE, TGWUI_STATE_DIR, TGWUI_SYSTEMD_SERVICE, "Text Generation WebUI", "7860")
+
+
+def get_comfyui_info():
+    return _get_ai_service_info(COMFYUI_STATE_FILE, COMFYUI_STATE_DIR, COMFYUI_SYSTEMD_SERVICE, "ComfyUI", "8188")
+
+
+def get_whisper_info():
+    return _get_ai_service_info(WHISPER_STATE_FILE, WHISPER_STATE_DIR, WHISPER_SYSTEMD_SERVICE, "Whisper STT Service", "9000")
+
+
+def get_piper_info():
+    return _get_ai_service_info(PIPER_STATE_FILE, PIPER_STATE_DIR, PIPER_SYSTEMD_SERVICE, "Piper TTS Service", "5500")
+
+
+# ── Generic AI service installer ────────────────────────────────────────────
+def _run_ai_service_install(service_id, form, state_file, state_dir, systemd_service, display_name, default_port, install_cmd_map, live_cb=None):
+    """Generic installer for AI services. install_cmd_map = {os_name: [commands]}."""
+    form = form or {}
+    output_lines = []
+    def log(msg):
+        output_lines.append(msg)
+        if live_cb:
+            live_cb(msg + "\n")
+
+    host_ip = (form.get(f"{service_id.upper()}_HOST_IP", [""])[0] or "").strip() or "0.0.0.0"
+    http_port = (form.get(f"{service_id.upper()}_HTTP_PORT", [default_port])[0] or default_port).strip()
+    https_port = (form.get(f"{service_id.upper()}_HTTPS_PORT", [""])[0] or "").strip()
+    domain = (form.get(f"{service_id.upper()}_DOMAIN", [""])[0] or "").strip()
+    username = (form.get(f"{service_id.upper()}_USERNAME", [""])[0] or "").strip()
+    password = (form.get(f"{service_id.upper()}_PASSWORD", [""])[0] or "").strip()
+    extra = {}
+    for k, v in form.items():
+        if k.startswith(f"{service_id.upper()}_"):
+            extra[k] = (v[0] if isinstance(v, list) else v)
+
+    log(f"=== Installing {display_name} ===")
+    log(f"Host: {host_ip}, Port: {http_port}")
+
+    state_dir.mkdir(parents=True, exist_ok=True)
+    install_dir = state_dir / "app"
+
+    # Determine host for URL
+    host = domain or (host_ip if host_ip not in ("", "*", "0.0.0.0") else choose_service_host())
+    http_url = f"http://{host}:{http_port}" if http_port else ""
+    https_url = f"https://{host}:{https_port}" if https_port else ""
+
+    # Run install commands
+    cmds = install_cmd_map.get(os.name, install_cmd_map.get("posix", []))
+    code = 0
+    for cmd in cmds:
+        if callable(cmd):
+            code = cmd(log, install_dir, form, extra)
+        elif isinstance(cmd, str):
+            code = _run_install_cmd(cmd, log, timeout=600)
+        else:
+            code = _run_install_cmd(cmd, log, timeout=600)
+        if code != 0:
+            log(f"Command failed with code {code}")
+            break
+
+    if code == 0:
+        # Save state
+        state = _read_json_file(state_file)
+        state.update({
+            "installed": True,
+            "service_name": systemd_service,
+            "install_dir": str(install_dir),
+            "host": host_ip,
+            "domain": domain,
+            "http_port": http_port,
+            "https_port": https_port,
+            "http_url": http_url,
+            "https_url": https_url,
+            "deploy_mode": "os",
+            "auth_enabled": bool(username),
+            "auth_username": username,
+        })
+        state.update({k.lower(): v for k, v in extra.items()})
+        _write_json_file(state_file, state)
+
+        # Open firewall
+        if http_port:
+            manage_firewall_port("open", http_port, "tcp", host=host)
+        if https_port:
+            manage_firewall_port("open", https_port, "tcp", host=host)
+
+        log(f"\n=== {display_name} installed successfully ===")
+        if http_url:
+            log(f"URL: {http_url}")
+
+    return code, "\n".join(output_lines)
+
+
+def _install_ollama_os(log, install_dir, form, extra):
+    """Install Ollama binary."""
+    if command_exists("ollama"):
+        log("Ollama is already installed.")
+        return 0
+    if os.name == "nt":
+        log("Installing Ollama for Windows...")
+        code = _run_install_cmd(["winget", "install", "-e", "--id", "Ollama.Ollama", "--accept-package-agreements", "--accept-source-agreements"], log, timeout=300)
+        if code != 0:
+            log("Trying direct download...")
+            code = _run_install_cmd("powershell.exe -NoProfile -Command \"Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile '%TEMP%\\OllamaSetup.exe'; Start-Process '%TEMP%\\OllamaSetup.exe' -ArgumentList '/S' -Wait\"", log, timeout=300)
+        return code
+    else:
+        log("Installing Ollama via official script...")
+        return _run_install_cmd("curl -fsSL https://ollama.com/install.sh | sh", log, timeout=300)
+
+
+def _install_tgwui_os(log, install_dir, form, extra):
+    """Install Text Generation WebUI."""
+    install_dir = Path(install_dir)
+    if install_dir.exists() and (install_dir / "server.py").exists():
+        log("Text Generation WebUI already installed.")
+        return 0
+    log("Cloning Text Generation WebUI repository...")
+    install_dir.parent.mkdir(parents=True, exist_ok=True)
+    code = _run_install_cmd(["git", "clone", "https://github.com/oobabooga/text-generation-webui.git", str(install_dir)], log, timeout=600)
+    if code != 0:
+        return code
+    log("Running one-click installer...")
+    if os.name == "nt":
+        start_script = install_dir / "start_windows.bat"
+        if start_script.exists():
+            code = _run_install_cmd([str(start_script), "--auto-launch", "--listen"], log, timeout=900)
+    else:
+        start_script = install_dir / "start_linux.sh"
+        if start_script.exists():
+            code = _run_install_cmd(["bash", str(start_script), "--auto-launch", "--listen"], log, timeout=900)
+        else:
+            log("Setting up Python venv...")
+            code = _run_install_cmd(f"cd {install_dir} && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt", log, timeout=900)
+    return code
+
+
+def _install_comfyui_os(log, install_dir, form, extra):
+    """Install ComfyUI."""
+    install_dir = Path(install_dir)
+    if install_dir.exists() and (install_dir / "main.py").exists():
+        log("ComfyUI already installed.")
+        return 0
+    log("Cloning ComfyUI repository...")
+    install_dir.parent.mkdir(parents=True, exist_ok=True)
+    code = _run_install_cmd(["git", "clone", "https://github.com/comfyanonymous/ComfyUI.git", str(install_dir)], log, timeout=600)
+    if code != 0:
+        return code
+    log("Installing Python dependencies...")
+    if os.name == "nt":
+        code = _run_install_cmd(f"cd /d \"{install_dir}\" && python -m venv venv && venv\\Scripts\\pip install -r requirements.txt", log, timeout=600)
+    else:
+        code = _run_install_cmd(f"cd \"{install_dir}\" && python3 -m venv venv && venv/bin/pip install -r requirements.txt", log, timeout=600)
+    return code
+
+
+def _install_whisper_os(log, install_dir, form, extra):
+    """Install Whisper API server."""
+    install_dir = Path(install_dir)
+    install_dir.mkdir(parents=True, exist_ok=True)
+    model_size = extra.get("WHISPER_MODEL_SIZE", "base")
+    log(f"Installing Whisper with model size: {model_size}")
+    if os.name == "nt":
+        code = _run_install_cmd(f"cd /d \"{install_dir}\" && python -m venv venv && venv\\Scripts\\pip install openai-whisper faster-whisper flask", log, timeout=600)
+    else:
+        code = _run_install_cmd(f"cd \"{install_dir}\" && python3 -m venv venv && venv/bin/pip install openai-whisper faster-whisper flask", log, timeout=600)
+    if code != 0:
+        return code
+    # Create a simple Flask server for Whisper
+    server_py = install_dir / "whisper_server.py"
+    server_py.write_text(f'''#!/usr/bin/env python3
+"""Whisper speech-to-text API server."""
+import os, sys, json, tempfile
+from flask import Flask, request, jsonify
+app = Flask(__name__)
+model = None
+MODEL_SIZE = "{model_size}"
+
+def get_model():
+    global model
+    if model is None:
+        try:
+            from faster_whisper import WhisperModel
+            model = WhisperModel(MODEL_SIZE, device="auto", compute_type="auto")
+        except Exception:
+            import whisper
+            model = whisper.load_model(MODEL_SIZE)
+    return model
+
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({{"service": "whisper", "model": MODEL_SIZE, "status": "running"}})
+
+@app.route("/transcribe", methods=["POST"])
+def transcribe():
+    if "audio" not in request.files:
+        return jsonify({{"error": "No audio file provided"}}), 400
+    audio = request.files["audio"]
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        audio.save(tmp.name)
+        tmp_path = tmp.name
+    try:
+        m = get_model()
+        if hasattr(m, "transcribe") and hasattr(m.transcribe, "__code__"):
+            # faster-whisper
+            segments, info = m.transcribe(tmp_path)
+            text = " ".join([s.text for s in segments])
+            return jsonify({{"ok": True, "text": text.strip(), "language": info.language}})
+        else:
+            result = m.transcribe(tmp_path)
+            return jsonify({{"ok": True, "text": result["text"].strip(), "language": result.get("language", "")}})
+    except Exception as e:
+        return jsonify({{"ok": False, "error": str(e)}}), 500
+    finally:
+        os.unlink(tmp_path)
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({{"ok": True, "status": "healthy", "model": MODEL_SIZE}})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("WHISPER_PORT", "9000"))
+    host = os.environ.get("WHISPER_HOST", "0.0.0.0")
+    app.run(host=host, port=port)
+''', encoding="utf-8")
+    log("Whisper server created successfully.")
+    return 0
+
+
+def _install_piper_os(log, install_dir, form, extra):
+    """Install Piper TTS."""
+    install_dir = Path(install_dir)
+    install_dir.mkdir(parents=True, exist_ok=True)
+    voice = extra.get("PIPER_VOICE", "en_US-lessac-medium")
+    log(f"Installing Piper TTS with voice: {voice}")
+    if os.name == "nt":
+        code = _run_install_cmd(f"cd /d \"{install_dir}\" && python -m venv venv && venv\\Scripts\\pip install piper-tts flask", log, timeout=600)
+    else:
+        # Try system package first
+        if command_exists("apt-get"):
+            _run_install_cmd(["apt-get", "install", "-y", "piper"], log, timeout=120)
+        code = _run_install_cmd(f"cd \"{install_dir}\" && python3 -m venv venv && venv/bin/pip install piper-tts flask", log, timeout=600)
+    if code != 0:
+        return code
+    # Create a simple Flask server for Piper
+    server_py = install_dir / "piper_server.py"
+    server_py.write_text(f'''#!/usr/bin/env python3
+"""Piper text-to-speech API server."""
+import os, io, subprocess, tempfile
+from flask import Flask, request, jsonify, send_file
+app = Flask(__name__)
+DEFAULT_VOICE = "{voice}"
+
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({{"service": "piper-tts", "voice": DEFAULT_VOICE, "status": "running"}})
+
+@app.route("/tts", methods=["POST"])
+def tts():
+    data = request.get_json(silent=True) or {{}}
+    text = data.get("text", "") or request.form.get("text", "")
+    voice_name = data.get("voice", DEFAULT_VOICE)
+    if not text:
+        return jsonify({{"error": "No text provided"}}), 400
+    try:
+        import piper
+        v = piper.PiperVoice.load(voice_name)
+        buf = io.BytesIO()
+        import wave
+        with wave.open(buf, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(v.config.sample_rate)
+            for audio_bytes in v.synthesize_stream_raw(text):
+                wav.writeframes(audio_bytes)
+        buf.seek(0)
+        return send_file(buf, mimetype="audio/wav", download_name="speech.wav")
+    except Exception as e:
+        # Fallback: try CLI piper
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                proc = subprocess.run(
+                    ["piper", "--model", voice_name, "--output_file", tmp.name],
+                    input=text, capture_output=True, text=True, timeout=30,
+                )
+                if proc.returncode == 0:
+                    return send_file(tmp.name, mimetype="audio/wav", download_name="speech.wav")
+        except Exception:
+            pass
+        return jsonify({{"ok": False, "error": str(e)}}), 500
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({{"ok": True, "status": "healthy", "voice": DEFAULT_VOICE}})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PIPER_PORT", "5500"))
+    host = os.environ.get("PIPER_HOST", "0.0.0.0")
+    app.run(host=host, port=port)
+''', encoding="utf-8")
+    log("Piper TTS server created successfully.")
+    return 0
+
+
+# ── AI service install entry points ─────────────────────────────────────────
+def run_ollama_os_install(form=None, live_cb=None):
+    return _run_ai_service_install("ollama", form, OLLAMA_STATE_FILE, OLLAMA_STATE_DIR, OLLAMA_SYSTEMD_SERVICE, "Ollama", "11434",
+        {"nt": [_install_ollama_os], "posix": [_install_ollama_os]}, live_cb=live_cb)
+
+def run_tgwui_os_install(form=None, live_cb=None):
+    return _run_ai_service_install("tgwui", form, TGWUI_STATE_FILE, TGWUI_STATE_DIR, TGWUI_SYSTEMD_SERVICE, "Text Generation WebUI", "7860",
+        {"nt": [_install_tgwui_os], "posix": [_install_tgwui_os]}, live_cb=live_cb)
+
+def run_comfyui_os_install(form=None, live_cb=None):
+    return _run_ai_service_install("comfyui", form, COMFYUI_STATE_FILE, COMFYUI_STATE_DIR, COMFYUI_SYSTEMD_SERVICE, "ComfyUI", "8188",
+        {"nt": [_install_comfyui_os], "posix": [_install_comfyui_os]}, live_cb=live_cb)
+
+def run_whisper_os_install(form=None, live_cb=None):
+    return _run_ai_service_install("whisper", form, WHISPER_STATE_FILE, WHISPER_STATE_DIR, WHISPER_SYSTEMD_SERVICE, "Whisper STT", "9000",
+        {"nt": [_install_whisper_os], "posix": [_install_whisper_os]}, live_cb=live_cb)
+
+def run_piper_os_install(form=None, live_cb=None):
+    return _run_ai_service_install("piper", form, PIPER_STATE_FILE, PIPER_STATE_DIR, PIPER_SYSTEMD_SERVICE, "Piper TTS", "5500",
+        {"nt": [_install_piper_os], "posix": [_install_piper_os]}, live_cb=live_cb)
+
+
+# ── Docker install for AI services ──────────────────────────────────────────
+def run_ollama_docker(form=None, live_cb=None):
+    form = form or {}
+    port = (form.get("OLLAMA_HTTP_PORT", ["11434"])[0] or "11434").strip()
+    host = (form.get("OLLAMA_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
+    output = []
+    def log(m):
+        output.append(m)
+        if live_cb: live_cb(m + "\n")
+    log("=== Installing Ollama via Docker ===")
+    if not command_exists("docker"):
+        log("Docker not found. Installing Docker first...")
+        _install_engine_docker(log)
+    cmd = ["docker", "run", "-d", "--name", "serverinstaller-ollama",
+           "-p", f"{port}:11434",
+           "-v", f"ollama-data:/root/.ollama",
+           "--restart", "unless-stopped"]
+    # GPU support
+    try:
+        rc, _ = run_capture(["docker", "info", "--format", "{{.Runtimes}}"], timeout=10)
+        if "nvidia" in str(_).lower():
+            cmd.extend(["--gpus", "all"])
+            log("NVIDIA GPU detected — enabling GPU passthrough.")
+    except Exception:
+        pass
+    cmd.append("ollama/ollama:latest")
+    log(f"Running: {' '.join(cmd)}")
+    code = _run_install_cmd(cmd, log, timeout=300)
+    if code == 0:
+        OLLAMA_STATE_DIR.mkdir(parents=True, exist_ok=True)
+        display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
+        state = _read_json_file(OLLAMA_STATE_FILE)
+        state.update({"installed": True, "service_name": "serverinstaller-ollama", "deploy_mode": "docker",
+                       "host": host, "http_port": port, "http_url": f"http://{display_host}:{port}"})
+        _write_json_file(OLLAMA_STATE_FILE, state)
+        manage_firewall_port("open", port, "tcp")
+        log(f"\nOllama Docker container running on port {port}")
+    return code, "\n".join(output)
+
+
+def _run_ai_docker_generic(service_id, image, form, default_port, container_port, display_name, state_file, state_dir, live_cb=None, extra_args=None):
+    """Generic Docker install for AI services."""
+    form = form or {}
+    port = (form.get(f"{service_id.upper()}_HTTP_PORT", [default_port])[0] or default_port).strip()
+    host = (form.get(f"{service_id.upper()}_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
+    output = []
+    def log(m):
+        output.append(m)
+        if live_cb: live_cb(m + "\n")
+    log(f"=== Installing {display_name} via Docker ===")
+    if not command_exists("docker"):
+        _install_engine_docker(log)
+    container_name = f"serverinstaller-{service_id}"
+    # Remove existing
+    run_capture(["docker", "rm", "-f", container_name], timeout=15)
+    cmd = ["docker", "run", "-d", "--name", container_name,
+           "-p", f"{port}:{container_port}", "--restart", "unless-stopped"]
+    # GPU support
+    try:
+        rc, out = run_capture(["docker", "info", "--format", "{{.Runtimes}}"], timeout=10)
+        if "nvidia" in str(out).lower():
+            cmd.extend(["--gpus", "all"])
+            log("NVIDIA GPU detected.")
+    except Exception:
+        pass
+    if extra_args:
+        cmd.extend(extra_args)
+    cmd.append(image)
+    log(f"Running: {' '.join(cmd)}")
+    code = _run_install_cmd(cmd, log, timeout=600)
+    if code == 0:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
+        state = _read_json_file(state_file)
+        state.update({"installed": True, "service_name": container_name, "deploy_mode": "docker",
+                       "host": host, "http_port": port, "http_url": f"http://{display_host}:{port}"})
+        _write_json_file(state_file, state)
+        manage_firewall_port("open", port, "tcp")
+        log(f"\n{display_name} running on port {port}")
+    return code, "\n".join(output)
+
+
+def run_tgwui_docker(form=None, live_cb=None):
+    return _run_ai_docker_generic("tgwui", "atinoda/text-generation-webui:default-nightly", form, "7860", "7860", "Text Generation WebUI", TGWUI_STATE_FILE, TGWUI_STATE_DIR, live_cb)
+
+def run_comfyui_docker(form=None, live_cb=None):
+    return _run_ai_docker_generic("comfyui", "yanwk/comfyui-boot:latest", form, "8188", "8188", "ComfyUI", COMFYUI_STATE_FILE, COMFYUI_STATE_DIR, live_cb)
+
+def run_whisper_docker(form=None, live_cb=None):
+    model = (form or {}).get("WHISPER_MODEL_SIZE", ["base"])
+    model_size = model[0] if isinstance(model, list) else model
+    return _run_ai_docker_generic("whisper", "onerahmet/openai-whisper-asr-webservice:latest", form, "9000", "9000", "Whisper STT",
+        WHISPER_STATE_FILE, WHISPER_STATE_DIR, live_cb, extra_args=["-e", f"ASR_MODEL={model_size}"])
+
+def run_piper_docker(form=None, live_cb=None):
+    return _run_ai_docker_generic("piper", "rhasspy/wyoming-piper:latest", form, "5500", "10200", "Piper TTS", PIPER_STATE_FILE, PIPER_STATE_DIR, live_cb,
+        extra_args=["-v", "piper-data:/data", "-e", "PIPER_VOICE=en_US-lessac-medium"])
+
+
+# ── AI service name detection helpers ────────────────────────────────────────
+def _is_ollama_name(name):
+    return bool(re.search(r'ollama', str(name or ""), re.IGNORECASE))
+
+def _is_tgwui_name(name):
+    return bool(re.search(r'tgwui|text.generation.webui|oobabooga', str(name or ""), re.IGNORECASE))
+
+def _is_comfyui_name(name):
+    return bool(re.search(r'comfyui|comfy.ui', str(name or ""), re.IGNORECASE))
+
+def _is_whisper_name(name):
+    return bool(re.search(r'whisper', str(name or ""), re.IGNORECASE))
+
+def _is_piper_name(name):
+    return bool(re.search(r'piper', str(name or ""), re.IGNORECASE))
+
+
 def filter_service_items(scope):
     scope = str(scope or "all").strip().lower()
     items = get_service_items()
@@ -7012,6 +7582,21 @@ def filter_service_items(scope):
         if sam3_items:
             return sam3_items
         return [x for x in items if _is_sam3_name(x.get("name", "")) or _is_sam3_name(x.get("display_name", ""))]
+    # New AI services
+    ai_scope_map = {
+        "ollama": (get_ollama_info, _is_ollama_name),
+        "tgwui": (get_tgwui_info, _is_tgwui_name),
+        "comfyui": (get_comfyui_info, _is_comfyui_name),
+        "whisper": (get_whisper_info, _is_whisper_name),
+        "piper": (get_piper_info, _is_piper_name),
+    }
+    if scope in ai_scope_map:
+        get_info_fn, is_name_fn = ai_scope_map[scope]
+        info = get_info_fn()
+        svc_items = info.get("services") or []
+        if svc_items:
+            return svc_items
+        return [x for x in items if is_name_fn(x.get("name", "")) or is_name_fn(x.get("display_name", ""))]
     return items
 
 
@@ -7644,6 +8229,16 @@ def get_system_status(scope="all"):
             software["iis"] = get_iis_info()
     if scope in ("all", "sam3"):
         software["sam3_service"] = get_sam3_info()
+    if scope in ("all", "ollama"):
+        software["ollama_service"] = get_ollama_info()
+    if scope in ("all", "tgwui"):
+        software["tgwui_service"] = get_tgwui_info()
+    if scope in ("all", "comfyui"):
+        software["comfyui_service"] = get_comfyui_info()
+    if scope in ("all", "whisper"):
+        software["whisper_service"] = get_whisper_info()
+    if scope in ("all", "piper"):
+        software["piper_service"] = get_piper_info()
 
     status = {
         "hostname": socket.gethostname(),
@@ -13383,6 +13978,101 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_sam3_delete()
+                self.respond_run_result(title, code, output)
+            return
+        # ── Ollama routes ─────────────────────────────────────────────────────
+        if self.path in ("/run/ollama_windows_os", "/run/ollama_unix_os", "/run/ollama_windows_iis"):
+            title = "Ollama Install"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_ollama_os_install(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_ollama_os_install(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/ollama_docker":
+            title = "Ollama Docker"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_ollama_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_ollama_docker(form)
+                self.respond_run_result(title, code, output)
+            return
+        # ── Text Generation WebUI routes ──────────────────────────────────────
+        if self.path in ("/run/tgwui_windows_os", "/run/tgwui_unix_os"):
+            title = "Text Gen WebUI Install"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_tgwui_os_install(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_tgwui_os_install(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/tgwui_docker":
+            title = "Text Gen WebUI Docker"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_tgwui_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_tgwui_docker(form)
+                self.respond_run_result(title, code, output)
+            return
+        # ── ComfyUI routes ────────────────────────────────────────────────────
+        if self.path in ("/run/comfyui_windows_os", "/run/comfyui_unix_os", "/run/comfyui_windows_iis"):
+            title = "ComfyUI Install"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_comfyui_os_install(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_comfyui_os_install(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/comfyui_docker":
+            title = "ComfyUI Docker"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_comfyui_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_comfyui_docker(form)
+                self.respond_run_result(title, code, output)
+            return
+        # ── Whisper routes ────────────────────────────────────────────────────
+        if self.path in ("/run/whisper_windows_os", "/run/whisper_unix_os", "/run/whisper_windows_iis"):
+            title = "Whisper STT Install"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_whisper_os_install(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_whisper_os_install(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/whisper_docker":
+            title = "Whisper Docker"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_whisper_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_whisper_docker(form)
+                self.respond_run_result(title, code, output)
+            return
+        # ── Piper TTS routes ──────────────────────────────────────────────────
+        if self.path in ("/run/piper_windows_os", "/run/piper_unix_os", "/run/piper_windows_iis"):
+            title = "Piper TTS Install"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_piper_os_install(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_piper_os_install(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/piper_docker":
+            title = "Piper TTS Docker"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_piper_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_piper_docker(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/dashboard_update":

@@ -57,8 +57,8 @@ function App() {
   const [portProtocol, setPortProtocol] = React.useState("tcp");
   const [portBusy, setPortBusy] = React.useState(false);
   const [serviceBusy, setServiceBusy] = React.useState(false);
-  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, docker: false, proxy: false, python: false, website: false, sam3: false });
-  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", docker: "", proxy: "", python: "", website: "", sam3: "" });
+  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, docker: false, proxy: false, python: false, website: false, sam3: false, ollama: false, tgwui: false, comfyui: false, whisper: false, piper: false });
+  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", docker: "", proxy: "", python: "", website: "", sam3: "", ollama: "", tgwui: "", comfyui: "", whisper: "", piper: "" });
   const [serviceFilter, setServiceFilter] = React.useState("");
   const [services, setServices] = React.useState([]);
   const [mongoPageServices, setMongoPageServices] = React.useState([]);
@@ -69,6 +69,11 @@ function App() {
   const [pythonPageServices, setPythonPageServices] = React.useState([]);
   const [websitePageServices, setWebsitePageServices] = React.useState([]);
   const [sam3PageServices, setSam3PageServices] = React.useState([]);
+  const [ollamaPageServices, setOllamaPageServices] = React.useState([]);
+  const [tgwuiPageServices, setTgwuiPageServices] = React.useState([]);
+  const [comfyuiPageServices, setComfyuiPageServices] = React.useState([]);
+  const [whisperPageServices, setWhisperPageServices] = React.useState([]);
+  const [piperPageServices, setPiperPageServices] = React.useState([]);
   const [mongoInfoState, setMongoInfoState] = React.useState(null);
   const [s3InfoState, setS3InfoState] = React.useState(null);
   const [dotnetInfoState, setDotnetInfoState] = React.useState(null);
@@ -77,6 +82,11 @@ function App() {
   const [pythonInfoState, setPythonInfoState] = React.useState(null);
   const [websiteInfoState, setWebsiteInfoState] = React.useState(null);
   const [sam3InfoState, setSam3InfoState] = React.useState(null);
+  const [ollamaInfoState, setOllamaInfoState] = React.useState(null);
+  const [tgwuiInfoState, setTgwuiInfoState] = React.useState(null);
+  const [comfyuiInfoState, setComfyuiInfoState] = React.useState(null);
+  const [whisperInfoState, setWhisperInfoState] = React.useState(null);
+  const [piperInfoState, setPiperInfoState] = React.useState(null);
   const [pythonApiEditor, setPythonApiEditor] = React.useState(null);
   const [pythonApiEditorSeed, setPythonApiEditorSeed] = React.useState(0);
   const [serviceEditDlg, setServiceEditDlg] = React.useState(null);
@@ -207,6 +217,11 @@ function App() {
   const loadPythonServices = React.useRef(async () => {});
   const loadWebsiteServices = React.useRef(async () => {});
   const loadSam3Services = React.useRef(async () => {});
+  const loadOllamaServices = React.useRef(async () => {});
+  const loadTgwuiServices = React.useRef(async () => {});
+  const loadComfyuiServices = React.useRef(async () => {});
+  const loadWhisperServices = React.useRef(async () => {});
+  const loadPiperServices = React.useRef(async () => {});
   const loadMongoInfo = React.useRef(async () => {});
   const loadS3Info = React.useRef(async () => {});
   const loadDotnetInfo = React.useRef(async () => {});
@@ -215,6 +230,11 @@ function App() {
   const loadPythonInfo = React.useRef(async () => {});
   const loadWebsiteInfo = React.useRef(async () => {});
   const loadSam3Info = React.useRef(async () => {});
+  const loadOllamaInfo = React.useRef(async () => {});
+  const loadTgwuiInfo = React.useRef(async () => {});
+  const loadComfyuiInfo = React.useRef(async () => {});
+  const loadWhisperInfo = React.useRef(async () => {});
+  const loadPiperInfo = React.useRef(async () => {});
 
   const loadServiceScope = React.useCallback(async (scope, setter) => {
     setScopeLoadingFlag(scope, true);
@@ -256,6 +276,11 @@ function App() {
   loadPythonServices.current = async () => loadServiceScope("python", setPythonPageServices);
   loadWebsiteServices.current = async () => loadServiceScope("website", setWebsitePageServices);
   loadSam3Services.current = async () => loadServiceScope("sam3", setSam3PageServices);
+  loadOllamaServices.current = async () => loadServiceScope("ollama", setOllamaPageServices);
+  loadTgwuiServices.current = async () => loadServiceScope("tgwui", setTgwuiPageServices);
+  loadComfyuiServices.current = async () => loadServiceScope("comfyui", setComfyuiPageServices);
+  loadWhisperServices.current = async () => loadServiceScope("whisper", setWhisperPageServices);
+  loadPiperServices.current = async () => loadServiceScope("piper", setPiperPageServices);
   loadMongoInfo.current = async () => loadScopedStatus("mongo", setMongoInfoState);
   loadS3Info.current = async () => loadScopedStatus("s3", setS3InfoState);
   loadDotnetInfo.current = async () => loadScopedStatus("dotnet", setDotnetInfoState);
@@ -264,6 +289,11 @@ function App() {
   loadPythonInfo.current = async () => loadScopedStatus("python", setPythonInfoState);
   loadWebsiteInfo.current = async () => loadScopedStatus("website", setWebsiteInfoState);
   loadSam3Info.current = async () => loadScopedStatus("sam3", setSam3InfoState);
+  loadOllamaInfo.current = async () => loadScopedStatus("ollama", setOllamaInfoState);
+  loadTgwuiInfo.current = async () => loadScopedStatus("tgwui", setTgwuiInfoState);
+  loadComfyuiInfo.current = async () => loadScopedStatus("comfyui", setComfyuiInfoState);
+  loadWhisperInfo.current = async () => loadScopedStatus("whisper", setWhisperInfoState);
+  loadPiperInfo.current = async () => loadScopedStatus("piper", setPiperInfoState);
 
   const refreshPageServices = React.useCallback((targetPage) => {
     if (targetPage === "services") return loadServices.current();
@@ -274,6 +304,11 @@ function App() {
     if (targetPage === "python" || String(targetPage || "").startsWith("python-")) return loadPythonServices.current();
     if (targetPage === "website") return loadWebsiteServices.current();
     if (String(targetPage || "").startsWith("ai-sam3")) return loadSam3Services.current();
+    if (targetPage === "ai-ollama") return loadOllamaServices.current();
+    if (targetPage === "ai-tgwui") return loadTgwuiServices.current();
+    if (targetPage === "ai-comfyui") return loadComfyuiServices.current();
+    if (targetPage === "ai-whisper") return loadWhisperServices.current();
+    if (targetPage === "ai-piper") return loadPiperServices.current();
     if (targetPage === "dotnet" || targetPage === "dotnet-docker" || targetPage === "dotnet-linux") return Promise.all([loadDotnetServices.current(), loadDockerServices.current()]);
     if (targetPage === "dotnet-iis") return Promise.all([loadDotnetServices.current(), loadServices.current()]);
     if (String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
@@ -289,6 +324,11 @@ function App() {
     if (targetPage === "python" || String(targetPage || "").startsWith("python-")) return loadPythonInfo.current();
     if (targetPage === "website") return loadWebsiteInfo.current();
     if (String(targetPage || "").startsWith("ai-sam3")) return loadSam3Info.current();
+    if (targetPage === "ai-ollama") return loadOllamaInfo.current();
+    if (targetPage === "ai-tgwui") return loadTgwuiInfo.current();
+    if (targetPage === "ai-comfyui") return loadComfyuiInfo.current();
+    if (targetPage === "ai-whisper") return loadWhisperInfo.current();
+    if (targetPage === "ai-piper") return loadPiperInfo.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetInfo.current();
     if (targetPage === "home" || targetPage === "api" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
     return Promise.resolve();
@@ -1211,6 +1251,11 @@ function App() {
   const pythonSoftware = pythonStatusInfo?.software || {};
   const websiteSoftware = websiteStatusInfo?.software || {};
   const sam3Software = sam3InfoState?.software || {};
+  const ollamaSoftware = ollamaInfoState?.software || {};
+  const tgwuiSoftware = tgwuiInfoState?.software || {};
+  const comfyuiSoftware = comfyuiInfoState?.software || {};
+  const whisperSoftware = whisperInfoState?.software || {};
+  const piperSoftware = piperInfoState?.software || {};
   const dotnet = dotnetSoftware.dotnet || software.dotnet || {};
   const docker = dockerSoftware.docker || software.docker || {};
   const mongoDocker = mongoSoftware.docker || software.docker || {};
@@ -1220,6 +1265,11 @@ function App() {
   const pythonService = pythonSoftware.python_service || software.python_service || {};
   const websiteInfo = websiteSoftware.website || software.website || {};
   const sam3Service = sam3Software.sam3_service || software.sam3_service || {};
+  const ollamaService = ollamaSoftware.ollama_service || software.ollama_service || {};
+  const tgwuiService = tgwuiSoftware.tgwui_service || software.tgwui_service || {};
+  const comfyuiService = comfyuiSoftware.comfyui_service || software.comfyui_service || {};
+  const whisperService = whisperSoftware.whisper_service || software.whisper_service || {};
+  const piperService = piperSoftware.piper_service || software.piper_service || {};
   const listeningPorts = systemInfo?.listening_ports || [];
 
   // Compute set of port numbers that belong to services managed by this installer
@@ -1781,6 +1831,7 @@ function App() {
     serviceFilter, setServiceFilter,
     services, mongoPageServices, s3PageServices, dotnetPageServices,
     dockerPageServices, proxyPageServices, pythonPageServices, websitePageServices, sam3PageServices,
+    ollamaPageServices, tgwuiPageServices, comfyuiPageServices, whisperPageServices, piperPageServices,
     mongoInfoState, s3InfoState, dotnetInfoState, dockerInfoState,
     proxyInfoState, pythonInfoState, websiteInfoState,
     pythonApiEditor, pythonApiEditorSeed,
@@ -1797,6 +1848,7 @@ function App() {
     pythonStatusInfo, websiteStatusInfo,
     mongoSoftware, dotnetSoftware, dockerSoftware, proxySoftware, pythonSoftware, websiteSoftware,
     dotnet, docker, mongoDocker, iis, mongo, proxy, pythonService, websiteInfo, sam3Service,
+    ollamaService, tgwuiService, comfyuiService, whisperService, piperService,
     listeningPorts, managedPortSet, cpuPercent, memoryPercent, netBps, netPercent,
     apiAddressList, filteredServices,
     dotnetServices, s3Services, mongoServices, proxyServices, pythonServices, websiteServices,
@@ -1812,8 +1864,10 @@ function App() {
     // Refs
     loadSystem, loadServices, loadMongoServices, loadS3Services, loadDotnetServices,
     loadDockerServices, loadProxyServices, loadPythonServices, loadWebsiteServices, loadSam3Services,
+    loadOllamaServices, loadTgwuiServices, loadComfyuiServices, loadWhisperServices, loadPiperServices,
     loadMongoInfo, loadS3Info, loadDotnetInfo, loadDockerInfo, loadProxyInfo,
     loadPythonInfo, loadWebsiteInfo, loadSam3Info,
+    loadOllamaInfo, loadTgwuiInfo, loadComfyuiInfo, loadWhisperInfo, loadPiperInfo,
     // Callbacks and handlers
     append, setScopeLoadingFlag, setScopeErrorText, isScopeLoading,
     loadScopedStatus, loadServiceScope,
@@ -1846,6 +1900,11 @@ function App() {
     if (page === "python" || String(page).startsWith("python-")) return "python";
     if (page === "website") return "website";
     if (String(page).startsWith("ai-sam3")) return "sam3";
+    if (page === "ai-ollama") return "ollama";
+    if (page === "ai-tgwui") return "tgwui";
+    if (page === "ai-comfyui") return "comfyui";
+    if (page === "ai-whisper") return "whisper";
+    if (page === "ai-piper") return "piper";
     if (page === "dotnet" || String(page).startsWith("dotnet-")) return "dotnet";
     return null;
   })();
