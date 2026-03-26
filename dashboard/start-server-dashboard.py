@@ -73,6 +73,18 @@ SYNC_WINDOWS_FILES = [
     "S3/windows/modules/iis.ps1",
     "S3/windows/modules/docker.ps1",
     "S3/windows/modules/main.ps1",
+    "SAM3/windows/setup-sam3.ps1",
+    "SAM3/common/app.py",
+    "SAM3/common/requirements.txt",
+    "SAM3/common/core/detector.py",
+    "SAM3/common/core/video_processor.py",
+    "SAM3/common/core/tracker.py",
+    "SAM3/common/core/exporter.py",
+    "SAM3/common/core/utils.py",
+    "SAM3/common/core/__init__.py",
+    "SAM3/common/web/templates/index.html",
+    "SAM3/common/web/static/js/dashboard.js",
+    "SAM3/common/web/static/css/dashboard.css",
     "Proxy/linux-macos/setup-proxy.sh",
     "Proxy/windows/setup-proxy.ps1",
     "Proxy/common/add-user.sh",
@@ -113,6 +125,18 @@ SYNC_UNIX_FILES = [
     "S3/linux-macos/modules/core.sh",
     "S3/linux-macos/modules/cleanup.sh",
     "S3/linux-macos/modules/platform.sh",
+    "SAM3/linux-macos/setup-sam3.sh",
+    "SAM3/common/app.py",
+    "SAM3/common/requirements.txt",
+    "SAM3/common/core/detector.py",
+    "SAM3/common/core/video_processor.py",
+    "SAM3/common/core/tracker.py",
+    "SAM3/common/core/exporter.py",
+    "SAM3/common/core/utils.py",
+    "SAM3/common/core/__init__.py",
+    "SAM3/common/web/templates/index.html",
+    "SAM3/common/web/static/js/dashboard.js",
+    "SAM3/common/web/static/css/dashboard.css",
     "Proxy/linux-macos/setup-proxy.sh",
     "Proxy/common/add-user.sh",
     "Proxy/common/backup-config.sh",
@@ -172,9 +196,19 @@ def cache_root() -> Path:
 
 def ensure_files(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
+    local_root_str = os.environ.get("SERVER_INSTALLER_LOCAL_ROOT", "").strip()
+    local_root = Path(local_root_str) if local_root_str else None
     for rel in sync_files_for_current_os():
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
+        # Try local copy first (when running from the repo directory)
+        if local_root:
+            local_src = local_root / rel
+            if local_src.exists():
+                if not target.exists() or local_src.stat().st_mtime > target.stat().st_mtime:
+                    import shutil
+                    shutil.copy2(str(local_src), str(target))
+                continue
         tmp_target = target.with_suffix(target.suffix + ".download")
         try:
             print(f"Syncing required file: {rel}")
