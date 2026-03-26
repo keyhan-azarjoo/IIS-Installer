@@ -293,119 +293,156 @@
             </CardContent>
           </Card>
         </Grid>
-        {/* ── Inline API Documentation ── */}
-        {React.createElement(function SAM3ApiDocs() {
-          const [showApi, setShowApi] = React.useState(false);
-          const [expanded, setExpanded] = React.useState({ 0: true, 1: true, 2: true, 3: true });
-          const toggleSec = (i) => setExpanded((prev) => ({ ...prev, [i]: !prev[i] }));
+        {/* ── API Documents Button ── */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed44", background: "linear-gradient(135deg, #7c3aed05 0%, #ffffff 100%)" }}>
+            <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+              <Stack direction="row" alignItems="center" spacing={1.5}>
+                <Box sx={{ width: 6, height: 36, borderRadius: 3, bgcolor: "#7c3aed" }} />
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography variant="h6" fontWeight={800} sx={{ color: "#7c3aed" }}>SAM3 API Documentation</Typography>
+                  <Typography variant="caption" color="text.secondary">16 API endpoints — detect, video, export, model info</Typography>
+                </Box>
+                <Chip label="16 endpoints" size="small" sx={{ bgcolor: "#7c3aed15", color: "#7c3aed", fontWeight: 700, border: "1px solid #7c3aed33" }} />
+                <Button variant="contained" size="small" onClick={() => setPage("ai-sam3-api")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, px: 3 }}>
+                  API Documents
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
+  };
 
-          const MC = { GET: { bg: "#dcfce7", c: "#166534", b: "#86efac" }, POST: { bg: "#dbeafe", c: "#1e40af", b: "#93c5fd" }, DELETE: { bg: "#fee2e2", c: "#991b1b", b: "#fca5a5" } };
-          const mc = (m) => MC[m] || { bg: "#f3f4f6", c: "#374151", b: "#d1d5db" };
+  // ── SAM3 API Documentation Page ─────────────────────────────────────────────
+  ns.pages["ai-sam3-api"] = function renderSam3ApiPage(p) {
+    const { Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip, Tooltip, Alert, setPage, sam3Service, copyText } = p;
+    const sam3 = sam3Service || {};
+    const host = String(sam3.host || "").trim();
+    const port = String(sam3.http_port || "5000").trim();
+    const base = "http://" + (host || "{host}") + ":" + (port || "{port}");
 
-          const base = "http://" + (String(sam3.host || "").trim() || "{host}") + ":" + (String(sam3.http_port || "5000").trim() || "{port}");
+    const MC = { GET: { bg: "#dcfce7", c: "#166534", b: "#86efac" }, POST: { bg: "#dbeafe", c: "#1e40af", b: "#93c5fd" }, DELETE: { bg: "#fee2e2", c: "#991b1b", b: "#fca5a5" } };
+    const mc = (m) => MC[m] || { bg: "#f3f4f6", c: "#374151", b: "#d1d5db" };
 
-          const sections = [
-            { name: "Image Detection (5 endpoints)", eps: [
-              { m: "POST", p: "/detect", d: "Detect objects using text prompts. Upload image + specify what to find.", body: 'multipart/form-data: image (file), prompt ("person,car,dog"), threshold (0.0-1.0)', res: '{ "detections": [{ "label": "person", "confidence": 0.95, "bbox": [x1,y1,x2,y2], "mask": "base64..." }] }' },
-              { m: "POST", p: "/detect-point", d: "Segment object at pixel coordinates. labels: 1=foreground, 0=background.", body: "multipart/form-data: image, points ([[250,300]]), labels ([1])", res: '{ "detections": [{ "mask": "base64...", "score": 0.98 }] }' },
-              { m: "POST", p: "/detect-box", d: "Segment object within a bounding box.", body: "multipart/form-data: image, box ([x1,y1,x2,y2])", res: '{ "detections": [{ "mask": "base64...", "score": 0.97 }] }' },
-              { m: "POST", p: "/detect-exemplar", d: "Find similar objects using a cropped visual example.", body: "multipart/form-data: image, exemplar (crop file)", res: '{ "detections": [{ "mask": "base64...", "score": 0.92 }] }' },
-              { m: "POST", p: "/detect-live", d: "Real-time detection for camera frames (optimized for speed).", body: "multipart/form-data: image, prompt, threshold", res: '{ "detections": [...], "processing_time_ms": 45 }' },
-            ]},
-            { name: "Video Processing (5 endpoints)", eps: [
-              { m: "POST", p: "/upload-video", d: "Upload video file (MP4/AVI/MOV) for AI processing.", body: "multipart/form-data: video (file)", res: '{ "video_id": "abc123", "frames": 300, "fps": 30, "duration": 10.0 }' },
-              { m: "GET", p: "/process-video/{video_id}?prompt={text}&threshold={float}", d: "Process video with detection. Returns SSE stream with per-frame results.", res: "text/event-stream: frame-by-frame detections" },
-              { m: "GET", p: "/get-video/{video_id}", d: "Download processed video with detection overlays.", res: "video/mp4 binary" },
-              { m: "GET", p: "/get-frame/{video_id}/{frame_number}", d: "Get a specific frame as JPEG image.", res: "image/jpeg binary" },
-              { m: "GET", p: "/track-object/{video_id}?x={x}&y={y}&frame={n}", d: "Track object across all frames. Returns SSE stream.", res: "text/event-stream: per-frame tracking data" },
-            ]},
-            { name: "Export Results (4 endpoints)", eps: [
-              { m: "POST", p: "/export/mask", d: "Export detection mask as PNG.", res: "image/png binary" },
-              { m: "POST", p: "/export/masks-zip", d: "Export all masks as ZIP archive.", res: "application/zip binary" },
-              { m: "POST", p: "/export/json", d: "Export detections as JSON file.", res: "application/json download" },
-              { m: "POST", p: "/export/coco", d: "Export in COCO annotation format for ML training.", res: "application/json (COCO)" },
-            ]},
-            { name: "Model & System (2 endpoints)", eps: [
-              { m: "GET", p: "/model-info", d: "Get model status: name, device, loaded state, VRAM usage.", res: '{ "model": "sam3", "device": "cuda", "loaded": true, "vram_usage": "3.2 GB" }' },
-              { m: "GET", p: "/", d: "Open SAM3 web dashboard (visual detection interface).", res: "HTML page" },
-            ]},
-          ];
+    const doCopy = (text) => { if (copyText) copyText(text, "cURL"); else if (navigator.clipboard) navigator.clipboard.writeText(text); };
+    const makeCurl = (method, path, body) => {
+      let c = 'curl -X ' + method + ' "' + base + path + '"';
+      if (body && body.indexOf("multipart") !== 0) c += ' \\\n  -H "Content-Type: application/json" \\\n  -d \'' + body + "'";
+      return c;
+    };
 
-          if (!showApi) {
-            return (
-              <Grid item xs={12}>
-                <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed44", background: "linear-gradient(135deg, #7c3aed05 0%, #ffffff 100%)" }}>
-                  <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
-                    <Stack direction="row" alignItems="center" spacing={1.5}>
-                      <Box sx={{ width: 6, height: 36, borderRadius: 3, bgcolor: "#7c3aed" }} />
-                      <Box sx={{ flexGrow: 1 }}>
-                        <Typography variant="h6" fontWeight={800} sx={{ color: "#7c3aed" }}>SAM3 API Documentation</Typography>
-                        <Typography variant="caption" color="text.secondary">16 API endpoints available</Typography>
-                      </Box>
-                      <Chip label="16 endpoints" size="small" sx={{ bgcolor: "#7c3aed15", color: "#7c3aed", fontWeight: 700, border: "1px solid #7c3aed33" }} />
-                      <Button variant="contained" size="small" onClick={() => setShowApi(true)} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, px: 3 }}>
-                        Show API Documents
-                      </Button>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-            );
-          }
+    const sections = [
+      { name: "Image Detection", color: "#7c3aed", eps: [
+        { m: "POST", p: "/detect", d: "Detect objects in an image using text prompts. Upload an image file and specify what objects to find.", body: 'multipart/form-data:\n  image: (file) JPEG/PNG image\n  prompt: (text) "person,car,dog"\n  threshold: (float) 0.0-1.0, default 0.3', res: '{\n  "detections": [\n    {\n      "label": "person",\n      "confidence": 0.95,\n      "bbox": [100, 50, 300, 400],\n      "mask": "base64-encoded-png..."\n    }\n  ]\n}' },
+        { m: "POST", p: "/detect-point", d: "Segment the object at specific pixel coordinates. Click on the image to get the mask of that object. Use labels: 1 = foreground (select), 0 = background (exclude).", body: 'multipart/form-data:\n  image: (file) JPEG/PNG\n  points: (JSON) [[250, 300], [100, 100]]\n  labels: (JSON) [1, 0]', res: '{\n  "detections": [\n    { "mask": "base64...", "score": 0.98 }\n  ]\n}' },
+        { m: "POST", p: "/detect-box", d: "Segment the object within a rectangular bounding box.", body: 'multipart/form-data:\n  image: (file) JPEG/PNG\n  box: (JSON) [x1, y1, x2, y2]', res: '{\n  "detections": [\n    { "mask": "base64...", "score": 0.97 }\n  ]\n}' },
+        { m: "POST", p: "/detect-exemplar", d: "Find and segment objects similar to a visual example. Provide a cropped reference image of what to look for.", body: 'multipart/form-data:\n  image: (file) full image\n  exemplar: (file) cropped example', res: '{\n  "detections": [\n    { "mask": "base64...", "score": 0.92 }\n  ]\n}' },
+        { m: "POST", p: "/detect-live", d: "Process a single camera/video frame for real-time detection. Optimized for low latency — send frames from a live feed.", body: 'multipart/form-data:\n  image: (file) frame\n  prompt: (text) objects to detect\n  threshold: (float) 0.0-1.0', res: '{\n  "detections": [...],\n  "processing_time_ms": 45\n}' },
+      ]},
+      { name: "Video Processing", color: "#0891b2", eps: [
+        { m: "POST", p: "/upload-video", d: "Upload a video file for AI processing. Supports MP4, AVI, MOV formats. Returns a video_id for all subsequent video operations.", body: 'multipart/form-data:\n  video: (file) MP4/AVI/MOV', res: '{\n  "video_id": "abc123",\n  "frames": 300,\n  "fps": 30,\n  "duration": 10.0,\n  "width": 1920,\n  "height": 1080\n}' },
+        { m: "GET", p: "/process-video/{video_id}?prompt={text}&threshold={float}", d: "Process the uploaded video with object detection. Returns a Server-Sent Events (SSE) stream with detection results for each frame.", res: 'text/event-stream:\n  data: { "frame": 1, "detections": [...] }\n  data: { "frame": 2, "detections": [...] }\n  ...' },
+        { m: "GET", p: "/get-video/{video_id}", d: "Download the fully processed video with detection overlays (bounding boxes, labels) drawn on each frame.", res: "video/mp4 binary file download" },
+        { m: "GET", p: "/get-frame/{video_id}/{frame_number}", d: "Get a specific processed frame as a JPEG image. Useful for previewing results.", res: "image/jpeg binary" },
+        { m: "GET", p: "/track-object/{video_id}?x={x}&y={y}&frame={n}", d: "Track a selected object across all video frames. Click a point on a frame to select the object, then track it throughout the video. Returns SSE stream.", res: 'text/event-stream:\n  data: { "frame": 1, "bbox": [...], "mask": "..." }\n  ...' },
+      ]},
+      { name: "Export Results", color: "#059669", eps: [
+        { m: "POST", p: "/export/mask", d: "Export a single detection mask as a transparent PNG image. Send the detection data from a /detect response.", body: 'JSON body with detection data from /detect response', res: "image/png binary (transparent mask)" },
+        { m: "POST", p: "/export/masks-zip", d: "Export ALL detection masks as a ZIP archive. Each detection gets its own PNG file.", body: 'JSON body with detections array', res: "application/zip binary download" },
+        { m: "POST", p: "/export/json", d: "Export all detections as a structured JSON file for programmatic use.", body: 'JSON body with detections array', res: "application/json file download" },
+        { m: "POST", p: "/export/coco", d: "Export detections in COCO annotation format — standard format for training ML/AI models.", body: 'JSON body with detections array', res: "application/json (COCO annotation format)" },
+      ]},
+      { name: "Model & System Info", color: "#7c3aed", eps: [
+        { m: "GET", p: "/model-info", d: "Get the current SAM3 model status including: model name, compute device (cpu/cuda/mps/tpu), whether the model is loaded, and VRAM usage.", res: '{\n  "model": "sam3",\n  "device": "cuda",\n  "loaded": true,\n  "vram_usage": "3.2 GB"\n}' },
+        { m: "GET", p: "/", d: "Opens the SAM3 web dashboard — a visual interface for image detection, video processing, and result export. Open this URL in your browser.", res: "HTML page (SAM3 Dashboard UI)" },
+      ]},
+    ];
 
-          return (
-            <Grid item xs={12}>
-              <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed44" }}>
-                <CardContent>
-                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-                    <Box sx={{ width: 6, height: 32, borderRadius: 3, bgcolor: "#7c3aed" }} />
-                    <Typography variant="h6" fontWeight={900} sx={{ color: "#7c3aed", flexGrow: 1 }}>SAM3 API Documentation</Typography>
-                    <Chip label={"Base URL: " + base} size="small" sx={{ fontFamily: "monospace", fontWeight: 600, fontSize: 11, bgcolor: "#7c3aed11", color: "#7c3aed", border: "1px solid #7c3aed33" }} />
-                    <Button variant="outlined" size="small" onClick={() => setShowApi(false)} sx={{ textTransform: "none", fontWeight: 700, borderColor: "#cbd5e1", color: "#64748b" }}>Hide</Button>
-                  </Stack>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    SAM3 object detection & segmentation API. Replace {"{host}:{port}"} with your SAM3 server address (e.g. {base}).
-                  </Typography>
+    return (
+      <Grid container spacing={2}>
+        {/* Header */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed44" }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
+                <Button variant="outlined" size="small" onClick={() => setPage("ai-sam3")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#7c3aed", color: "#7c3aed" }}>
+                  Back to SAM3
+                </Button>
+                <Typography variant="h5" fontWeight={900} sx={{ color: "#7c3aed", flexGrow: 1 }}>
+                  SAM3 API Documentation
+                </Typography>
+                <Chip label="16 endpoints" size="small" sx={{ bgcolor: "#7c3aed15", color: "#7c3aed", fontWeight: 700, border: "1px solid #7c3aed33" }} />
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Complete API reference for SAM3 object detection & segmentation service. All endpoints are REST APIs accessible via HTTP.
+              </Typography>
+              <Alert severity="info" sx={{ borderRadius: 2 }}>
+                <b>Base URL:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{base}</code>
+                {" "} — All paths below are relative to this base URL. Replace {"{host}:{port}"} with your SAM3 server address.
+              </Alert>
+            </CardContent>
+          </Card>
+        </Grid>
 
-                  {sections.map((sec, si) => (
-                    <Box key={si} sx={{ mb: 2.5 }}>
-                      <Stack direction="row" alignItems="center" spacing={1} sx={{ cursor: "pointer", userSelect: "none", mb: 1, py: 0.5, px: 1, borderRadius: 1.5, bgcolor: "#7c3aed08", "&:hover": { bgcolor: "#7c3aed12" } }} onClick={() => toggleSec(si)}>
-                        <Typography variant="subtitle1" fontWeight={800} sx={{ color: "#7c3aed", flexGrow: 1 }}>{sec.name}</Typography>
-                        <Typography sx={{ color: "#7c3aed", fontSize: 14, fontWeight: 700 }}>{expanded[si] ? "\u25BC" : "\u25B6"}</Typography>
+        {/* Sections */}
+        {sections.map((sec, si) => (
+          <Grid item xs={12} key={si}>
+            <Card sx={{ borderRadius: 3, border: "1px solid " + (sec.color || "#7c3aed") + "33" }}>
+              <CardContent>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+                  <Box sx={{ width: 5, height: 28, borderRadius: 3, bgcolor: sec.color || "#7c3aed" }} />
+                  <Typography variant="h6" fontWeight={800} sx={{ color: sec.color || "#7c3aed", flexGrow: 1 }}>{sec.name}</Typography>
+                  <Chip label={sec.eps.length + " endpoint" + (sec.eps.length > 1 ? "s" : "")} size="small" variant="outlined" sx={{ fontSize: 10, height: 20 }} />
+                </Stack>
+
+                {sec.eps.map((ep, ei) => {
+                  const cl = mc(ep.m);
+                  return (
+                    <Paper key={ei} variant="outlined" sx={{ p: 2, mb: 1.5, borderRadius: 2, "&:hover": { borderColor: (sec.color || "#7c3aed") + "66", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" } }}>
+                      {/* Method + Path */}
+                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "flex-start", md: "center" }}>
+                        <Chip label={ep.m} size="small" sx={{ bgcolor: cl.bg, color: cl.c, border: "1px solid " + cl.b, fontWeight: 800, fontFamily: "monospace", minWidth: 70, justifyContent: "center" }} />
+                        <Typography sx={{ fontFamily: "'Cascadia Code','Fira Code','Consolas',monospace", fontWeight: 600, wordBreak: "break-all", flexGrow: 1, fontSize: 14 }}>
+                          {base}{ep.p}
+                        </Typography>
+                        <Tooltip title="Copy cURL command">
+                          <Button size="small" variant="outlined" onClick={() => doCopy(makeCurl(ep.m, ep.p, ep.body))} sx={{ textTransform: "none", minWidth: 0, px: 1.5, fontSize: 11, borderColor: "#e2e8f0" }}>
+                            cURL
+                          </Button>
+                        </Tooltip>
                       </Stack>
-                      {expanded[si] && sec.eps.map((ep, ei) => {
-                        const cl = mc(ep.m);
-                        return (
-                          <Paper key={ei} variant="outlined" sx={{ p: 1.5, mb: 1, borderRadius: 2, "&:hover": { borderColor: "#7c3aed44" } }}>
-                            <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "flex-start", md: "center" }}>
-                              <Chip label={ep.m} size="small" sx={{ bgcolor: cl.bg, color: cl.c, border: "1px solid " + cl.b, fontWeight: 800, fontFamily: "monospace", minWidth: 70, justifyContent: "center" }} />
-                              <Typography variant="body2" sx={{ fontFamily: "'Cascadia Code','Fira Code','Consolas',monospace", fontWeight: 600, wordBreak: "break-all", flexGrow: 1, fontSize: 13 }}>
-                                {base}{ep.p}
-                              </Typography>
-                            </Stack>
-                            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>{ep.d}</Typography>
-                            {ep.body && (
-                              <Box sx={{ mt: 1 }}>
-                                <Typography variant="caption" fontWeight={700} sx={{ color: "#475569" }}>Request Body:</Typography>
-                                <Paper elevation={0} sx={{ mt: 0.3, p: 1, bgcolor: "#f8fafc", borderRadius: 1.5, fontFamily: "monospace", fontSize: 12, wordBreak: "break-all", border: "1px solid #e2e8f0" }}>{ep.body}</Paper>
-                              </Box>
-                            )}
-                            {ep.res && (
-                              <Box sx={{ mt: 1 }}>
-                                <Typography variant="caption" fontWeight={700} sx={{ color: "#475569" }}>Response:</Typography>
-                                <Paper elevation={0} sx={{ mt: 0.3, p: 1, bgcolor: "#f0fdf4", borderRadius: 1.5, fontFamily: "monospace", fontSize: 12, wordBreak: "break-all", border: "1px solid #dcfce7" }}>{ep.res}</Paper>
-                              </Box>
-                            )}
+
+                      {/* Description */}
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1, lineHeight: 1.6 }}>{ep.d}</Typography>
+
+                      {/* Request Body */}
+                      {ep.body && (
+                        <Box sx={{ mt: 1.5 }}>
+                          <Typography variant="caption" fontWeight={700} sx={{ color: "#475569", display: "block", mb: 0.5 }}>Request Body:</Typography>
+                          <Paper elevation={0} sx={{ p: 1.5, bgcolor: "#f8fafc", borderRadius: 2, fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all", border: "1px solid #e2e8f0", lineHeight: 1.7 }}>
+                            {ep.body}
                           </Paper>
-                        );
-                      })}
-                    </Box>
-                  ))}
-                </CardContent>
-              </Card>
-            </Grid>
-          );
-        })}
+                        </Box>
+                      )}
+
+                      {/* Response */}
+                      {ep.res && (
+                        <Box sx={{ mt: 1.5 }}>
+                          <Typography variant="caption" fontWeight={700} sx={{ color: "#475569", display: "block", mb: 0.5 }}>Response:</Typography>
+                          <Paper elevation={0} sx={{ p: 1.5, bgcolor: "#f0fdf4", borderRadius: 2, fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all", border: "1px solid #dcfce7", lineHeight: 1.7 }}>
+                            {ep.res}
+                          </Paper>
+                        </Box>
+                      )}
+                    </Paper>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
       </Grid>
     );
   };
