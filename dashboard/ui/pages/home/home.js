@@ -65,11 +65,78 @@
   // ── AI & ML Services page ─────────────────────────────────────────────────
   ns.pages["ai-ml"] = function renderAiMlPage(p) {
     const {
-      Grid, Card, CardContent, Typography, Stack, Button, Box, Alert,
-      NavCard, cfg, setPage,
+      Grid, Card, CardContent, Typography, Stack, Button, Box, Alert, Chip, Paper,
+      NavCard, cfg, setPage, isScopeLoading,
     } = p;
+
+    const [activeCategory, setActiveCategory] = React.useState("all");
+
+    const categories = [
+      {
+        id: "llm",
+        label: "LLMs",
+        color: "#1e40af",
+        bg: "#eff6ff",
+        border: "#bfdbfe",
+        description: "Large Language Models for text generation, chat, code, and reasoning.",
+        services: [
+          { title: "Ollama", text: "Run LLMs locally (Llama 3, Mistral, Gemma, Phi, etc.). OpenAI-compatible API with GPU acceleration.", page: "ai-ollama", hasApi: true },
+          { title: "Text Generation WebUI", text: "Full-featured web UI for LLMs with GPTQ, GGUF, AWQ, and EXL2 backends.", page: "ai-tgwui" },
+          { title: "vLLM", text: "High-throughput LLM serving engine with PagedAttention. Production-grade OpenAI-compatible API.", page: "ai-vllm" },
+          { title: "llama.cpp", text: "Lightweight C++ LLM inference. Runs GGUF models on CPU and GPU with minimal dependencies.", page: "ai-llamacpp" },
+          { title: "DeepSeek", text: "Deploy DeepSeek models locally via Ollama or vLLM. Optimized for code and reasoning tasks.", page: "ai-deepseek" },
+          { title: "LocalAI", text: "OpenAI-compatible local API supporting LLMs, image generation, audio, and embeddings.", page: "ai-localai" },
+        ],
+      },
+      {
+        id: "image-video",
+        label: "Image & Video",
+        color: "#7c3aed",
+        bg: "#f5f3ff",
+        border: "#c4b5fd",
+        description: "Image generation, editing, video processing, and visual AI models.",
+        services: [
+          { title: "ComfyUI", text: "Node-based Stable Diffusion workflow editor. Supports SDXL, ControlNet, LoRA, and custom pipelines.", page: "ai-comfyui" },
+          { title: "Stable Diffusion WebUI", text: "AUTOMATIC1111's web UI for Stable Diffusion image generation with extensions ecosystem.", page: "ai-sdwebui" },
+          { title: "SAM3 - Segment Anything", text: "Meta's advanced object detection & segmentation. Text/point/box prompts, video tracking, live camera.", page: "ai-sam3", hasApi: true },
+          { title: "Fooocus", text: "Simplified Stable Diffusion with Midjourney-like quality. Minimal configuration needed.", page: "ai-fooocus" },
+        ],
+      },
+      {
+        id: "voice",
+        label: "Voice & Audio",
+        color: "#0d9488",
+        bg: "#f0fdfa",
+        border: "#99f6e4",
+        description: "Text-to-Speech, Speech-to-Text, voice cloning, and audio processing.",
+        services: [
+          { title: "Whisper", text: "OpenAI's speech recognition model. Transcribe and translate audio in 99+ languages.", page: "ai-whisper" },
+          { title: "Piper TTS", text: "Fast local text-to-speech with natural voices. Supports 30+ languages, runs on CPU.", page: "ai-piper" },
+          { title: "Coqui TTS", text: "Deep learning text-to-speech with voice cloning. Multiple models and languages.", page: "ai-coqui" },
+          { title: "Bark", text: "Suno's text-to-audio model. Generate speech, music, and sound effects from text prompts.", page: "ai-bark" },
+          { title: "RVC (Voice Changer)", text: "Real-time voice conversion using AI. Clone voices with minimal training data.", page: "ai-rvc" },
+        ],
+      },
+      {
+        id: "tools",
+        label: "AI Tools",
+        color: "#b45309",
+        bg: "#fffbeb",
+        border: "#fde68a",
+        description: "Embeddings, vector databases, RAG pipelines, and general-purpose AI tools.",
+        services: [
+          { title: "Custom Model", text: "Deploy any AI model as a managed service with custom Docker or OS configuration.", page: "ai-custom" },
+          { title: "Open WebUI", text: "ChatGPT-style web interface for Ollama and OpenAI-compatible APIs with RAG support.", page: "ai-openwebui" },
+          { title: "ChromaDB", text: "Open-source vector database for AI embeddings. Build RAG and semantic search pipelines.", page: "ai-chromadb" },
+        ],
+      },
+    ];
+
+    const visibleCategories = activeCategory === "all" ? categories : categories.filter((c) => c.id === activeCategory);
+
     return (
       <Grid container spacing={2}>
+        {/* ── Header ── */}
         <Grid item xs={12}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
             <CardContent>
@@ -78,38 +145,105 @@
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
                 Deploy and manage AI models, inference servers, and machine learning workloads on your server.
-              </Typography>
-              <Typography variant="body2" sx={{ mb: 0.5 }}>
-                <b>Supported frameworks:</b> Ollama, vLLM, llama.cpp, Text Generation WebUI, ComfyUI
+                Services are grouped by their nature — select a category or browse all.
               </Typography>
               <Alert severity="info" sx={{ mt: 1, borderRadius: 2 }}>
                 Most AI/ML workloads benefit from a dedicated GPU. CPU-only inference is supported but will be significantly slower for large models.
+                Ensure your server meets the VRAM/RAM requirements for the models you plan to deploy.
               </Alert>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
-          <NavCard title="Ollama" text="Run large language models locally. Supports GPU acceleration." onClick={() => setPage("ai-ollama")} />
+
+        {/* ── Category filter buttons ── */}
+        <Grid item xs={12}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Button
+              variant={activeCategory === "all" ? "contained" : "outlined"}
+              size="small"
+              onClick={() => setActiveCategory("all")}
+              sx={{
+                textTransform: "none", borderRadius: 2, fontWeight: 700, px: 2,
+                ...(activeCategory === "all" ? { bgcolor: "#6d28d9", "&:hover": { bgcolor: "#5b21b6" } } : { borderColor: "#6d28d9", color: "#6d28d9" }),
+              }}
+            >
+              All Services
+            </Button>
+            {categories.map((cat) => (
+              <Button
+                key={cat.id}
+                variant={activeCategory === cat.id ? "contained" : "outlined"}
+                size="small"
+                onClick={() => setActiveCategory(cat.id)}
+                sx={{
+                  textTransform: "none", borderRadius: 2, fontWeight: 700, px: 2,
+                  ...(activeCategory === cat.id ? { bgcolor: cat.color, "&:hover": { bgcolor: cat.color, filter: "brightness(0.9)" } } : { borderColor: cat.color, color: cat.color }),
+                }}
+              >
+                {cat.label}
+              </Button>
+            ))}
+          </Stack>
         </Grid>
-        <Grid item xs={12} md={6}>
-          <NavCard title="Text Generation WebUI" text="Web UI for running LLMs with various backends." onClick={() => setPage("ai-tgwui")} outlined />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <NavCard title="ComfyUI" text="Node-based Stable Diffusion UI." onClick={() => setPage("ai-comfyui")} outlined />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <NavCard title="Custom Model" text="Deploy any AI model as a managed service." onClick={() => setPage("ai-custom")} outlined />
-        </Grid>
+
+        {/* ── Category sections with service cards ── */}
+        {visibleCategories.map((cat) => (
+          <Grid item xs={12} key={cat.id}>
+            <Card sx={{ borderRadius: 3, border: `1.5px solid ${cat.border}`, background: `linear-gradient(135deg, ${cat.bg} 0%, #ffffff 100%)` }}>
+              <CardContent>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                  <Chip label={cat.label} size="small" sx={{ bgcolor: cat.color, color: "#fff", fontWeight: 700 }} />
+                  <Typography variant="h6" fontWeight={800} sx={{ color: cat.color, flexGrow: 1 }}>
+                    {cat.label}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {cat.services.length} service{cat.services.length !== 1 ? "s" : ""}
+                  </Typography>
+                </Stack>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  {cat.description}
+                </Typography>
+                <Grid container spacing={1.5}>
+                  {cat.services.map((svc) => (
+                    <Grid item xs={12} sm={6} md={4} key={svc.page}>
+                      <Paper
+                        variant="outlined"
+                        sx={{
+                          p: 1.5, borderRadius: 2, cursor: "pointer", height: "100%",
+                          transition: "all 0.15s ease",
+                          "&:hover": { borderColor: cat.color, boxShadow: `0 2px 8px ${cat.color}22`, transform: "translateY(-1px)" },
+                        }}
+                        onClick={() => setPage(svc.page)}
+                      >
+                        <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.5 }}>
+                          <Typography variant="subtitle2" fontWeight={800}>{svc.title}</Typography>
+                          {svc.hasApi && <Chip label="API" size="small" variant="outlined" sx={{ fontSize: 10, height: 18, color: cat.color, borderColor: cat.color }} />}
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.4 }}>
+                          {svc.text}
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                  ))}
+                </Grid>
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+
+        {/* ── Deployed Services List ── */}
         <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
             <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                <Typography variant="h6" fontWeight={800}>AI & ML Services</Typography>
+                <Typography variant="h6" fontWeight={800}>Deployed AI Services</Typography>
                 <Box sx={{ flexGrow: 1 }} />
-                <Button variant="outlined" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}>Refresh</Button>
+                <Button variant="outlined" disabled={isScopeLoading && isScopeLoading("ai")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}>
+                  {isScopeLoading && isScopeLoading("ai") ? "Refreshing..." : "Refresh"}
+                </Button>
               </Stack>
               <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: 200, overflow: "auto" }}>
-                <Typography variant="body2" color="text.secondary">No AI services deployed yet.</Typography>
+                <Typography variant="body2" color="text.secondary">No AI services deployed yet. Select a service above to get started.</Typography>
               </Box>
             </CardContent>
           </Card>
