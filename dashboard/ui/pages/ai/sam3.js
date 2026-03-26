@@ -163,7 +163,7 @@
               {httpPort && <Typography variant="body2">HTTP Port: {httpPort}</Typography>}
               {httpsPort && <Typography variant="body2">HTTPS Port: {httpsPort}</Typography>}
               {sam3.detected_gpu_name && <Typography variant="body2">GPU: {sam3.detected_gpu_name}</Typography>}
-              {!!modelDir && (
+              {modelReady && !!modelDir && (
                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mt: 0.5 }}>
                   <IconOnlyAction title={`Open ${modelDir}`} IconComp={FolderIcon} fallback="folder" onClick={() => openInFiles(modelDir)} />
                   <Typography variant="body2" sx={{ wordBreak: "break-all", cursor: "pointer", "&:hover": { textDecoration: "underline", color: "#7c3aed" } }} onClick={() => openInFiles(modelDir)}>
@@ -200,7 +200,7 @@
             onRun={run}
             color="#059669"
           />
-          {modelPath && (
+          {modelReady && modelPath && (
             <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 0.5 }}>
               <IconOnlyAction title={`Open ${modelDir}`} IconComp={FolderIcon} fallback="folder" onClick={() => openInFiles(modelDir)} />
               <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all", cursor: "pointer", "&:hover": { textDecoration: "underline" } }} onClick={() => openInFiles(modelDir)}>
