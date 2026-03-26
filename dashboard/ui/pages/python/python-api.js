@@ -4,8 +4,9 @@
 
   ns.pages["python-api"] = function renderPythonApiPage(p) {
     const {
-      Grid, NavCard,
+      Grid, Card, CardContent, Typography, Stack, Button, NavCard,
       cfg, startNewPythonApiDeployment, renderPythonApiRunsCard,
+      setPage,
     } = p;
 
     const pythonApiTargets = [];
@@ -42,6 +43,16 @@
     }
     return (
       <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1 }}>Python APIs</Typography>
+                <Button variant="outlined" size="small" onClick={() => setPage("api-docs-python")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#0d9488", color: "#0d9488" }}>API Documents</Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
         {pythonApiTargets}
         {renderPythonApiRunsCard()}
       </Grid>

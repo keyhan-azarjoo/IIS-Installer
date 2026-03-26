@@ -95,9 +95,12 @@
         <Grid item xs={12}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
             <CardContent>
-              <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5, color: "#6d28d9" }}>
-                SAM3 - Segment Anything Model 3
-              </Typography>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1, color: "#6d28d9" }}>
+                  SAM3 - Segment Anything Model 3
+                </Typography>
+                <Button variant="outlined" size="small" onClick={() => setPage("api-docs-sam3")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#7c3aed", color: "#7c3aed" }}>API Documents</Button>
+              </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 Deploy Meta's Segment Anything Model 3 for advanced object detection and segmentation.
                 Supports text, point, bounding-box, and visual exemplar prompts. Includes video processing

@@ -122,9 +122,23 @@
       </Grid>
     );
 
+    const apiDocsBtn = (
+      <Grid item xs={12}>
+        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+          <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1 }}>MongoDB</Typography>
+              <Button variant="outlined" size="small" onClick={() => setPage("api-docs-mongo")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#15803d", color: "#15803d" }}>API Documents</Button>
+            </Stack>
+          </CardContent>
+        </Card>
+      </Grid>
+    );
+
     if (cfg.os === "windows") {
       return (
         <Grid container spacing={2}>
+          {apiDocsBtn}
           <Grid item xs={12} md={6}>
             <NavCard title="Native" text="Install MongoDB as a Windows service." onClick={() => setPage("mongo-native")} />
           </Grid>
@@ -138,6 +152,7 @@
     if (cfg.os === "linux" || cfg.os === "darwin") {
       return (
         <Grid container spacing={2}>
+          {apiDocsBtn}
           <Grid item xs={12} md={6}>
             <NavCard title="Native" text="Install MongoDB natively with a Compass-style web UI." onClick={() => setPage("mongo-native")} />
           </Grid>

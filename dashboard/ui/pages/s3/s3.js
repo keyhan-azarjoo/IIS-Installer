@@ -14,6 +14,7 @@
       onServiceAction, isServiceRunningStatus,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
       OpenCompassStyleIcon, TryOpenCompassIcon, CopyCompassIcon,
+      setPage,
     } = p;
 
     const s3ExtraActions = (
@@ -124,7 +125,10 @@
           <Grid item xs={12}>
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
               <CardContent>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>S3-Compatible Object Storage</Typography>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                  <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1 }}>S3-Compatible Object Storage</Typography>
+                  <Button variant="outlined" size="small" onClick={() => setPage("api-docs-s3")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#0f766e", color: "#0f766e" }}>API Documents</Button>
+                </Stack>
                 <Typography variant="body2">
                   MinIO provides Amazon S3-compatible object storage you can run locally. Store files, images, backups, and application data using the standard S3 API. Access your storage through the MinIO Console web UI or connect from any S3-compatible client or SDK.
                 </Typography>
@@ -179,7 +183,10 @@
           <Grid item xs={12}>
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
               <CardContent>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>S3-Compatible Object Storage</Typography>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                  <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1 }}>S3-Compatible Object Storage</Typography>
+                  <Button variant="outlined" size="small" onClick={() => setPage("api-docs-s3")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#0f766e", color: "#0f766e" }}>API Documents</Button>
+                </Stack>
                 <Typography variant="body2">
                   MinIO provides Amazon S3-compatible object storage you can run locally. Store files, images, backups, and application data using the standard S3 API. Access your storage through the MinIO Console web UI or connect from any S3-compatible client or SDK.
                 </Typography>
