@@ -3160,6 +3160,15 @@ def run_windows_website_iis(form=None, live_cb=None):
         # Also add a binding without host header so IP access still works
         ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'http' -Port {int(http_port)} -IPAddress $ip -ErrorAction SilentlyContinue | Out-Null")
     ps_lines.append("Start-Website -Name $siteName | Out-Null")
+
+    # Add domain to hosts file so it resolves on this server
+    if domain:
+        ip_for_hosts = bind_ip if bind_ip not in ("", "*", "0.0.0.0") else choose_service_host()
+        ps_lines.append(f"$hostsFile = Join-Path $env:SystemRoot 'System32\\drivers\\etc\\hosts'")
+        ps_lines.append(f"$domainEntry = '{ip_for_hosts}  {domain}'")
+        ps_lines.append(f"$hostsContent = Get-Content $hostsFile -Raw -ErrorAction SilentlyContinue")
+        ps_lines.append(f"if ($hostsContent -notmatch [regex]::Escape('{domain}')) {{ Add-Content -Path $hostsFile -Value \"`n$domainEntry\" -ErrorAction SilentlyContinue }}")
+
     ps = "\n".join(ps_lines)
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
     if rc != 0:
@@ -3219,7 +3228,12 @@ def run_windows_website_iis(form=None, live_cb=None):
         result_lines.append(f"URL: {u}")
     result_lines.append(f"Content: {deploy['publish_root']}")
     if domain:
-        result_lines.append(f"\nNote: For '{domain}' to work, add it to your DNS or hosts file:")
+        result_lines.append(f"\nDomain '{domain}' added to this server's hosts file.")
+        result_lines.append(f"To access from other devices, add this to their hosts file:")
+        if os.name == "nt":
+            result_lines.append(f"  Windows: C:\\Windows\\System32\\drivers\\etc\\hosts")
+        else:
+            result_lines.append(f"  Linux/Mac: /etc/hosts")
         result_lines.append(f"  {ip_host}  {domain}")
     return 0, "\n".join(result_lines) + "\n"
 
