@@ -3166,15 +3166,10 @@ def run_windows_website_iis(form=None, live_cb=None):
     ]
     ps_lines.append("Start-Website -Name $siteName | Out-Null")
 
-    # Add domain to hosts file so it resolves on this server
+    # Add domain to hosts file so it resolves on this machine
     if domain:
         ip_for_hosts = bind_ip if bind_ip not in ("", "*", "0.0.0.0") else choose_service_host()
-        hosts_entry = f"{ip_for_hosts}  {domain}"
-        ps_lines.append("$hostsFile = Join-Path $env:SystemRoot 'System32\\drivers\\etc\\hosts'")
-        ps_lines.append(f"$domainEntry = '{hosts_entry}'")
-        ps_lines.append("$hostsContent = Get-Content $hostsFile -Raw -ErrorAction SilentlyContinue")
-        ps_lines.append(f"if ($hostsContent -and $hostsContent -notmatch [regex]::Escape('{domain}')) {{ Add-Content -Path $hostsFile -Value $domainEntry -ErrorAction SilentlyContinue }}")
-        ps_lines.append(f"if (-not $hostsContent) {{ Add-Content -Path $hostsFile -Value $domainEntry -ErrorAction SilentlyContinue }}")
+        _add_hosts_entry(domain, ip_for_hosts, live_cb=live_cb)
 
     ps = "\n".join(ps_lines)
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
@@ -7049,6 +7044,36 @@ def is_windows_local_system():
 
 def _ps_single_quote(value):
     return "'" + str(value or "").replace("'", "''") + "'"
+
+
+def _add_hosts_entry(domain, ip, live_cb=None):
+    """Add a domain→IP entry to the system hosts file."""
+    try:
+        if os.name == "nt":
+            hosts_path = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "drivers" / "etc" / "hosts"
+        else:
+            hosts_path = Path("/etc/hosts")
+
+        entry = f"{ip}  {domain}"
+        existing = ""
+        try:
+            existing = hosts_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+        if domain in existing:
+            if live_cb:
+                live_cb(f"Domain '{domain}' already in hosts file.\n")
+            return
+
+        with open(str(hosts_path), "a", encoding="utf-8") as f:
+            f.write(f"\n{entry}\n")
+
+        if live_cb:
+            live_cb(f"Added '{entry}' to {hosts_path}\n")
+    except Exception as ex:
+        if live_cb:
+            live_cb(f"[WARN] Could not update hosts file: {ex}\n")
 
 
 def get_active_windows_user():
