@@ -8069,11 +8069,19 @@ def run_sam3_download_model(form=None, live_cb=None):
 
     replace_model = (form.get("SAM3_REPLACE_MODEL", ["no"])[0] or "no").strip().lower()
     target_model = Path(model_dir)
+    stopped_service = False
     if target_model.exists():
         if replace_model not in ("yes", "y", "1", "true"):
             return 0, "SAM3 model is already downloaded. Select 'yes' to replace."
+        # Stop SAM3 service first so the file isn't locked
         if live_cb:
-            live_cb("Replacing existing SAM3 model...\n")
+            live_cb("Stopping SAM3 service before replacing model...\n")
+        run_sam3_stop(live_cb=live_cb)
+        stopped_service = True
+        import time
+        time.sleep(1)
+        if live_cb:
+            live_cb("Removing old model...\n")
         try:
             target_model.unlink()
         except Exception as ex:
@@ -8137,12 +8145,27 @@ def run_sam3_download_model(form=None, live_cb=None):
         _write_json_file(SAM3_STATE_FILE, state)
         size_mb = target_model.stat().st_size / (1024 * 1024)
         output = f"{output.rstrip()}\nSAM3 model downloaded successfully ({size_mb:.0f} MB)."
+        # Restart service if we stopped it
+        if stopped_service:
+            if live_cb:
+                live_cb("Restarting SAM3 service...\n")
+            run_sam3_start(live_cb=live_cb)
     elif code == 0:
         # Download succeeded but file is suspiciously small or missing
         if target_model.exists():
             target_model.unlink(missing_ok=True)
         output = f"{output.rstrip()}\n[ERROR] Download completed but file is missing or too small. Check the URL."
         code = 1
+        if stopped_service:
+            if live_cb:
+                live_cb("Restarting SAM3 service...\n")
+            run_sam3_start(live_cb=live_cb)
+    else:
+        # Download failed — restart service if we stopped it
+        if stopped_service:
+            if live_cb:
+                live_cb("Restarting SAM3 service...\n")
+            run_sam3_start(live_cb=live_cb)
     return code, output
 
 
