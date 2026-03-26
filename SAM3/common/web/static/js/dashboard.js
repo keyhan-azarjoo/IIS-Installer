@@ -176,11 +176,15 @@ detectionForm.addEventListener('submit', async (e) => {
     showLoading(true);
 
     try {
-        // Send AJAX request
+        // Send AJAX request with extended timeout for CPU inference
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 min timeout
         const response = await fetch('/detect', {
             method: 'POST',
-            body: formData
+            body: formData,
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -1071,9 +1075,12 @@ const PointClickModule = {
                 detectBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Detecting...';
             }
 
+            const _ctrl1 = new AbortController();
+            setTimeout(() => _ctrl1.abort(), 600000);
             const response = await fetch('/detect-point', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: _ctrl1.signal
             });
 
             if (!response.ok) {
@@ -1970,7 +1977,9 @@ const BoundingBoxModule = {
             formData.append('bboxes', JSON.stringify(bboxes));
             formData.append('confidence', document.getElementById('boxConfidenceSlider').value);
 
-            const response = await fetch('/detect-box', {method: 'POST', body: formData});
+            const _ctrl2 = new AbortController();
+            setTimeout(() => _ctrl2.abort(), 600000);
+            const response = await fetch('/detect-box', {method: 'POST', body: formData, signal: _ctrl2.signal});
             const data = await response.json();
 
             if (data.error) {
@@ -2274,7 +2283,9 @@ const ExemplarModule = {
             formData.append('reference_bbox', JSON.stringify(bbox));
             formData.append('confidence', document.getElementById('exemplarConfidenceSlider').value);
 
-            const response = await fetch('/detect-exemplar', {method: 'POST', body: formData});
+            const _ctrl3 = new AbortController();
+            setTimeout(() => _ctrl3.abort(), 600000);
+            const response = await fetch('/detect-exemplar', {method: 'POST', body: formData, signal: _ctrl3.signal});
             const data = await response.json();
 
             if (data.error) {

@@ -906,6 +906,8 @@ def model_info():
     Returns:
         JSON with model configuration details
     """
+    err = _ensure_detector()
+    if err: return err
     info = detector.get_model_info()
     return jsonify(info)
 
@@ -915,13 +917,16 @@ def model_info():
 # ====================================
 
 if __name__ == "__main__":
+    # Pre-load model at startup so first request doesn't timeout
+    _ensure_detector()
+
     print("\n" + "="*50)
-    print("🚀 SAM3 Professional Dashboard")
+    print("SAM3 Professional Dashboard")
     print("="*50)
-    print(f"📂 Templates: {app.template_folder}")
-    print(f"📂 Static: {app.static_folder}")
-    print(f"🤖 Model: {os.path.basename(MODEL_PATH)}")
-    print(f"⚡ Device: {DEVICE}")
+    print(f"Templates: {app.template_folder}")
+    print(f"Static: {app.static_folder}")
+    print(f"Model: {os.path.basename(MODEL_PATH)} ({'loaded' if detector else 'NOT LOADED'})")
+    print(f"Device: {DEVICE}")
     print("="*50 + "\n")
 
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=5000, threaded=True)

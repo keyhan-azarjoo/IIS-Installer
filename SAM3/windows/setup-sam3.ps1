@@ -332,7 +332,7 @@ if __name__ == '__main__':
     else:
         print(f'SAM3 starting on http://{host}:{http_port}')
 
-    app.run(host=host, port=http_port, debug=False)
+    app.run(host=host, port=http_port, debug=False, threaded=True)
 "@
 Set-Content -Path $startupScript -Value $startupContent -Encoding UTF8
 
