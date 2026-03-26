@@ -388,9 +388,122 @@
           </Card>
         </Grid>
 
-        {/* ── API Docs ── */}
-        {ns.renderApiDocs && ns.apiDocs && ns.apiDocs.ollama && ns.renderApiDocs(p, ns.apiDocs.ollama)}
+        {/* ── API Documents Button ── */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #1e40af44", background: "linear-gradient(135deg, #1e40af05 0%, #ffffff 100%)" }}>
+            <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+              <Stack direction="row" alignItems="center" spacing={1.5}>
+                <Box sx={{ width: 6, height: 36, borderRadius: 3, bgcolor: "#1e40af" }} />
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography variant="h6" fontWeight={800} sx={{ color: "#1e40af" }}>Ollama API Documentation</Typography>
+                  <Typography variant="caption" color="text.secondary">OpenAI-compatible API — chat, generate, embeddings, model management</Typography>
+                </Box>
+                <Chip label="12 endpoints" size="small" sx={{ bgcolor: "#1e40af15", color: "#1e40af", fontWeight: 700, border: "1px solid #1e40af33" }} />
+                <Button variant="contained" size="small" onClick={() => setPage("ai-ollama-api")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#1e40af", "&:hover": { bgcolor: "#1d4ed8" }, px: 3 }}>
+                  API Documents
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
+  };
+
+  // ── Ollama API Documentation Page ───────────────────────────────────────────
+  ns.pages["ai-ollama-api"] = function renderOllamaApiPage(p) {
+    const { Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip, Tooltip, Alert, setPage, copyText } = p;
+    const ollamaInfo = p.ollamaService || {};
+    const host = String(ollamaInfo.host || "").trim() || "{host}";
+    const port = String(ollamaInfo.http_port || "11434").trim();
+    const base = "http://" + (host === "0.0.0.0" ? "127.0.0.1" : host) + ":" + port;
+
+    const MC = { GET: { bg: "#dcfce7", c: "#166534", b: "#86efac" }, POST: { bg: "#dbeafe", c: "#1e40af", b: "#93c5fd" }, DELETE: { bg: "#fee2e2", c: "#991b1b", b: "#fca5a5" } };
+    const mc = (m) => MC[m] || { bg: "#f3f4f6", c: "#374151", b: "#d1d5db" };
+    const doCopy = (text) => { if (copyText) copyText(text, "cURL"); else if (navigator.clipboard) navigator.clipboard.writeText(text); };
+
+    const sections = [
+      { name: "Chat & Generate", color: "#1e40af", eps: [
+        { m: "POST", p: "/api/chat", d: "Chat with a model. Send messages and get the assistant response. Supports streaming.", body: '{\n  "model": "llama3.2",\n  "messages": [\n    { "role": "user", "content": "Hello!" }\n  ],\n  "stream": false\n}', res: '{\n  "model": "llama3.2",\n  "message": {\n    "role": "assistant",\n    "content": "Hi there! How can I help?"\n  },\n  "done": true\n}' },
+        { m: "POST", p: "/api/generate", d: "Generate text completion from a prompt.", body: '{\n  "model": "llama3.2",\n  "prompt": "Write a haiku about coding",\n  "stream": false\n}', res: '{\n  "model": "llama3.2",\n  "response": "Lines of code unfold..."\n}' },
+        { m: "POST", p: "/api/embeddings", d: "Generate vector embeddings for text. Useful for RAG and semantic search.", body: '{\n  "model": "llama3.2",\n  "prompt": "Hello world"\n}', res: '{\n  "embedding": [0.123, -0.456, 0.789, ...]\n}' },
+      ]},
+      { name: "Model Management", color: "#059669", eps: [
+        { m: "GET", p: "/api/tags", d: "List all downloaded models with name, size, and parameter count.", res: '{\n  "models": [\n    { "name": "llama3.2:latest", "size": 2000000000, "parameter_size": "3B" }\n  ]\n}' },
+        { m: "POST", p: "/api/pull", d: "Download a model from the Ollama registry.", body: '{ "name": "llama3.2", "stream": false }', res: '{ "status": "success" }' },
+        { m: "DELETE", p: "/api/delete", d: "Delete a downloaded model to free disk space.", body: '{ "name": "llama3.2" }', res: '{ "status": "success" }' },
+        { m: "POST", p: "/api/show", d: "Show model details: Modelfile, parameters, template, license.", body: '{ "name": "llama3.2" }', res: '{\n  "modelfile": "FROM llama3.2...",\n  "parameters": "num_ctx 4096",\n  "template": "{{ .System }}"\n}' },
+        { m: "GET", p: "/api/ps", d: "List models currently loaded in GPU/CPU memory.", res: '{\n  "models": [{ "name": "llama3.2", "size": 2000000000 }]\n}' },
+        { m: "POST", p: "/api/copy", d: "Copy a model under a new name (alias).", body: '{ "source": "llama3.2", "destination": "my-model" }', res: "200 OK" },
+        { m: "POST", p: "/api/create", d: "Create a custom model from a Modelfile with system prompt.", body: '{\n  "name": "my-assistant",\n  "modelfile": "FROM llama3.2\\nSYSTEM You are a helpful coding assistant."\n}', res: '{ "status": "success" }' },
+      ]},
+      { name: "OpenAI-Compatible (v1)", color: "#7c3aed", eps: [
+        { m: "POST", p: "/v1/chat/completions", d: "OpenAI-compatible chat completions. Works with any OpenAI SDK (Python, JS, etc.).", body: '{\n  "model": "llama3.2",\n  "messages": [\n    { "role": "user", "content": "Hello" }\n  ]\n}', res: '{\n  "choices": [{\n    "message": { "role": "assistant", "content": "Hi!" }\n  }]\n}' },
+        { m: "GET", p: "/v1/models", d: "List models in OpenAI format.", res: '{\n  "data": [{ "id": "llama3.2", "object": "model" }]\n}' },
+      ]},
+    ];
+
+    return (
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #1e40af44" }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
+                <Button variant="outlined" size="small" onClick={() => setPage("ai-ollama")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#1e40af", color: "#1e40af" }}>
+                  Back to Ollama
+                </Button>
+                <Typography variant="h5" fontWeight={900} sx={{ color: "#1e40af", flexGrow: 1 }}>Ollama API Documentation</Typography>
+                <Chip label="12 endpoints" size="small" sx={{ bgcolor: "#1e40af15", color: "#1e40af", fontWeight: 700 }} />
+              </Stack>
+              <Alert severity="info" sx={{ borderRadius: 2 }}>
+                <b>Base URL:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{base}</code>
+                {" "} — Ollama also supports the OpenAI /v1/ endpoints. Use any OpenAI SDK by pointing it to this base URL.
+              </Alert>
+            </CardContent>
+          </Card>
+        </Grid>
+        {sections.map((sec, si) => (
+          <Grid item xs={12} key={si}>
+            <Card sx={{ borderRadius: 3, border: "1px solid " + sec.color + "33" }}>
+              <CardContent>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+                  <Box sx={{ width: 5, height: 28, borderRadius: 3, bgcolor: sec.color }} />
+                  <Typography variant="h6" fontWeight={800} sx={{ color: sec.color, flexGrow: 1 }}>{sec.name}</Typography>
+                  <Chip label={sec.eps.length + " endpoints"} size="small" variant="outlined" sx={{ fontSize: 10, height: 20 }} />
+                </Stack>
+                {sec.eps.map((ep, ei) => {
+                  const cl = mc(ep.m);
+                  return (
+                    <Paper key={ei} variant="outlined" sx={{ p: 2, mb: 1.5, borderRadius: 2, "&:hover": { borderColor: sec.color + "66" } }}>
+                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "flex-start", md: "center" }}>
+                        <Chip label={ep.m} size="small" sx={{ bgcolor: cl.bg, color: cl.c, border: "1px solid " + cl.b, fontWeight: 800, fontFamily: "monospace", minWidth: 70, justifyContent: "center" }} />
+                        <Typography sx={{ fontFamily: "'Cascadia Code','Fira Code','Consolas',monospace", fontWeight: 600, wordBreak: "break-all", flexGrow: 1, fontSize: 14 }}>{base}{ep.p}</Typography>
+                        <Tooltip title="Copy cURL">
+                          <Button size="small" variant="outlined" onClick={() => doCopy("curl -X " + ep.m + ' "' + base + ep.p + '"')} sx={{ textTransform: "none", minWidth: 0, px: 1.5, fontSize: 11, borderColor: "#e2e8f0" }}>cURL</Button>
+                        </Tooltip>
+                      </Stack>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{ep.d}</Typography>
+                      {ep.body && (
+                        <Box sx={{ mt: 1.5 }}>
+                          <Typography variant="caption" fontWeight={700} sx={{ color: "#475569" }}>Request Body:</Typography>
+                          <Paper elevation={0} sx={{ mt: 0.3, p: 1.5, bgcolor: "#f8fafc", borderRadius: 2, fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap", border: "1px solid #e2e8f0", lineHeight: 1.7 }}>{ep.body}</Paper>
+                        </Box>
+                      )}
+                      {ep.res && (
+                        <Box sx={{ mt: 1.5 }}>
+                          <Typography variant="caption" fontWeight={700} sx={{ color: "#475569" }}>Response:</Typography>
+                          <Paper elevation={0} sx={{ mt: 0.3, p: 1.5, bgcolor: "#f0fdf4", borderRadius: 2, fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap", border: "1px solid #dcfce7", lineHeight: 1.7 }}>{ep.res}</Paper>
+                        </Box>
+                      )}
+                    </Paper>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
       </Grid>
     );
   };
 })();
+

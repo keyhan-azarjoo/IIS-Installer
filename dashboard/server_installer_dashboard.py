@@ -133,6 +133,21 @@ WHISPER_SYSTEMD_SERVICE = "serverinstaller-whisper"
 PIPER_STATE_DIR = SERVER_INSTALLER_DATA / "piper"
 PIPER_STATE_FILE = PIPER_STATE_DIR / "piper-state.json"
 PIPER_SYSTEMD_SERVICE = "serverinstaller-piper"
+
+OLLAMA_WINDOWS_INSTALLER = ROOT / "Ollama" / "windows" / "setup-ollama.ps1"
+OLLAMA_LINUX_INSTALLER = ROOT / "Ollama" / "linux-macos" / "setup-ollama.sh"
+OLLAMA_WINDOWS_FILES = [
+    "Ollama/windows/setup-ollama.ps1",
+    "Ollama/common/ollama_web.py",
+    "Ollama/common/requirements.txt",
+    "Ollama/common/web/templates/index.html",
+]
+OLLAMA_UNIX_FILES = [
+    "Ollama/linux-macos/setup-ollama.sh",
+    "Ollama/common/ollama_web.py",
+    "Ollama/common/requirements.txt",
+    "Ollama/common/web/templates/index.html",
+]
 JUPYTER_SYSTEMD_SERVICE = "serverinstaller-jupyter.service"
 WINDOWS_LOCALS3_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "install-state.json"
 REPO_RAW_BASE = os.environ.get(
@@ -7424,8 +7439,122 @@ if __name__ == "__main__":
 
 # ── AI service install entry points ─────────────────────────────────────────
 def run_ollama_os_install(form=None, live_cb=None):
-    return _run_ai_service_install("ollama", form, OLLAMA_STATE_FILE, OLLAMA_STATE_DIR, OLLAMA_SYSTEMD_SERVICE, "Ollama", "11434",
-        {"nt": [_install_ollama_os], "posix": [_install_ollama_os]}, live_cb=live_cb)
+    """Install Ollama using the platform-specific installer script (like SAM3)."""
+    form = form or {}
+    if os.name == "nt":
+        return run_windows_ollama_installer(form, live_cb=live_cb)
+    return run_unix_ollama_installer(form, live_cb=live_cb)
+
+
+def run_windows_ollama_installer(form=None, live_cb=None):
+    """Run the Ollama Windows PowerShell installer."""
+    form = form or {}
+    if os.name != "nt":
+        return 1, "Windows Ollama installer can only run on Windows hosts."
+    ensure_repo_files(OLLAMA_WINDOWS_FILES, live_cb=live_cb, refresh=False)
+    env = os.environ.copy()
+    for key in ["OLLAMA_HOST_IP", "OLLAMA_HTTP_PORT", "OLLAMA_HTTPS_PORT", "OLLAMA_DOMAIN",
+                 "OLLAMA_USERNAME", "OLLAMA_PASSWORD"]:
+        val = (form.get(key, [""])[0] or "").strip()
+        if val:
+            env[key] = val
+    env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
+    code, output = run_process(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(OLLAMA_WINDOWS_INSTALLER)],
+        env=env, live_cb=live_cb,
+    )
+    return code, output
+
+
+def run_unix_ollama_installer(form=None, live_cb=None):
+    """Run the Ollama Linux/macOS bash installer."""
+    form = form or {}
+    if os.name == "nt":
+        return 1, "Unix Ollama installer can only run on Linux or macOS."
+    ensure_repo_files(OLLAMA_UNIX_FILES, live_cb=live_cb, refresh=False)
+    env = os.environ.copy()
+    env_keys = ["OLLAMA_HOST_IP", "OLLAMA_HTTP_PORT", "OLLAMA_HTTPS_PORT", "OLLAMA_DOMAIN",
+                 "OLLAMA_USERNAME", "OLLAMA_PASSWORD"]
+    for key in env_keys:
+        val = (form.get(key, [""])[0] or "").strip()
+        if val:
+            env[key] = val
+    env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
+    cmd = ["bash", str(OLLAMA_LINUX_INSTALLER)]
+    if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
+        cmd = ["sudo", "env"]
+        for key in env_keys + ["SERVER_INSTALLER_DATA_DIR"]:
+            value = env.get(key, "").strip()
+            if value:
+                cmd.append(f"{key}={value}")
+        cmd += ["bash", str(OLLAMA_LINUX_INSTALLER)]
+    code, output = run_process(cmd, env=env, live_cb=live_cb)
+    return code, output
+
+
+def run_ollama_start(live_cb=None):
+    """Start the Ollama service."""
+    log = lambda m: live_cb(m + "\n") if live_cb else None
+    if os.name != "nt" and command_exists("systemctl"):
+        rc, out = run_capture(["systemctl", "start", OLLAMA_SYSTEMD_SERVICE], timeout=30)
+        run_capture(["systemctl", "start", f"{OLLAMA_SYSTEMD_SERVICE}-webui"], timeout=30)
+        if rc == 0:
+            state = _read_json_file(OLLAMA_STATE_FILE)
+            state["running"] = True
+            _write_json_file(OLLAMA_STATE_FILE, state)
+        return rc, out or "Ollama started."
+    elif os.name == "nt":
+        try:
+            run_capture(["schtasks", "/Run", "/TN", "ServerInstaller-Ollama"], timeout=15)
+            state = _read_json_file(OLLAMA_STATE_FILE)
+            state["running"] = True
+            _write_json_file(OLLAMA_STATE_FILE, state)
+            return 0, "Ollama started."
+        except Exception as e:
+            return 1, str(e)
+    return 1, "Could not start Ollama."
+
+
+def run_ollama_stop(live_cb=None):
+    """Stop the Ollama service."""
+    if os.name != "nt" and command_exists("systemctl"):
+        run_capture(["systemctl", "stop", f"{OLLAMA_SYSTEMD_SERVICE}-webui"], timeout=30)
+        rc, out = run_capture(["systemctl", "stop", OLLAMA_SYSTEMD_SERVICE], timeout=30)
+    elif os.name == "nt":
+        run_capture(["schtasks", "/End", "/TN", "ServerInstaller-Ollama"], timeout=15)
+        rc, out = 0, "Ollama stopped."
+    else:
+        rc, out = 1, "Cannot stop Ollama."
+    state = _read_json_file(OLLAMA_STATE_FILE)
+    state["running"] = False
+    _write_json_file(OLLAMA_STATE_FILE, state)
+    return rc, out or "Ollama stopped."
+
+
+def run_ollama_delete(live_cb=None):
+    """Delete the Ollama service and clean up."""
+    log = lambda m: live_cb(m + "\n") if live_cb else None
+    run_ollama_stop(live_cb=live_cb)
+    if os.name != "nt" and command_exists("systemctl"):
+        for svc in [f"{OLLAMA_SYSTEMD_SERVICE}-webui", OLLAMA_SYSTEMD_SERVICE]:
+            run_capture(["systemctl", "disable", svc], timeout=15)
+            run_capture(["systemctl", "stop", svc], timeout=15)
+            svc_file = Path(f"/etc/systemd/system/{svc}.service")
+            if svc_file.exists():
+                svc_file.unlink()
+        run_capture(["systemctl", "daemon-reload"], timeout=15)
+    elif os.name == "nt":
+        try:
+            run_capture(["schtasks", "/Delete", "/TN", "ServerInstaller-Ollama", "/F"], timeout=15)
+        except Exception:
+            pass
+    # Clean up install dir
+    install_dir = OLLAMA_STATE_DIR / "app"
+    if install_dir.exists():
+        shutil.rmtree(install_dir, ignore_errors=True)
+    if OLLAMA_STATE_FILE.exists():
+        OLLAMA_STATE_FILE.unlink()
+    return 0, "Ollama service deleted."
 
 def run_tgwui_os_install(form=None, live_cb=None):
     return _run_ai_service_install("tgwui", form, TGWUI_STATE_FILE, TGWUI_STATE_DIR, TGWUI_SYSTEMD_SERVICE, "Text Generation WebUI", "7860",
@@ -8069,6 +8198,22 @@ def manage_service(action, name, kind, detail=""):
             code, output = run_sam3_delete(delete_model=del_model)
             return code == 0, output
         return False, "Unsupported SAM3 action."
+
+    if _is_ollama_name(svc_name):
+        if action == "start":
+            code, output = run_ollama_start()
+            return code == 0, output
+        if action == "stop":
+            code, output = run_ollama_stop()
+            return code == 0, output
+        if action == "restart":
+            run_ollama_stop()
+            code, output = run_ollama_start()
+            return code == 0, output
+        if action == "delete":
+            code, output = run_ollama_delete()
+            return code == 0, output
+        return False, "Unsupported Ollama action."
 
     if kind == "website_launchd":
         if os.name == "nt":
