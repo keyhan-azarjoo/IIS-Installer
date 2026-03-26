@@ -6200,14 +6200,26 @@ def _is_sam3_name(name):
 
 def get_sam3_info():
     state = _read_json_file(SAM3_STATE_FILE)
+    # Compute default paths (always available, even before install)
+    default_install_dir = str(SAM3_STATE_DIR / "app")
+    default_model_dir = str(SAM3_STATE_DIR / "app" / "models")
+    default_model_path = str(SAM3_STATE_DIR / "app" / "models" / "sam3.pt")
+    # Use state values if available, otherwise defaults
+    model_path = str(state.get("model_path") or "").strip() or default_model_path
+    install_dir = str(state.get("install_dir") or "").strip() or default_install_dir
+    model_dir = str(Path(model_path).parent) if model_path else default_model_dir
+    # Check actual file on disk
+    model_exists = Path(model_path).exists() and Path(model_path).stat().st_size > 1000000
     info = {
         "installed": bool(state.get("install_dir")),
         "service_name": str(state.get("service_name") or "").strip(),
-        "install_dir": str(state.get("install_dir") or "").strip(),
+        "install_dir": install_dir,
         "venv_dir": str(state.get("venv_dir") or "").strip(),
         "python_executable": str(state.get("python_executable") or "").strip(),
-        "model_path": str(state.get("model_path") or "").strip(),
-        "model_downloaded": bool(state.get("model_downloaded")),
+        "model_path": model_path,
+        "model_dir": model_dir,
+        "default_model_dir": default_model_dir,
+        "model_downloaded": model_exists,
         "device": str(state.get("device") or "cpu").strip(),
         "detected_gpus": state.get("detected_gpus") or [],
         "detected_gpu_type": str(state.get("detected_gpu_type") or "").strip(),
@@ -6266,10 +6278,10 @@ def get_sam3_info():
             "ports": [p for p in [info["http_port"], info["https_port"]] if p],
             "urls": [u for u in [info["http_url"], info["https_url"]] if u],
         })
-    # Check model file
-    model_path = info["model_path"]
-    if model_path and Path(model_path).exists():
-        info["model_downloaded"] = True
+    # Re-check model file on disk (may have been downloaded separately)
+    if not info["model_downloaded"] and info["model_path"] and Path(info["model_path"]).exists():
+        if Path(info["model_path"]).stat().st_size > 1000000:
+            info["model_downloaded"] = True
     return info
 
 

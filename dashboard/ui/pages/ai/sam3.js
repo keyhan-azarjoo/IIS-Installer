@@ -28,6 +28,10 @@
     const authEnabled = !!sam3.auth_enabled;
     const authUser = String(sam3.auth_username || "").trim();
     const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
+    const modelPath = String(sam3.model_path || "").trim();
+    const modelDir = String(sam3.model_dir || sam3.default_model_dir || "").trim();
+    const installDir = String(sam3.install_dir || "").trim();
+    const openInFiles = (dir) => { if (dir && setFileManagerPath) { setFileManagerPath(dir); setPage("files"); } };
 
     // Build GPU options - only show if GPU is actually detected
     const hasGpu = sam3.detected_gpu_type && sam3.detected_gpu_type !== "cpu" && sam3.detected_gpu_type !== "";
@@ -153,13 +157,21 @@
               <Typography variant="h6" fontWeight={800} sx={{ mb: 1, color: "#7c3aed" }}>SAM3 Status</Typography>
               <Typography variant="body2">Device: <b>{device}</b></Typography>
               <Typography variant="body2">Model: <Chip size="small" label={modelReady ? "Ready" : "Not Downloaded"} color={modelReady ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>
-              <Typography variant="body2">Deploy Mode: <b>{deployMode}</b></Typography>
-              <Typography variant="body2">Auth: {authEnabled ? `User: ${authUser}` : "Disabled"}</Typography>
-              <Typography variant="body2">Host: {hostIp || "-"}</Typography>
+              {sam3.installed && <Typography variant="body2">Deploy Mode: <b>{deployMode}</b></Typography>}
+              {authEnabled && <Typography variant="body2">Auth: User: {authUser}</Typography>}
+              {hostIp && <Typography variant="body2">Host: {hostIp}</Typography>}
               {httpPort && <Typography variant="body2">HTTP Port: {httpPort}</Typography>}
               {httpsPort && <Typography variant="body2">HTTPS Port: {httpsPort}</Typography>}
               {sam3.detected_gpu_name && <Typography variant="body2">GPU: {sam3.detected_gpu_name}</Typography>}
-              {!!httpUrl && <Typography variant="body2" sx={{ mt: 1, wordBreak: "break-all" }}>HTTP: <a href={httpUrl} target="_blank" rel="noopener">{httpUrl}</a></Typography>}
+              {!!modelDir && (
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mt: 0.5 }}>
+                  <IconOnlyAction title={`Open ${modelDir}`} IconComp={FolderIcon} fallback="folder" onClick={() => openInFiles(modelDir)} />
+                  <Typography variant="body2" sx={{ wordBreak: "break-all", cursor: "pointer", "&:hover": { textDecoration: "underline", color: "#7c3aed" } }} onClick={() => openInFiles(modelDir)}>
+                    {modelDir}
+                  </Typography>
+                </Box>
+              )}
+              {!!httpUrl && <Typography variant="body2" sx={{ mt: 0.5, wordBreak: "break-all" }}>HTTP: <a href={httpUrl} target="_blank" rel="noopener">{httpUrl}</a></Typography>}
               {!!httpsUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>HTTPS: <a href={httpsUrl} target="_blank" rel="noopener">{httpsUrl}</a></Typography>}
             </CardContent>
           </Card>
@@ -188,19 +200,11 @@
             onRun={run}
             color="#059669"
           />
-          {sam3.model_path && (
-            <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 1 }}>
-              <IconOnlyAction
-                title={sam3.model_path}
-                IconComp={FolderIcon}
-                fallback="folder"
-                onClick={() => {
-                  const dir = String(sam3.model_path || "").replace(/[/\\][^/\\]+$/, "");
-                  if (dir && p.setFileManagerPath) { p.setFileManagerPath(dir); p.setPage("files"); }
-                }}
-              />
-              <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all" }}>
-                {sam3.model_path || ""}
+          {modelPath && (
+            <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 0.5 }}>
+              <IconOnlyAction title={`Open ${modelDir}`} IconComp={FolderIcon} fallback="folder" onClick={() => openInFiles(modelDir)} />
+              <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all", cursor: "pointer", "&:hover": { textDecoration: "underline" } }} onClick={() => openInFiles(modelDir)}>
+                {modelPath}
               </Typography>
             </Box>
           )}
