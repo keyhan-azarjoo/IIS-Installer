@@ -6234,17 +6234,18 @@ def get_sam3_info():
         info["running"] = bool(service_status.get("running"))
         info["service_sub_status"] = str(service_status.get("active") or "")
         info["service_autostart"] = bool(service_status.get("autostart"))
-        if info["running"]:
-            info["services"].append({
-                "name": SAM3_SYSTEMD_SERVICE,
-                "display_name": "SAM3 AI Detection Service",
-                "kind": "systemd",
-                "status": "running" if service_status.get("running") else "stopped",
-                "sub_status": str(service_status.get("active") or ""),
-                "manageable": True,
-                "ports": [info["http_port"], info["https_port"]],
-                "urls": [u for u in [info["http_url"], info["https_url"]] if u],
-            })
+        info["services"].append({
+            "name": SAM3_SYSTEMD_SERVICE,
+            "display_name": "SAM3 AI Detection Service",
+            "kind": "systemd",
+            "status": "running" if service_status.get("running") else "stopped",
+            "sub_status": str(service_status.get("active") or ""),
+            "manageable": True,
+            "deletable": True,
+            "project_path": info["install_dir"],
+            "ports": [p for p in [info["http_port"], info["https_port"]] if p],
+            "urls": [u for u in [info["http_url"], info["https_url"]] if u],
+        })
     # Check Windows scheduled task / NSSM service
     elif os.name == "nt" and info["installed"]:
         svc_name = str(state.get("service_name") or "ServerInstaller-SAM3")
@@ -6254,16 +6255,17 @@ def get_sam3_info():
                 info["running"] = True
         except Exception:
             pass
-        if info.get("running") or state.get("running"):
-            info["services"].append({
-                "name": svc_name,
-                "display_name": "SAM3 AI Detection Service",
-                "kind": "service",
-                "status": "running" if info.get("running") else "stopped",
-                "manageable": True,
-                "ports": [info["http_port"], info["https_port"]],
-                "urls": [u for u in [info["http_url"], info["https_url"]] if u],
-            })
+        info["services"].append({
+            "name": svc_name,
+            "display_name": "SAM3 AI Detection Service",
+            "kind": "service",
+            "status": "running" if info.get("running") else "stopped",
+            "manageable": True,
+            "deletable": True,
+            "project_path": info["install_dir"],
+            "ports": [p for p in [info["http_port"], info["https_port"]] if p],
+            "urls": [u for u in [info["http_url"], info["https_url"]] if u],
+        })
     # Check model file
     model_path = info["model_path"]
     if model_path and Path(model_path).exists():
@@ -6737,6 +6739,23 @@ def manage_service(action, name, kind, detail=""):
         if action == "delete":
             return _hide_detected_python(detail)
         return False, "Detected Python entries only support delete."
+
+    # SAM3 systemd service
+    if _is_sam3_name(svc_name):
+        if action == "start":
+            code, output = run_sam3_start()
+            return code == 0, output
+        if action == "stop":
+            code, output = run_sam3_stop()
+            return code == 0, output
+        if action == "restart":
+            run_sam3_stop()
+            code, output = run_sam3_start()
+            return code == 0, output
+        if action == "delete":
+            code, output = run_sam3_delete()
+            return code == 0, output
+        return False, "Unsupported SAM3 action."
 
     if kind == "website_launchd":
         if os.name == "nt":
@@ -8249,6 +8268,79 @@ def run_sam3_start(live_cb=None):
         state["running"] = True
         _write_json_file(SAM3_STATE_FILE, state)
     return code, output
+
+
+def run_sam3_delete(live_cb=None):
+    """Stop and completely remove SAM3 service, venv, and config."""
+    state = _read_json_file(SAM3_STATE_FILE)
+    deploy_mode = str(state.get("deploy_mode") or "os").strip()
+    service_name = str(state.get("service_name") or "").strip()
+    install_dir = str(state.get("install_dir") or "").strip()
+    outputs = []
+
+    if live_cb:
+        live_cb("Stopping SAM3 service...\n")
+
+    # Stop and disable the service
+    if deploy_mode == "docker":
+        run_process(["docker", "stop", service_name or "serverinstaller-sam3"], live_cb=live_cb)
+        run_process(["docker", "rm", "-f", service_name or "serverinstaller-sam3"], live_cb=live_cb)
+        outputs.append("Docker container removed.")
+    elif os.name == "nt":
+        svc = service_name or "ServerInstaller-SAM3"
+        nssm = shutil.which("nssm")
+        if nssm:
+            run_process([nssm, "stop", svc], live_cb=live_cb)
+            run_process([nssm, "remove", svc, "confirm"], live_cb=live_cb)
+        else:
+            run_process(["schtasks", "/End", "/TN", svc], live_cb=live_cb)
+            run_process(["schtasks", "/Delete", "/TN", svc, "/F"], live_cb=live_cb)
+        outputs.append("Windows service removed.")
+    else:
+        unit = f"{service_name or SAM3_SYSTEMD_SERVICE}.service"
+        run_process(["systemctl", "stop", unit], live_cb=live_cb)
+        run_process(["systemctl", "disable", unit], live_cb=live_cb)
+        systemd_file = f"/etc/systemd/system/{unit}"
+        if Path(systemd_file).exists():
+            Path(systemd_file).unlink(missing_ok=True)
+            run_process(["systemctl", "daemon-reload"], live_cb=live_cb)
+        outputs.append("Systemd service removed.")
+
+    # Remove nginx config
+    nginx_conf = f"/etc/nginx/conf.d/{service_name or SAM3_SYSTEMD_SERVICE}.conf"
+    if Path(nginx_conf).exists():
+        if live_cb:
+            live_cb("Removing Nginx config...\n")
+        Path(nginx_conf).unlink(missing_ok=True)
+        if command_exists("nginx"):
+            run_process(["systemctl", "reload", "nginx"], live_cb=live_cb)
+        outputs.append("Nginx config removed.")
+
+    # Remove install directory (venv, app files) but keep models
+    if install_dir and Path(install_dir).exists():
+        if live_cb:
+            live_cb(f"Removing install directory: {install_dir}\n")
+        shutil.rmtree(install_dir, ignore_errors=True)
+        outputs.append(f"Install directory removed: {install_dir}")
+
+    # Remove state file
+    if SAM3_STATE_FILE.exists():
+        SAM3_STATE_FILE.unlink(missing_ok=True)
+        outputs.append("State file removed.")
+
+    # Remove certs
+    cert_dir = SAM3_STATE_DIR / "certs"
+    if cert_dir.exists():
+        shutil.rmtree(str(cert_dir), ignore_errors=True)
+
+    # Remove auth file
+    auth_file = Path(f"/etc/nginx/auth/{SAM3_SYSTEMD_SERVICE}.htpasswd")
+    if auth_file.exists():
+        auth_file.unlink(missing_ok=True)
+
+    if live_cb:
+        live_cb("SAM3 service deleted successfully.\n")
+    return 0, "\n".join(outputs) + "\nSAM3 deleted successfully."
 
 
 def run_windows_s3_installer(form, live_cb=None, mode="iis"):
@@ -12084,6 +12176,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_sam3_start()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/sam3_delete":
+            title = "SAM3 Delete"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_sam3_delete(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_sam3_delete()
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/dashboard_update":
