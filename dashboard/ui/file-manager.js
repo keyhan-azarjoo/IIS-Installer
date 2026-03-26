@@ -766,8 +766,12 @@
       setPropsData(null);
       setPropsLoading(true);
       try {
-        const r = await fetch(`/api/files/info?path=${encodeURIComponent(entry.path)}`, {
-          headers: { "X-Requested-With": "fetch" },
+        const body = new URLSearchParams();
+        body.set("path", entry.path);
+        const r = await fetch("/api/files/info", {
+          method: "POST",
+          headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
         });
         const j = await r.json();
         setPropsData(j.ok ? j : { error: j.error || "Failed to load properties." });

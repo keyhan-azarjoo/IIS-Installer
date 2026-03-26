@@ -11753,10 +11753,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
-                query = {}
-                if "?" in self.path:
-                    query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
-                path_str = (query.get("path", [""])[0] or "").strip()
+                # Support both POST form data and GET query params
+                path_str = (form.get("path", [""])[0] or "").strip() if form else ""
+                if not path_str:
+                    query = {}
+                    if "?" in self.path:
+                        query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+                    path_str = (query.get("path", [""])[0] or "").strip()
                 if not path_str:
                     self.write_json({"ok": False, "error": "path is required"}, HTTPStatus.BAD_REQUEST)
                     return
