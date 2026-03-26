@@ -3127,11 +3127,14 @@ def run_windows_website_iis(form=None, live_cb=None):
     http_port = deploy["site_port"]
     https_ps_lines = []
     if https_port:
-        https_host_header = f" -HostHeader {_ps_single_quote(domain)}" if domain else ""
+        # Include domain in cert if set
+        cert_dns_names = [dns_name, "localhost", "127.0.0.1"]
+        if domain and domain not in cert_dns_names:
+            cert_dns_names.insert(0, domain)
+        dns_list = ",".join([f"'{d}'" for d in cert_dns_names])
         https_ps_lines = [
-            f"New-WebBinding -Name $siteName -Protocol 'https' -Port {int(https_port)} -IPAddress $ip{https_host_header} -ErrorAction SilentlyContinue | Out-Null",
-            f"$dnsName = {_ps_single_quote(dns_name)}",
-            "$cert = New-SelfSignedCertificate -DnsName @($dnsName,'localhost','127.0.0.1') -CertStoreLocation 'cert:\\LocalMachine\\My' -FriendlyName ('ServerInstaller Website ' + $siteName)",
+            f"New-WebBinding -Name $siteName -Protocol 'https' -Port {int(https_port)} -IPAddress $ip -ErrorAction SilentlyContinue | Out-Null",
+            f"$cert = New-SelfSignedCertificate -DnsName @({dns_list}) -CertStoreLocation 'cert:\\LocalMachine\\My' -FriendlyName ('ServerInstaller Website ' + $siteName)",
             "$bindingPath = ($(if ($ip -eq '*') { '0.0.0.0' } else { $ip })) + '!' + " + str(int(https_port)),
             "if (Test-Path ('IIS:\\SslBindings\\' + $bindingPath)) { Remove-Item ('IIS:\\SslBindings\\' + $bindingPath) -Force -ErrorAction SilentlyContinue }",
             "New-Item ('IIS:\\SslBindings\\' + $bindingPath) -Thumbprint $cert.Thumbprint -SSLFlags 0 | Out-Null",
@@ -3142,7 +3145,8 @@ def run_windows_website_iis(form=None, live_cb=None):
     initial_port = http_port if http_port else https_port
     initial_protocol_args = "-Ssl" if (not http_port and https_port) else ""
 
-    # Create site WITHOUT host header (so IP access works), then add domain binding
+    # Create site with plain port bindings (NO host headers - responds to any hostname)
+    # Domain access works via DNS/hosts file, not IIS host headers
     ps_lines = [
         "Import-Module WebAdministration",
         f"$siteName = {_ps_single_quote(deploy['site_name'])}",
@@ -3153,19 +3157,13 @@ def run_windows_website_iis(form=None, live_cb=None):
         # Remove existing site completely
         "if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) { Stop-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null; Remove-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null }",
         "if (Test-Path ('IIS:\\AppPools\\' + $appPool)) { Stop-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null; Remove-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null }",
-        # Create fresh app pool and site - NO host header on initial binding
+        # Create fresh app pool and site
         "New-WebAppPool -Name $appPool | Out-Null",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name managedRuntimeVersion -Value ''",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name processModel.identityType -Value 4",
         f"New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip {initial_protocol_args} -ApplicationPool $appPool | Out-Null".replace("  ", " "),
         *(https_ps_lines if http_port else []),
     ]
-    # Add domain binding so the site ALSO responds to the domain name
-    if domain:
-        if http_port:
-            ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'http' -Port {int(http_port)} -IPAddress $ip -HostHeader {_ps_single_quote(domain)} -ErrorAction SilentlyContinue | Out-Null")
-        if https_port:
-            ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'https' -Port {int(https_port)} -IPAddress $ip -HostHeader {_ps_single_quote(domain)} -ErrorAction SilentlyContinue | Out-Null")
     ps_lines.append("Start-Website -Name $siteName | Out-Null")
 
     # Add domain to hosts file so it resolves on this server
