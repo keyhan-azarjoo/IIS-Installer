@@ -6253,10 +6253,12 @@ def get_sam3_info():
     model_dir = str(Path(model_path).parent) if model_path else default_model_dir
     # Check actual file on disk
     model_exists = Path(model_path).exists() and Path(model_path).stat().st_size > 1000000
-    # "installed" means the service was actually set up, not just the model downloaded
-    _has_service = bool(state.get("service_name"))
+    # "installed" means the service was set up (state file has service_name and install_dir)
+    _has_service = bool(state.get("service_name")) and bool(state.get("install_dir"))
     if _has_service and os.name != "nt":
         _has_service = Path(f"/etc/systemd/system/{SAM3_SYSTEMD_SERVICE}.service").exists()
+    elif _has_service and os.name == "nt":
+        _has_service = bool(state.get("install_dir")) and Path(str(state.get("install_dir") or "")).exists()
     info = {
         "installed": _has_service,
         "service_name": str(state.get("service_name") or "").strip(),
@@ -6305,15 +6307,38 @@ def get_sam3_info():
             "ports": [p for p in [info["http_port"], info["https_port"]] if p],
             "urls": [u for u in [info["http_url"], info["https_url"]] if u],
         })
-    # Check Windows scheduled task / NSSM service
+    # Check Windows: scheduled task, NSSM service, or running process
     elif os.name == "nt" and info["installed"]:
         svc_name = str(state.get("service_name") or "ServerInstaller-SAM3")
+        # Check if running: try sc.exe, then schtasks, then check port
         try:
             rc, out = run_capture(["sc.exe", "query", svc_name], timeout=10)
             if rc == 0 and "RUNNING" in out.upper():
                 info["running"] = True
         except Exception:
             pass
+        if not info["running"]:
+            try:
+                rc, out = run_capture(["schtasks", "/Query", "/TN", svc_name, "/FO", "CSV"], timeout=10)
+                if rc == 0 and "Running" in out:
+                    info["running"] = True
+            except Exception:
+                pass
+        if not info["running"]:
+            # Check if SAM3 port is listening
+            http_p = str(state.get("http_port") or "").strip()
+            if http_p.isdigit():
+                try:
+                    import subprocess
+                    r = subprocess.run(
+                        ["powershell.exe", "-NoProfile", "-Command",
+                         f"Get-NetTCPConnection -LocalPort {http_p} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if r.stdout.strip():
+                        info["running"] = True
+                except Exception:
+                    pass
         info["services"].append({
             "name": svc_name,
             "display_name": "SAM3 AI Detection Service",
