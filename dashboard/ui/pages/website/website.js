@@ -27,6 +27,7 @@
     const [siteName,   setSiteName]   = React.useState(websiteEditor?.name || "ServerInstallerWebsite");
     const [siteKind,   setSiteKind]   = React.useState(websiteEditor?.kind || "auto");
     const [bindIp,     setBindIp]     = React.useState(websiteHost);
+    const [domainName, setDomainName] = React.useState(websiteEditor?.domain || "");
     const [port,       setPort]       = React.useState(websiteEditor?.port || "8088");
     const [httpsPort,  setHttpsPort]  = React.useState(websiteEditor?.https_port || "");
     const [source,     setSource]     = React.useState(websiteEditor?.source || defaultWebsiteDirForOs(cfg.os));
@@ -245,6 +246,12 @@
                       {selectableIps.map((ip) => <MenuItem key={ip} value={ip}>{ip}</MenuItem>)}
                     </Select>
                   </FormControl>
+                  <TextField
+                    label="Domain Name (optional)" size="small" fullWidth
+                    name="WEBSITE_DOMAIN" value={domainName}
+                    onChange={(e) => setDomainName(e.target.value)}
+                    placeholder="e.g. mysite.example.com"
+                  />
                   {/* Ports row */}
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                     <TextField
