@@ -633,11 +633,17 @@ def run_dashboard_foreground(root: Path, bind_host: str, selected_port: int, dis
 def install_or_update_linux_service(root: Path, bind_host: str, selected_port: int, display_host: str) -> int:
     if os.name == "nt":
         return 1
+
+    script_path = (root / "dashboard" / "start-server-dashboard.py").resolve()
+    app_path = (root / "dashboard" / "server_installer_dashboard.py").resolve()
+
     if os.geteuid() != 0:
         # Not root — show URLs and instructions, then try to re-run with sudo
         use_https, _, _ = resolve_https_config()
         primary_url, extra_urls = build_dashboard_urls(bind_host, selected_port)
         hostname = socket.gethostname()
+        # Build .local name (avoid double .local suffix)
+        local_suffix = hostname if hostname.endswith(".local") else hostname + ".local"
         print("")
         print("=" * 60)
         print("  Server Installer Dashboard")
@@ -646,11 +652,7 @@ def install_or_update_linux_service(root: Path, bind_host: str, selected_port: i
         if extra_urls:
             for u in extra_urls:
                 print(f"        {u}")
-        try:
-            local_name = f"http://{hostname}.local:{selected_port}"
-            print(f"        {local_name}")
-        except Exception:
-            pass
+        print(f"        http://{local_suffix}:{selected_port}")
         print(f"  Port: {selected_port}")
         print("=" * 60)
         print("")
@@ -664,9 +666,6 @@ def install_or_update_linux_service(root: Path, bind_host: str, selected_port: i
             print("Could not re-launch with sudo. Run manually:")
             print(f"  sudo python3 {script_path} --host {bind_host} --port {selected_port}")
             return 1
-
-    script_path = (root / "dashboard" / "start-server-dashboard.py").resolve()
-    app_path = (root / "dashboard" / "server_installer_dashboard.py").resolve()
     if not script_path.exists() or not app_path.exists():
         print("Required dashboard files are missing after sync.", file=sys.stderr)
         return 1
@@ -743,7 +742,8 @@ WantedBy=multi-user.target
         for u in extra_urls:
             print(f"            {u}")
     try:
-        local_name = f"http://{hostname}.local:{selected_port}"
+        _ls = hostname if hostname.endswith(".local") else hostname + ".local"
+        local_name = f"http://{_ls}:{selected_port}"
         print(f"            {local_name}")
     except Exception:
         pass
