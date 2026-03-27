@@ -102,14 +102,66 @@ def health():
 @app.route("/api/run", methods=["POST"])
 @_require_auth
 def run_task():
-    """Run an OpenClaw agent task."""
+    """Run an OpenClaw agent task. Falls back to direct LLM if openclaw CLI fails."""
     data = request.get_json(silent=True) or {}
     task = data.get("task", "").strip()
     if not task:
         return jsonify({"ok": False, "error": "Task description required."}), 400
 
+    # Try openclaw CLI first
     result = _run_openclaw(["run", task], timeout=300)
+    if result["ok"] and result.get("output", "").strip():
+        return jsonify(result)
+
+    # Fallback: try using Ollama directly if openclaw has no output
+    ollama_output = _try_ollama_fallback(task)
+    if ollama_output:
+        return jsonify({"ok": True, "output": ollama_output, "error": "", "source": "ollama"})
+
+    # If openclaw had an error, return it
+    if not result["ok"] or not result.get("output", "").strip():
+        error_msg = result.get("error", "")
+        if "not found" in error_msg.lower() or not error_msg:
+            return jsonify({
+                "ok": False,
+                "output": "",
+                "error": "OpenClaw produced no output. This usually means no LLM backend is configured.\n\n"
+                         "To fix:\n"
+                         "1. Install Ollama: go to AI & ML > Ollama and install it\n"
+                         "2. Pull a model: ollama pull llama3.2\n"
+                         "3. Then retry your task here\n\n"
+                         "Or set OPENAI_API_KEY environment variable for OpenAI."
+            })
     return jsonify(result)
+
+
+def _try_ollama_fallback(task):
+    """Try to use Ollama as a direct fallback for simple tasks."""
+    try:
+        import requests as req
+        # Check if Ollama is running
+        for port in [11434, 8080]:
+            try:
+                r = req.get(f"http://127.0.0.1:{port}/api/tags", timeout=3)
+                if r.status_code == 200:
+                    models = r.json().get("models", [])
+                    if models:
+                        model_name = models[0].get("name", models[0].get("model", ""))
+                        if model_name:
+                            # Use Ollama to answer
+                            chat_r = req.post(
+                                f"http://127.0.0.1:{port}/api/chat",
+                                json={"model": model_name, "messages": [{"role": "user", "content": task}], "stream": False},
+                                timeout=120,
+                            )
+                            if chat_r.status_code == 200:
+                                msg = chat_r.json().get("message", {})
+                                return f"[via Ollama - {model_name}]\n\n{msg.get('content', '')}"
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
 
 
 @app.route("/api/run/stream", methods=["POST"])
@@ -123,14 +175,27 @@ def run_task_stream():
 
     def generate():
         cmd = [_get_openclaw_bin(), "run", task]
+        got_output = False
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             for line in proc.stdout:
+                got_output = True
                 yield f"data: {json.dumps({'line': line.rstrip()})}\n\n"
             proc.wait()
-            yield f"data: {json.dumps({'done': True, 'exit_code': proc.returncode})}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'line': f'OpenClaw CLI error: {e}'})}\n\n"
+
+        # If no output from openclaw, try Ollama fallback
+        if not got_output:
+            yield f"data: {json.dumps({'line': '[OpenClaw produced no output, trying Ollama...]'})}\n\n"
+            fallback = _try_ollama_fallback(task)
+            if fallback:
+                for fline in fallback.split("\n"):
+                    yield f"data: {json.dumps({'line': fline})}\n\n"
+            else:
+                yield f"data: {json.dumps({'line': 'No LLM backend available. Install Ollama and pull a model first.'})}\n\n"
+
+        yield f"data: {json.dumps({'done': True})}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
 
