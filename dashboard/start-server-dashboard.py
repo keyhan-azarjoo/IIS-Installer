@@ -80,9 +80,18 @@ SYNC_DASHBOARD_FILES = [
     "dashboard/ui/pages/website/website.js",
     "dashboard/ui/pages/ai/ai.js",
     "dashboard/ui/pages/ai/sam3.js",
+    "dashboard/ui/pages/ai/ollama.js",
+    "dashboard/ui/pages/ai/tgwui.js",
+    "dashboard/ui/pages/ai/comfyui.js",
+    "dashboard/ui/pages/ai/whisper.js",
+    "dashboard/ui/pages/ai/piper.js",
+    "dashboard/ui/pages/ai/ai-all.js",
+    "dashboard/ui/pages/api/api-docs.js",
+    "dashboard/ui/pages/agents/agents-all.js",
     "dashboard/ui/pages/ssl/ssl.js",
     "dashboard/ui/pages/files/files.js",
     "dashboard/ui/app.js",
+    "dashboard/api_gateway.py",
 ]
 SYNC_WINDOWS_FILES = [
     "Python/windows/setup-python.ps1",
@@ -625,8 +634,36 @@ def install_or_update_linux_service(root: Path, bind_host: str, selected_port: i
     if os.name == "nt":
         return 1
     if os.geteuid() != 0:
-        print("Linux service installation requires root. Re-run with sudo.", file=sys.stderr)
-        return 1
+        # Not root — show URLs and instructions, then try to re-run with sudo
+        use_https, _, _ = resolve_https_config()
+        primary_url, extra_urls = build_dashboard_urls(bind_host, selected_port)
+        hostname = socket.gethostname()
+        print("")
+        print("=" * 60)
+        print("  Server Installer Dashboard")
+        print("=" * 60)
+        print(f"  URL:  {primary_url}")
+        if extra_urls:
+            for u in extra_urls:
+                print(f"        {u}")
+        try:
+            local_name = f"http://{hostname}.local:{selected_port}"
+            print(f"        {local_name}")
+        except Exception:
+            pass
+        print(f"  Port: {selected_port}")
+        print("=" * 60)
+        print("")
+        print("Service installation requires root. Re-running with sudo...")
+        print("")
+        # Try to re-launch with sudo
+        try:
+            cmd = ["sudo", sys.executable, str(script_path)] + sys.argv[1:]
+            os.execvp("sudo", cmd)
+        except Exception:
+            print("Could not re-launch with sudo. Run manually:")
+            print(f"  sudo python3 {script_path} --host {bind_host} --port {selected_port}")
+            return 1
 
     script_path = (root / "dashboard" / "start-server-dashboard.py").resolve()
     app_path = (root / "dashboard" / "server_installer_dashboard.py").resolve()
@@ -696,20 +733,34 @@ WantedBy=multi-user.target
     ok, detail = check_local_http(selected_port, use_https=use_https)
     fw_ok, fw_note = ensure_linux_firewall_port(selected_port)
     primary_url, extra_urls = build_dashboard_urls(bind_host, selected_port)
-    print(f"OS detected: {platform.system()}")
-    print(f"Service: {LINUX_SERVICE_NAME} (enabled, restarted)")
-    print(f"Verified local URL: {primary_url}")
+    hostname = socket.gethostname()
+    print("")
+    print("=" * 60)
+    print("  Server Installer Dashboard — Running!")
+    print("=" * 60)
+    print(f"  URL:      {primary_url}")
     if extra_urls:
-        print(f"Network URLs: {', '.join(extra_urls)}")
-    print(f"Firewall: {'updated' if fw_ok else 'not changed'} ({fw_note})")
+        for u in extra_urls:
+            print(f"            {u}")
+    try:
+        local_name = f"http://{hostname}.local:{selected_port}"
+        print(f"            {local_name}")
+    except Exception:
+        pass
+    print(f"  Service:  {LINUX_SERVICE_NAME}")
+    print(f"  Port:     {selected_port}")
+    print(f"  Firewall: {'updated' if fw_ok else 'not changed'} ({fw_note})")
     if ok:
-        print(f"Local HTTP check: PASS (HTTP {detail})")
+        print(f"  Status:   RUNNING (HTTP {detail})")
     else:
-        print(f"Local HTTP check: FAIL ({detail})")
+        print(f"  Status:   STARTING (check: journalctl -u {LINUX_SERVICE_NAME} -n 50)")
+    print("=" * 60)
+    print("")
+    if not ok:
         print(f"Inspect logs: journalctl -u {LINUX_SERVICE_NAME} -n 120 --no-pager")
     if extra_urls:
-        print("Remote URLs require firewall/security-group access to the selected port.")
-    print("Re-running this same command will update files and restart the service.")
+        print("Remote access requires firewall/security-group to allow the port.")
+    print("Re-running this command will update files and restart the service.")
     return 0
 
 
@@ -847,8 +898,6 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         except Exception as ex:
             detail = f"Fallback launch failed: {ex}"
 
-    print(f"OS detected: {platform.system()}")
-    print(f"Service: {service_name}")
     urls = [f"https://127.0.0.1:{selected_port}"]
     for ip in get_local_ipv4_addresses():
         candidate = f"https://{ip}:{selected_port}"
@@ -858,18 +907,27 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         candidate = f"https://{display_host}:{selected_port}"
         if candidate not in urls:
             urls.insert(0, candidate)
-    print("Dashboard URLs:")
-    for url in urls:
-        print(f"- {url}")
-    print(f"Log file: {log_path}")
-    if ok:
-        print(f"Local HTTP check: PASS (HTTP {detail})")
-    else:
-        print(f"Local HTTP check: FAIL ({detail})")
-        print(f"Inspect log: {log_path}")
+    hostname = socket.gethostname()
+    try:
+        local_name = f"https://{hostname}:{selected_port}"
+        if local_name not in urls:
+            urls.append(local_name)
+    except Exception:
+        pass
     print("")
-    print(f"Dashboard ready: https://{display_host}:{selected_port}")
-    print(f"Service name in Windows Services: {service_name}")
+    print("=" * 60)
+    print("  Server Installer Dashboard — Running!")
+    print("=" * 60)
+    for url in urls:
+        print(f"  URL:      {url}")
+    print(f"  Service:  {service_name}")
+    print(f"  Port:     {selected_port}")
+    if ok:
+        print(f"  Status:   RUNNING (HTTP {detail})")
+    else:
+        print(f"  Status:   STARTING (check log: {log_path})")
+    print("=" * 60)
+    print("")
     print("Re-running this same command will update files and restart the service.")
     return 0
 
