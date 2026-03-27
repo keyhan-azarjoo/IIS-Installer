@@ -2541,6 +2541,11 @@ def _install_engine_docker(log):
         return 1, "Docker Desktop must be installed manually on Windows."
 
     if sys.platform == "darwin":
+        # macOS Apple Silicon: install Rosetta 2 first (required for Docker)
+        import platform as _plat
+        if _plat.machine() == "arm64":
+            log("Installing Rosetta 2 (required for Docker on Apple Silicon)...")
+            _run_install_cmd(["softwareupdate", "--install-rosetta", "--agree-to-license"], log, timeout=120)
         # macOS: use brew to install Docker
         log("macOS detected. Installing Docker via Homebrew...")
         if command_exists("brew"):
