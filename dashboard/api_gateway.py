@@ -643,8 +643,8 @@ def sam3_detect(image_data, prompt="", threshold=0.3, content_type="image/jpeg")
 
     add_file("image", "image.jpg", image_data, content_type)
     if prompt:
-        add_field("prompt", prompt)
-    add_field("threshold", str(threshold))
+        add_field("text_prompt", prompt)
+    add_field("confidence", str(threshold))
     body.write(f"--{boundary}--\r\n".encode())
 
     data = body.getvalue()

@@ -3,6 +3,25 @@
   ns.pages = ns.pages || {};
 
   var AGENTS = {
+    "agent-openclaw": {
+      title: "OpenClaw",
+      color: "#dc2626",
+      defaultPort: "8080",
+      prefix: "OPENCLAW",
+      description: "Open-source AI agent framework for building autonomous agents with tool use, memory, planning, and self-reflection. Modular plugin architecture supports custom tools, multiple LLM backends, and persistent memory stores.",
+      website: "https://github.com/openclaw-ai/openclaw",
+      dockerImage: "openclaw/openclaw:latest",
+      installCmds: {
+        pip: "pip install openclaw",
+        git: "git clone https://github.com/openclaw-ai/openclaw.git && cd openclaw && pip install -e .",
+        docker: "docker run -d -p 8080:8080 openclaw/openclaw:latest",
+      },
+      links: [
+        { label: "GitHub", url: "https://github.com/openclaw-ai/openclaw" },
+        { label: "Documentation", url: "https://openclaw-ai.github.io/openclaw/" },
+        { label: "PyPI", url: "https://pypi.org/project/openclaw/" },
+      ],
+    },
     "agent-openinterpreter": {
       title: "Open Interpreter",
       color: "#b45309",

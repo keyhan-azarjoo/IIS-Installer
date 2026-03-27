@@ -271,6 +271,7 @@
         border: "#fde68a",
         description: "Autonomous AI agents that can execute tasks, write code, browse the web, and interact with your OS.",
         services: [
+          { title: "OpenClaw", text: "Open-source AI agent framework for building autonomous agents with tool use, memory, and planning. Modular architecture.", page: "agent-openclaw" },
           { title: "Open Interpreter", text: "Natural language interface to your computer. Runs code, manages files, browses web. Supports GPT-4, Claude, Llama.", page: "agent-openinterpreter" },
           { title: "OpenHands (OpenDevin)", text: "Autonomous AI software developer. Plans, writes code, runs tests, and deploys. Full dev environment in sandbox.", page: "agent-openhands" },
           { title: "AutoGPT", text: "Autonomous GPT-4 agent. Chains prompts to achieve complex goals. Web search, file I/O, code execution.", page: "agent-autogpt" },

@@ -12786,9 +12786,9 @@ class Handler(BaseHTTPRequestHandler):
                         image_data = part.get("content", b"")
                         if part.get("filename", "").lower().endswith(".png"):
                             content_type = "image/png"
-                    elif part.get("name") == "prompt":
+                    elif part.get("name") in ("prompt", "text_prompt"):
                         prompt = part.get("content", b"").decode("utf-8", errors="replace")
-                    elif part.get("name") == "threshold":
+                    elif part.get("name") in ("threshold", "confidence"):
                         try:
                             threshold = float(part.get("content", b"0.3").decode())
                         except Exception:
@@ -14269,6 +14269,7 @@ class Handler(BaseHTTPRequestHandler):
             "chromadb": ("ChromaDB", "chromadb/chroma:latest", "8000", "pip install chromadb"),
             "custom": ("Custom Model", "", "8080", ""),
             # OS Agents
+            "openclaw": ("OpenClaw", "openclaw/openclaw:latest", "8080", "pip install openclaw"),
             "openinterpreter": ("Open Interpreter", "openinterpreter/open-interpreter:latest", "8080", "pip install open-interpreter"),
             "openhands": ("OpenHands", "ghcr.io/all-hands-ai/openhands:latest", "3000", ""),
             "autogpt": ("AutoGPT", "", "8000", "pip install autogpt-forge"),
