@@ -8605,6 +8605,39 @@ def validate_os_credentials(username, password):
     if not username or not password:
         return False, "Username and password are required."
 
+    # Check custom dashboard credentials first (works on ALL platforms)
+    try:
+        creds_file = SERVER_INSTALLER_DATA / "dashboard-credentials.json"
+        if not creds_file.exists():
+            # Also check the cache root used by start-server-dashboard.py
+            for alt in [
+                Path.home() / ".server-installer" / "dashboard-credentials.json",
+                Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "dashboard-credentials.json",
+            ]:
+                if alt.exists():
+                    creds_file = alt
+                    break
+        if creds_file.exists():
+            import hashlib
+            creds = json.loads(creds_file.read_text(encoding="utf-8"))
+            stored_user = str(creds.get("username", "")).strip()
+            stored_hash = str(creds.get("password_hash", "")).strip()
+            if stored_user and stored_hash:
+                input_hash = hashlib.sha256(password.encode()).hexdigest()
+                if username == stored_user and input_hash == stored_hash:
+                    return True, ""
+    except Exception:
+        pass
+
+    # Also check environment variable credentials
+    env_user = os.environ.get("DASHBOARD_CUSTOM_USER", "").strip()
+    env_hash = os.environ.get("DASHBOARD_CUSTOM_PASS_HASH", "").strip()
+    if env_user and env_hash:
+        import hashlib
+        if username == env_user and hashlib.sha256(password.encode()).hexdigest() == env_hash:
+            return True, ""
+
+    # Then try OS-level authentication
     if os.name == "nt":
         import ctypes
         from ctypes import wintypes

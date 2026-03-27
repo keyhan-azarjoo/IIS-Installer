@@ -1219,17 +1219,42 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="auto")
     parser.add_argument("--port", type=int, default=8090)
+    parser.add_argument("--user", default="", help="Set a custom dashboard login username.")
+    parser.add_argument("--password", default="", help="Set a custom dashboard login password.")
     parser.add_argument("--run-server", action="store_true", help="Internal mode: run dashboard process in foreground.")
     parser.add_argument("--https", action="store_true", help="Ignored for compatibility; dashboard startup is HTTPS-only.")
     parser.add_argument("--cert", default="", help="Path to PEM certificate file.")
     parser.add_argument("--key", default="", help="Path to PEM private key file.")
+    # Also accept positional args: python3 start.py <username> <password>
+    parser.add_argument("positional_user", nargs="?", default="", help=argparse.SUPPRESS)
+    parser.add_argument("positional_pass", nargs="?", default="", help=argparse.SUPPRESS)
     args = parser.parse_args()
+
+    # Resolve credentials: --user/--password take priority, then positional args
+    dash_user = args.user or args.positional_user or ""
+    dash_pass = args.password or args.positional_pass or ""
 
     os.environ["DASHBOARD_HTTPS"] = "1"
     if args.cert:
         os.environ["DASHBOARD_CERT"] = args.cert
     if args.key:
         os.environ["DASHBOARD_KEY"] = args.key
+
+    # Save custom credentials if provided
+    if dash_user and dash_pass:
+        creds_dir = cache_root()
+        creds_dir.mkdir(parents=True, exist_ok=True)
+        creds_file = creds_dir / "dashboard-credentials.json"
+        import hashlib
+        hashed = hashlib.sha256(dash_pass.encode()).hexdigest()
+        creds_file.write_text(json.dumps({"username": dash_user, "password_hash": hashed}, indent=2), encoding="utf-8")
+        try:
+            os.chmod(str(creds_file), 0o600)
+        except Exception:
+            pass
+        print(f"[INFO] Dashboard credentials set: user={dash_user}")
+        os.environ["DASHBOARD_CUSTOM_USER"] = dash_user
+        os.environ["DASHBOARD_CUSTOM_PASS_HASH"] = hashed
 
     if relaunch_as_admin_if_needed():
         return 0
