@@ -38,6 +38,7 @@ dashboard/ui/pages/files/files.js
 dashboard/ui/pages/ai/ai.js
 dashboard/ui/pages/ai/sam3.js
 dashboard/ui/pages/ai/ollama.js
+dashboard/ui/pages/ai/lmstudio.js
 dashboard/ui/pages/ai/tgwui.js
 dashboard/ui/pages/ai/comfyui.js
 dashboard/ui/pages/ai/whisper.js
@@ -59,6 +60,12 @@ SAM3/common/core/__init__.py
 SAM3/common/web/templates/index.html
 SAM3/common/web/static/js/dashboard.js
 SAM3/common/web/static/css/dashboard.css
+# LM Studio
+LMStudio/windows/setup-lmstudio.ps1
+LMStudio/linux-macos/setup-lmstudio.sh
+LMStudio/common/lmstudio_web.py
+LMStudio/common/requirements.txt
+LMStudio/common/web/templates/index.html
 # Ollama
 Ollama/windows/setup-ollama.ps1
 Ollama/linux-macos/setup-ollama.sh

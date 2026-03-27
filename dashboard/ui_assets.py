@@ -34,6 +34,7 @@ DASHBOARD_UI_SCRIPTS = [
     "/static/ui/pages/ai/ai.js",
     "/static/ui/pages/ai/sam3.js",
     "/static/ui/pages/ai/ollama.js",
+    "/static/ui/pages/ai/lmstudio.js",
     "/static/ui/pages/ai/tgwui.js",
     "/static/ui/pages/ai/comfyui.js",
     "/static/ui/pages/ai/whisper.js",

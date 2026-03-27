@@ -134,6 +134,24 @@ PIPER_STATE_DIR = SERVER_INSTALLER_DATA / "piper"
 PIPER_STATE_FILE = PIPER_STATE_DIR / "piper-state.json"
 PIPER_SYSTEMD_SERVICE = "serverinstaller-piper"
 
+LMSTUDIO_STATE_DIR = SERVER_INSTALLER_DATA / "lmstudio"
+LMSTUDIO_STATE_FILE = LMSTUDIO_STATE_DIR / "lmstudio-state.json"
+LMSTUDIO_SYSTEMD_SERVICE = "serverinstaller-lmstudio"
+LMSTUDIO_WINDOWS_INSTALLER = ROOT / "LMStudio" / "windows" / "setup-lmstudio.ps1"
+LMSTUDIO_LINUX_INSTALLER = ROOT / "LMStudio" / "linux-macos" / "setup-lmstudio.sh"
+LMSTUDIO_WINDOWS_FILES = [
+    "LMStudio/windows/setup-lmstudio.ps1",
+    "LMStudio/common/lmstudio_web.py",
+    "LMStudio/common/requirements.txt",
+    "LMStudio/common/web/templates/index.html",
+]
+LMSTUDIO_UNIX_FILES = [
+    "LMStudio/linux-macos/setup-lmstudio.sh",
+    "LMStudio/common/lmstudio_web.py",
+    "LMStudio/common/requirements.txt",
+    "LMStudio/common/web/templates/index.html",
+]
+
 OLLAMA_WINDOWS_INSTALLER = ROOT / "Ollama" / "windows" / "setup-ollama.ps1"
 OLLAMA_LINUX_INSTALLER = ROOT / "Ollama" / "linux-macos" / "setup-ollama.sh"
 OLLAMA_WINDOWS_FILES = [
@@ -7132,6 +7150,10 @@ def get_ollama_info():
     return _get_ai_service_info(OLLAMA_STATE_FILE, OLLAMA_STATE_DIR, OLLAMA_SYSTEMD_SERVICE, "Ollama LLM Service", "11434")
 
 
+def get_lmstudio_info():
+    return _get_ai_service_info(LMSTUDIO_STATE_FILE, LMSTUDIO_STATE_DIR, LMSTUDIO_SYSTEMD_SERVICE, "LM Studio", "1234")
+
+
 def get_tgwui_info():
     return _get_ai_service_info(TGWUI_STATE_FILE, TGWUI_STATE_DIR, TGWUI_SYSTEMD_SERVICE, "Text Generation WebUI", "7860")
 
@@ -7556,6 +7578,78 @@ def run_ollama_delete(live_cb=None):
         OLLAMA_STATE_FILE.unlink()
     return 0, "Ollama service deleted."
 
+
+# ── LM Studio install/start/stop/delete ──────────────────────────────────────
+def run_lmstudio_os_install(form=None, live_cb=None):
+    form = form or {}
+    if os.name == "nt":
+        ensure_repo_files(LMSTUDIO_WINDOWS_FILES, live_cb=live_cb, refresh=False)
+        env = os.environ.copy()
+        for key in ["LMSTUDIO_HOST_IP", "LMSTUDIO_HTTP_PORT", "LMSTUDIO_HTTPS_PORT", "LMSTUDIO_DOMAIN", "LMSTUDIO_USERNAME", "LMSTUDIO_PASSWORD"]:
+            val = (form.get(key, [""])[0] or "").strip()
+            if val: env[key] = val
+        env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
+        return run_process(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(LMSTUDIO_WINDOWS_INSTALLER)], env=env, live_cb=live_cb)
+    else:
+        ensure_repo_files(LMSTUDIO_UNIX_FILES, live_cb=live_cb, refresh=False)
+        env = os.environ.copy()
+        env_keys = ["LMSTUDIO_HOST_IP", "LMSTUDIO_HTTP_PORT", "LMSTUDIO_HTTPS_PORT", "LMSTUDIO_DOMAIN", "LMSTUDIO_USERNAME", "LMSTUDIO_PASSWORD"]
+        for key in env_keys:
+            val = (form.get(key, [""])[0] or "").strip()
+            if val: env[key] = val
+        env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
+        cmd = ["bash", str(LMSTUDIO_LINUX_INSTALLER)]
+        if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
+            cmd = ["sudo", "env"] + [f"{k}={env.get(k, '')}" for k in env_keys + ["SERVER_INSTALLER_DATA_DIR"] if env.get(k)] + ["bash", str(LMSTUDIO_LINUX_INSTALLER)]
+        return run_process(cmd, env=env, live_cb=live_cb)
+
+
+def run_lmstudio_start(live_cb=None):
+    if os.name != "nt" and command_exists("systemctl"):
+        run_capture(["systemctl", "start", f"{LMSTUDIO_SYSTEMD_SERVICE}-webui"], timeout=30)
+        state = _read_json_file(LMSTUDIO_STATE_FILE)
+        state["running"] = True
+        _write_json_file(LMSTUDIO_STATE_FILE, state)
+        return 0, "LM Studio started."
+    elif os.name == "nt":
+        try:
+            run_capture(["schtasks", "/Run", "/TN", "ServerInstaller-LMStudio"], timeout=15)
+            state = _read_json_file(LMSTUDIO_STATE_FILE)
+            state["running"] = True
+            _write_json_file(LMSTUDIO_STATE_FILE, state)
+            return 0, "LM Studio started."
+        except Exception as e:
+            return 1, str(e)
+    return 1, "Could not start LM Studio."
+
+
+def run_lmstudio_stop(live_cb=None):
+    if os.name != "nt" and command_exists("systemctl"):
+        run_capture(["systemctl", "stop", f"{LMSTUDIO_SYSTEMD_SERVICE}-webui"], timeout=30)
+    elif os.name == "nt":
+        run_capture(["schtasks", "/End", "/TN", "ServerInstaller-LMStudio"], timeout=15)
+    state = _read_json_file(LMSTUDIO_STATE_FILE)
+    state["running"] = False
+    _write_json_file(LMSTUDIO_STATE_FILE, state)
+    return 0, "LM Studio stopped."
+
+
+def run_lmstudio_delete(live_cb=None):
+    run_lmstudio_stop(live_cb=live_cb)
+    if os.name != "nt" and command_exists("systemctl"):
+        for svc in [f"{LMSTUDIO_SYSTEMD_SERVICE}-webui"]:
+            run_capture(["systemctl", "disable", svc], timeout=15)
+            svc_file = Path(f"/etc/systemd/system/{svc}.service")
+            if svc_file.exists(): svc_file.unlink()
+        run_capture(["systemctl", "daemon-reload"], timeout=15)
+    elif os.name == "nt":
+        try: run_capture(["schtasks", "/Delete", "/TN", "ServerInstaller-LMStudio", "/F"], timeout=15)
+        except Exception: pass
+    install_dir = LMSTUDIO_STATE_DIR / "app"
+    if install_dir.exists(): shutil.rmtree(install_dir, ignore_errors=True)
+    if LMSTUDIO_STATE_FILE.exists(): LMSTUDIO_STATE_FILE.unlink()
+    return 0, "LM Studio service deleted."
+
 def run_tgwui_os_install(form=None, live_cb=None):
     return _run_ai_service_install("tgwui", form, TGWUI_STATE_FILE, TGWUI_STATE_DIR, TGWUI_SYSTEMD_SERVICE, "Text Generation WebUI", "7860",
         {"nt": [_install_tgwui_os], "posix": [_install_tgwui_os]}, live_cb=live_cb)
@@ -7725,6 +7819,7 @@ def filter_service_items(scope):
     # New AI services
     ai_scope_map = {
         "ollama": (get_ollama_info, _is_ollama_name),
+        "lmstudio": (get_lmstudio_info, lambda n: bool(re.search(r'lmstudio|lm.studio', str(n or ""), re.IGNORECASE))),
         "tgwui": (get_tgwui_info, _is_tgwui_name),
         "comfyui": (get_comfyui_info, _is_comfyui_name),
         "whisper": (get_whisper_info, _is_whisper_name),
@@ -8215,6 +8310,12 @@ def manage_service(action, name, kind, detail=""):
             return code == 0, output
         return False, "Unsupported Ollama action."
 
+    if re.search(r'lmstudio|lm.studio', str(svc_name or ""), re.IGNORECASE):
+        if action == "start": return (run_lmstudio_start()[0] == 0, run_lmstudio_start()[1])
+        if action == "stop": return (run_lmstudio_stop()[0] == 0, run_lmstudio_stop()[1])
+        if action == "restart": run_lmstudio_stop(); code, out = run_lmstudio_start(); return code == 0, out
+        if action == "delete": code, out = run_lmstudio_delete(); return code == 0, out
+
     if kind == "website_launchd":
         if os.name == "nt":
             return False, "launchd website actions are not available on Windows."
@@ -8397,6 +8498,8 @@ def get_system_status(scope="all"):
         software["sam3_service"] = get_sam3_info()
     if scope in ("all", "ollama"):
         software["ollama_service"] = get_ollama_info()
+    if scope in ("all", "lmstudio"):
+        software["lmstudio_service"] = get_lmstudio_info()
     if scope in ("all", "tgwui"):
         software["tgwui_service"] = get_tgwui_info()
     if scope in ("all", "comfyui"):
@@ -14327,6 +14430,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = _pull_model(None)
+                self.respond_run_result(title, code, output)
+            return
+        # ── LM Studio routes ──────────────────────────────────────────────────
+        if self.path in ("/run/lmstudio_windows_os", "/run/lmstudio_unix_os"):
+            title = "LM Studio Install"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_lmstudio_os_install(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_lmstudio_os_install(form)
                 self.respond_run_result(title, code, output)
             return
         # ── Text Generation WebUI routes ──────────────────────────────────────

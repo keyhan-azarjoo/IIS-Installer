@@ -70,6 +70,7 @@ function App() {
   const [websitePageServices, setWebsitePageServices] = React.useState([]);
   const [sam3PageServices, setSam3PageServices] = React.useState([]);
   const [ollamaPageServices, setOllamaPageServices] = React.useState([]);
+  const [lmstudioPageServices, setLmstudioPageServices] = React.useState([]);
   const [tgwuiPageServices, setTgwuiPageServices] = React.useState([]);
   const [comfyuiPageServices, setComfyuiPageServices] = React.useState([]);
   const [whisperPageServices, setWhisperPageServices] = React.useState([]);
@@ -83,6 +84,7 @@ function App() {
   const [websiteInfoState, setWebsiteInfoState] = React.useState(null);
   const [sam3InfoState, setSam3InfoState] = React.useState(null);
   const [ollamaInfoState, setOllamaInfoState] = React.useState(null);
+  const [lmstudioInfoState, setLmstudioInfoState] = React.useState(null);
   const [tgwuiInfoState, setTgwuiInfoState] = React.useState(null);
   const [comfyuiInfoState, setComfyuiInfoState] = React.useState(null);
   const [whisperInfoState, setWhisperInfoState] = React.useState(null);
@@ -218,6 +220,7 @@ function App() {
   const loadWebsiteServices = React.useRef(async () => {});
   const loadSam3Services = React.useRef(async () => {});
   const loadOllamaServices = React.useRef(async () => {});
+  const loadLmstudioServices = React.useRef(async () => {});
   const loadTgwuiServices = React.useRef(async () => {});
   const loadComfyuiServices = React.useRef(async () => {});
   const loadWhisperServices = React.useRef(async () => {});
@@ -231,6 +234,7 @@ function App() {
   const loadWebsiteInfo = React.useRef(async () => {});
   const loadSam3Info = React.useRef(async () => {});
   const loadOllamaInfo = React.useRef(async () => {});
+  const loadLmstudioInfo = React.useRef(async () => {});
   const loadTgwuiInfo = React.useRef(async () => {});
   const loadComfyuiInfo = React.useRef(async () => {});
   const loadWhisperInfo = React.useRef(async () => {});
@@ -277,6 +281,7 @@ function App() {
   loadWebsiteServices.current = async () => loadServiceScope("website", setWebsitePageServices);
   loadSam3Services.current = async () => loadServiceScope("sam3", setSam3PageServices);
   loadOllamaServices.current = async () => loadServiceScope("ollama", setOllamaPageServices);
+  loadLmstudioServices.current = async () => loadServiceScope("lmstudio", setLmstudioPageServices);
   loadTgwuiServices.current = async () => loadServiceScope("tgwui", setTgwuiPageServices);
   loadComfyuiServices.current = async () => loadServiceScope("comfyui", setComfyuiPageServices);
   loadWhisperServices.current = async () => loadServiceScope("whisper", setWhisperPageServices);
@@ -290,6 +295,7 @@ function App() {
   loadWebsiteInfo.current = async () => loadScopedStatus("website", setWebsiteInfoState);
   loadSam3Info.current = async () => loadScopedStatus("sam3", setSam3InfoState);
   loadOllamaInfo.current = async () => loadScopedStatus("ollama", setOllamaInfoState);
+  loadLmstudioInfo.current = async () => loadScopedStatus("lmstudio", setLmstudioInfoState);
   loadTgwuiInfo.current = async () => loadScopedStatus("tgwui", setTgwuiInfoState);
   loadComfyuiInfo.current = async () => loadScopedStatus("comfyui", setComfyuiInfoState);
   loadWhisperInfo.current = async () => loadScopedStatus("whisper", setWhisperInfoState);
@@ -1252,6 +1258,7 @@ function App() {
   const websiteSoftware = websiteStatusInfo?.software || {};
   const sam3Software = sam3InfoState?.software || {};
   const ollamaSoftware = ollamaInfoState?.software || {};
+  const lmstudioSoftware = lmstudioInfoState?.software || {};
   const tgwuiSoftware = tgwuiInfoState?.software || {};
   const comfyuiSoftware = comfyuiInfoState?.software || {};
   const whisperSoftware = whisperInfoState?.software || {};
@@ -1266,6 +1273,7 @@ function App() {
   const websiteInfo = websiteSoftware.website || software.website || {};
   const sam3Service = sam3Software.sam3_service || software.sam3_service || {};
   const ollamaService = ollamaSoftware.ollama_service || software.ollama_service || {};
+  const lmstudioService = lmstudioSoftware.lmstudio_service || software.lmstudio_service || {};
   const tgwuiService = tgwuiSoftware.tgwui_service || software.tgwui_service || {};
   const comfyuiService = comfyuiSoftware.comfyui_service || software.comfyui_service || {};
   const whisperService = whisperSoftware.whisper_service || software.whisper_service || {};
@@ -1831,7 +1839,7 @@ function App() {
     serviceFilter, setServiceFilter,
     services, mongoPageServices, s3PageServices, dotnetPageServices,
     dockerPageServices, proxyPageServices, pythonPageServices, websitePageServices, sam3PageServices,
-    ollamaPageServices, tgwuiPageServices, comfyuiPageServices, whisperPageServices, piperPageServices,
+    ollamaPageServices, lmstudioPageServices, tgwuiPageServices, comfyuiPageServices, whisperPageServices, piperPageServices,
     mongoInfoState, s3InfoState, dotnetInfoState, dockerInfoState,
     proxyInfoState, pythonInfoState, websiteInfoState,
     pythonApiEditor, pythonApiEditorSeed,
@@ -1848,7 +1856,7 @@ function App() {
     pythonStatusInfo, websiteStatusInfo,
     mongoSoftware, dotnetSoftware, dockerSoftware, proxySoftware, pythonSoftware, websiteSoftware,
     dotnet, docker, mongoDocker, iis, mongo, proxy, pythonService, websiteInfo, sam3Service,
-    ollamaService, tgwuiService, comfyuiService, whisperService, piperService,
+    ollamaService, lmstudioService, tgwuiService, comfyuiService, whisperService, piperService,
     listeningPorts, managedPortSet, cpuPercent, memoryPercent, netBps, netPercent,
     apiAddressList, filteredServices,
     dotnetServices, s3Services, mongoServices, proxyServices, pythonServices, websiteServices,
@@ -1864,10 +1872,10 @@ function App() {
     // Refs
     loadSystem, loadServices, loadMongoServices, loadS3Services, loadDotnetServices,
     loadDockerServices, loadProxyServices, loadPythonServices, loadWebsiteServices, loadSam3Services,
-    loadOllamaServices, loadTgwuiServices, loadComfyuiServices, loadWhisperServices, loadPiperServices,
+    loadOllamaServices, loadLmstudioServices, loadTgwuiServices, loadComfyuiServices, loadWhisperServices, loadPiperServices,
     loadMongoInfo, loadS3Info, loadDotnetInfo, loadDockerInfo, loadProxyInfo,
     loadPythonInfo, loadWebsiteInfo, loadSam3Info,
-    loadOllamaInfo, loadTgwuiInfo, loadComfyuiInfo, loadWhisperInfo, loadPiperInfo,
+    loadOllamaInfo, loadLmstudioInfo, loadTgwuiInfo, loadComfyuiInfo, loadWhisperInfo, loadPiperInfo,
     // Callbacks and handlers
     append, setScopeLoadingFlag, setScopeErrorText, isScopeLoading,
     loadScopedStatus, loadServiceScope,

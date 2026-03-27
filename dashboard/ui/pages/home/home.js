@@ -81,6 +81,7 @@
         description: "Large Language Models for text generation, chat, code, and reasoning.",
         services: [
           { title: "Ollama", text: "Run LLMs locally (Llama 3, Mistral, Gemma, Phi, etc.). OpenAI-compatible API with GPU acceleration.", page: "ai-ollama", hasApi: true },
+          { title: "LM Studio", text: "Desktop app for running GGUF models locally. Beautiful UI, GPU acceleration, OpenAI-compatible API.", page: "ai-lmstudio", hasApi: true },
           { title: "Text Generation WebUI", text: "Full-featured web UI for LLMs with GPTQ, GGUF, AWQ, and EXL2 backends.", page: "ai-tgwui" },
           { title: "vLLM", text: "High-throughput LLM serving engine with PagedAttention. Production-grade OpenAI-compatible API.", page: "ai-vllm" },
           { title: "llama.cpp", text: "Lightweight C++ LLM inference. Runs GGUF models on CPU and GPU with minimal dependencies.", page: "ai-llamacpp" },
