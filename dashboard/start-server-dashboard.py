@@ -16,30 +16,64 @@ import time
 import urllib.request
 from pathlib import Path
 
-# ── Fix macOS SSL certificate verification ───────────────────────────────────
-# Python on macOS doesn't use system certificates by default.
-# This creates an unverified context as fallback when certs are missing.
-try:
-    _test_ctx = ssl.create_default_context()
-    urllib.request.urlopen("https://raw.githubusercontent.com/", timeout=5, context=_test_ctx)
-except ssl.SSLCertVerificationError:
-    # macOS: try to install certificates first
-    if sys.platform == "darwin":
-        _cert_cmd = f"/Applications/Python {sys.version_info.major}.{sys.version_info.minor}/Install Certificates.command"
-        if os.path.exists(_cert_cmd):
-            try:
-                subprocess.run(["bash", _cert_cmd], capture_output=True, timeout=30)
-            except Exception:
-                pass
-    # If still failing, use unverified context globally
+# ── Fix macOS / system SSL certificate verification ──────────────────────────
+# Python on macOS doesn't trust system certs by default. Fix it before any
+# HTTPS requests happen. This also helps on minimal Linux containers.
+def _fix_ssl_certs():
+    """Ensure HTTPS works. On macOS, install certs or disable verification."""
     try:
-        _test_ctx2 = ssl.create_default_context()
-        urllib.request.urlopen("https://raw.githubusercontent.com/", timeout=5, context=_test_ctx2)
+        # Quick test — does HTTPS work at all?
+        ctx = ssl.create_default_context()
+        req = urllib.request.Request("https://github.com/", method="HEAD")
+        urllib.request.urlopen(req, timeout=5, context=ctx)
+        return  # SSL works fine
+    except ssl.SSLCertVerificationError:
+        pass  # Cert issue — fix it below
     except Exception:
-        ssl._create_default_https_context = ssl._create_unverified_context
-        print("[WARN] SSL certificate verification disabled (macOS certificate store not configured)")
-except Exception:
-    pass  # Network unavailable or other issue — will fail later with a clear error
+        return  # Network issue, not SSL — nothing to fix here
+
+    # Try macOS "Install Certificates.command"
+    if sys.platform == "darwin":
+        for ver in [f"{sys.version_info.major}.{sys.version_info.minor}", "3.13", "3.12", "3.11", "3.10"]:
+            cert_cmd = f"/Applications/Python {ver}/Install Certificates.command"
+            if os.path.exists(cert_cmd):
+                try:
+                    print(f"[INFO] Installing SSL certificates for Python {ver}...")
+                    subprocess.run(["bash", cert_cmd], capture_output=True, timeout=30)
+                    # Test again
+                    ctx2 = ssl.create_default_context()
+                    req2 = urllib.request.Request("https://github.com/", method="HEAD")
+                    urllib.request.urlopen(req2, timeout=5, context=ctx2)
+                    print("[INFO] SSL certificates installed successfully.")
+                    return
+                except ssl.SSLCertVerificationError:
+                    continue
+                except Exception:
+                    return
+
+    # Try certifi package
+    try:
+        import certifi
+        os.environ["SSL_CERT_FILE"] = certifi.where()
+        ctx3 = ssl.create_default_context(cafile=certifi.where())
+        req3 = urllib.request.Request("https://github.com/", method="HEAD")
+        urllib.request.urlopen(req3, timeout=5, context=ctx3)
+        # Install certifi-based opener globally
+        https_handler = urllib.request.HTTPSHandler(context=ctx3)
+        opener = urllib.request.build_opener(https_handler)
+        urllib.request.install_opener(opener)
+        print("[INFO] Using certifi SSL certificates.")
+        return
+    except Exception:
+        pass
+
+    # Last resort: disable SSL verification globally
+    ssl._create_default_https_context = ssl._create_unverified_context
+    print("[WARN] SSL certificate verification disabled (certificate store not configured)")
+    print("[WARN] To fix permanently on macOS, run:")
+    print(f"[WARN]   /Applications/Python {sys.version_info.major}.{sys.version_info.minor}/Install Certificates.command")
+
+_fix_ssl_certs()
 
 REPO = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 DASHBOARD_HTTPS = os.environ.get("DASHBOARD_HTTPS", "").strip().lower() in ("1", "true", "yes", "y", "on")
