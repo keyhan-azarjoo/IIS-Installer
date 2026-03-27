@@ -6946,17 +6946,14 @@ def get_sam3_info():
         "running": bool(state.get("running")),
         "services": [],
     }
-    # Build URLs from host + port if not already set
-    if not info["http_url"] and info["http_port"]:
-        _h = info["host"] or info.get("domain") or ""
-        if not _h or _h in ("0.0.0.0", "*", ""):
-            _h = choose_service_host() or "127.0.0.1"
-        info["http_url"] = f"http://{_h}:{info['http_port']}"
-    if not info["https_url"] and info["https_port"] and info["https_port"] not in ("0", ""):
-        _h = info["host"] or info.get("domain") or ""
-        if not _h or _h in ("0.0.0.0", "*", ""):
-            _h = choose_service_host() or "127.0.0.1"
-        info["https_url"] = f"https://{_h}:{info['https_port']}"
+    # Always rebuild URLs from host + port to ensure the user-selected IP is used
+    _url_host = info.get("domain") or info["host"] or ""
+    if not _url_host or _url_host in ("0.0.0.0", "*"):
+        _url_host = choose_service_host() or "127.0.0.1"
+    if info["http_port"]:
+        info["http_url"] = f"http://{_url_host}:{info['http_port']}"
+    if info["https_port"] and info["https_port"] not in ("0", ""):
+        info["https_url"] = f"https://{_url_host}:{info['https_port']}"
     # Check systemd service status on Linux
     if os.name != "nt" and info["installed"] and command_exists("systemctl"):
         service_status = _linux_systemd_unit_status(f"{SAM3_SYSTEMD_SERVICE}.service")
@@ -7062,11 +7059,14 @@ def _get_ai_service_info(state_file, state_dir, systemd_service, display_name, d
         "version": str(state.get("version") or "").strip(),
         "services": [],
     }
-    # Build URL if not set
-    if not info["http_url"] and info["host"] and info["http_port"]:
-        info["http_url"] = f"http://{info['host']}:{info['http_port']}"
-    elif not info["http_url"] and info["http_port"]:
-        info["http_url"] = f"http://127.0.0.1:{info['http_port']}"
+    # Always rebuild URLs from host + port to match user-selected IP
+    _url_host = info.get("domain") or info["host"] or ""
+    if not _url_host or _url_host in ("0.0.0.0", "*"):
+        _url_host = choose_service_host() or "127.0.0.1"
+    if info["http_port"]:
+        info["http_url"] = f"http://{_url_host}:{info['http_port']}"
+    if info.get("https_port") and info["https_port"] not in ("0", ""):
+        info["https_url"] = f"https://{_url_host}:{info['https_port']}"
     # Check systemd service status on Linux
     if os.name != "nt" and info["installed"] and command_exists("systemctl"):
         svc_status = _linux_systemd_unit_status(f"{systemd_service}.service")
