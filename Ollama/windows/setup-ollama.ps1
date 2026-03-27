@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Ollama Installer for Windows
-# Installs Ollama LLM server + Web UI proxy with HTTPS, auth, and auto-start
+# Installs Ollama LLM server + Web UI on user-selected IP:Port
 # ─────────────────────────────────────────────────────────────────────────────
 param()
 $ErrorActionPreference = "Stop"
@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 
 # ── Configuration ────────────────────────────────────────────────────────────
 $OLLAMA_SERVICE_NAME = "ServerInstaller-Ollama"
+$OLLAMA_INTERNAL_PORT = "11434"  # Ollama always runs internally on this
 $programData         = [Environment]::GetFolderPath("CommonApplicationData")
 if ($env:SERVER_INSTALLER_DATA_DIR) { $baseStateDir = $env:SERVER_INSTALLER_DATA_DIR } else { $baseStateDir = Join-Path $programData "Server-Installer" }
 $stateDir            = Join-Path $baseStateDir "ollama"
@@ -17,13 +18,12 @@ $venvDir             = Join-Path $installDir "venv"
 $certDir             = Join-Path $stateDir "certs"
 $logFile             = Join-Path $stateDir "ollama.log"
 
-if ($env:OLLAMA_HTTP_PORT)  { $httpPort  = $env:OLLAMA_HTTP_PORT }  else { $httpPort  = "11434" }
+if ($env:OLLAMA_HTTP_PORT)  { $httpPort  = $env:OLLAMA_HTTP_PORT }  else { $httpPort  = "" }
 if ($env:OLLAMA_HTTPS_PORT) { $httpsPort = $env:OLLAMA_HTTPS_PORT } else { $httpsPort = "" }
 if ($env:OLLAMA_HOST_IP)    { $hostIp    = $env:OLLAMA_HOST_IP }    else { $hostIp    = "0.0.0.0" }
 if ($env:OLLAMA_DOMAIN)     { $domain    = $env:OLLAMA_DOMAIN }     else { $domain    = "" }
 if ($env:OLLAMA_USERNAME)   { $username  = $env:OLLAMA_USERNAME }   else { $username  = "" }
 if ($env:OLLAMA_PASSWORD)   { $password  = $env:OLLAMA_PASSWORD }   else { $password  = "" }
-$webUiPort  = 3080  # Web UI proxy port
 
 function Log($msg) { Write-Host "[Ollama] $msg" }
 
@@ -45,13 +45,11 @@ if (-not $ollamaPath) {
         Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
         Log "Running Ollama installer (silent)..."
         Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait -NoNewWindow
-        # Refresh PATH
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
         $ollamaPath = Get-Command "ollama" -ErrorAction SilentlyContinue
         if ($ollamaPath) {
             Log "Ollama installed successfully: $($ollamaPath.Source)"
         } else {
-            Log "WARNING: Ollama installed but not found in PATH. Trying default location..."
             $defaultOllama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
             if (Test-Path $defaultOllama) {
                 $env:Path += ";$(Split-Path $defaultOllama)"
@@ -60,30 +58,53 @@ if (-not $ollamaPath) {
         }
     } catch {
         Log "ERROR: Failed to download Ollama: $_"
-        Log "Please install Ollama manually from https://ollama.com/download"
         exit 1
     }
 } else {
     Log "Ollama already installed: $($ollamaPath.Source)"
 }
 
-# ── Step 2: Start Ollama service ─────────────────────────────────────────────
-Log "Ensuring Ollama service is running..."
-$env:OLLAMA_HOST = "${hostIp}:${httpPort}"
+# ── Step 2: Start Ollama on internal port ────────────────────────────────────
+Log "Starting Ollama on internal port $OLLAMA_INTERNAL_PORT..."
+$env:OLLAMA_HOST = "127.0.0.1:${OLLAMA_INTERNAL_PORT}"
+$env:OLLAMA_ORIGINS = "*"
 try {
     $ollamaProcess = Get-Process -Name "ollama" -ErrorAction SilentlyContinue
     if (-not $ollamaProcess) {
-        Log "Starting Ollama server on ${hostIp}:${httpPort}..."
         Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden
         Start-Sleep -Seconds 3
+        Log "Ollama started on 127.0.0.1:${OLLAMA_INTERNAL_PORT}"
     } else {
-        Log "Ollama is already running (PID: $($ollamaProcess.Id))"
+        Log "Ollama already running (PID: $($ollamaProcess.Id))"
     }
 } catch {
     Log "WARNING: Could not start Ollama: $_"
 }
 
-# ── Step 3: Resolve Python for Web UI ────────────────────────────────────────
+# ── Step 3: Skip web UI if no ports configured ──────────────────────────────
+if (-not $httpPort -and -not $httpsPort) {
+    Log "No HTTP/HTTPS ports configured — skipping web UI setup."
+    Log "Ollama API available at http://127.0.0.1:${OLLAMA_INTERNAL_PORT}"
+
+    # Save state
+    $displayHost = $hostIp
+    if ($displayHost -eq "0.0.0.0" -or $displayHost -eq "*" -or $displayHost -eq "") {
+        $displayHost = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne "127.0.0.1" -and $_.PrefixOrigin -ne "WellKnown" } | Select-Object -First 1).IPAddress
+        if (-not $displayHost) { $displayHost = "127.0.0.1" }
+    }
+    $state = @{
+        installed = $true; service_name = $OLLAMA_SERVICE_NAME
+        install_dir = $installDir; host = $hostIp
+        http_port = $OLLAMA_INTERNAL_PORT
+        http_url = "http://${displayHost}:${OLLAMA_INTERNAL_PORT}"
+        deploy_mode = "os"; running = $true; version = ""
+    }
+    try { $state.version = (& ollama --version 2>&1) -replace "ollama version ", "" } catch {}
+    $state | ConvertTo-Json -Depth 10 | Set-Content -Path $statePath -Encoding UTF8
+    exit 0
+}
+
+# ── Step 4: Resolve Python for Web UI ────────────────────────────────────────
 Log "Resolving Python..."
 $pythonCmd = $null
 foreach ($py in @("python3", "python", "py")) {
@@ -99,13 +120,13 @@ if (-not $pythonCmd) {
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
         $pythonCmd = "python"
     } catch {
-        Log "ERROR: Could not install Python. Please install Python 3.10+ manually."
+        Log "ERROR: Could not install Python."
         exit 1
     }
 }
 Log "Using Python: $pythonCmd"
 
-# ── Step 4: Setup Web UI virtual environment ─────────────────────────────────
+# ── Step 5: Setup Web UI venv ────────────────────────────────────────────────
 Log "Setting up Web UI virtual environment..."
 $venvPython = Join-Path $venvDir "Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
@@ -114,103 +135,137 @@ if (-not (Test-Path $venvPython)) {
 & $venvPython -m pip install --upgrade pip --quiet 2>&1 | Out-Null
 & $venvPython -m pip install flask requests --quiet 2>&1
 
-# ── Step 5: Copy Web UI files ────────────────────────────────────────────────
+# ── Step 6: Copy Web UI files ────────────────────────────────────────────────
 Log "Copying Web UI files..."
 $scriptRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $commonDir = Join-Path $scriptRoot "Ollama\common"
 if (Test-Path $commonDir) {
     Copy-Item -Path "$commonDir\*" -Destination $installDir -Recurse -Force
     Log "Web UI files copied to $installDir"
-} else {
-    Log "WARNING: Common directory not found at $commonDir"
 }
 
-# ── Step 6: Generate startup script ──────────────────────────────────────────
+# ── Step 7: Generate startup script ──────────────────────────────────────────
 Log "Creating startup script..."
 $startScript = Join-Path $installDir "start-ollama-webui.py"
+$webPort = $httpPort
+if (-not $webPort) { $webPort = $httpsPort }
 $pyLines = @(
     "#!/usr/bin/env python3",
-    "import os, sys, subprocess, time",
+    "import os, sys, ssl, subprocess, threading, time",
     "",
-    "OLLAMA_PORT = os.environ.get('OLLAMA_PORT', '$httpPort')",
-    "OLLAMA_HOST_BIND = os.environ.get('OLLAMA_HOST', '0.0.0.0:' + OLLAMA_PORT)",
-    "WEB_UI_PORT = int(os.environ.get('OLLAMA_WEBUI_PORT', '$webUiPort'))",
+    "OLLAMA_INTERNAL = 'http://127.0.0.1:${OLLAMA_INTERNAL_PORT}'",
+    "WEB_PORT = int(os.environ.get('OLLAMA_WEB_PORT', '${webPort}'))",
+    "HTTPS_PORT = os.environ.get('OLLAMA_HTTPS_PORT', '${httpsPort}').strip()",
+    "CERT_FILE = os.environ.get('OLLAMA_CERT_FILE', '')",
+    "KEY_FILE = os.environ.get('OLLAMA_KEY_FILE', '')",
     "",
+    "# Ensure Ollama is running internally",
     "def ensure_ollama():",
     "    try:",
     "        import urllib.request",
-    "        urllib.request.urlopen('http://127.0.0.1:' + OLLAMA_PORT + '/api/tags', timeout=3)",
+    "        urllib.request.urlopen(OLLAMA_INTERNAL + '/api/tags', timeout=3)",
     "    except Exception:",
     "        print('[Startup] Starting Ollama server...')",
     "        env = dict(os.environ)",
-    "        env['OLLAMA_HOST'] = OLLAMA_HOST_BIND",
-    "        subprocess.Popen(['ollama', 'serve'], env=env)",
+    "        env['OLLAMA_HOST'] = '127.0.0.1:${OLLAMA_INTERNAL_PORT}'",
+    "        env['OLLAMA_ORIGINS'] = '*'",
+    "        subprocess.Popen(['ollama', 'serve'], env=env, creationflags=0x00000008)",
     "        time.sleep(5)",
+    "",
+    "def run_https(app, port, certfile, keyfile):",
+    "    try:",
+    "        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)",
+    "        ctx.minimum_version = ssl.TLSVersion.TLSv1_2",
+    "        ctx.load_cert_chain(os.path.normpath(certfile), os.path.normpath(keyfile))",
+    "        from werkzeug.serving import make_server",
+    "        server = make_server('0.0.0.0', port, app, ssl_context=ctx, threaded=True)",
+    "        print(f'Ollama HTTPS on https://0.0.0.0:{port}')",
+    "        server.serve_forever()",
+    "    except Exception as e:",
+    "        print(f'HTTPS failed: {e}')",
     "",
     "if __name__ == '__main__':",
     "    ensure_ollama()",
+    "    os.environ['OLLAMA_API_BASE'] = OLLAMA_INTERNAL",
     "    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))",
     "    from ollama_web import app",
-    "    app.run(host='0.0.0.0', port=WEB_UI_PORT)"
+    "    # Start HTTPS thread if configured",
+    "    if HTTPS_PORT and HTTPS_PORT.isdigit() and CERT_FILE and KEY_FILE:",
+    "        if os.path.isfile(os.path.normpath(CERT_FILE)) and os.path.isfile(os.path.normpath(KEY_FILE)):",
+    "            t = threading.Thread(target=run_https, args=(app, int(HTTPS_PORT), CERT_FILE, KEY_FILE), daemon=True)",
+    "            t.start()",
+    "            print(f'Ollama Web UI: HTTP on :{WEB_PORT}, HTTPS on :{HTTPS_PORT}')",
+    "    print(f'Ollama Web UI starting on http://0.0.0.0:{WEB_PORT}')",
+    "    app.run(host='0.0.0.0', port=WEB_PORT)"
 )
 $pyLines -join "`n" | Set-Content -Path $startScript -Encoding UTF8
 
-# ── Step 7: Generate self-signed SSL cert ────────────────────────────────────
+# ── Step 8: SSL certificate ──────────────────────────────────────────────────
+$certFile = Join-Path $certDir "ollama.crt"
+$keyFile  = Join-Path $certDir "ollama.key"
 if ($httpsPort -and $httpsPort -ne "0") {
-    $certFile = Join-Path $certDir "ollama.crt"
-    $keyFile  = Join-Path $certDir "ollama.key"
     if (-not (Test-Path $certFile)) {
         Log "Generating self-signed SSL certificate..."
         $cn = $domain
         if (-not $cn) { $cn = $hostIp }
+        if (-not $cn -or $cn -eq "0.0.0.0") { $cn = "localhost" }
         $opensslPath = Get-Command "openssl" -ErrorAction SilentlyContinue
         if ($opensslPath) {
             & openssl req -x509 -nodes -newkey rsa:2048 -keyout $keyFile -out $certFile -days 3650 -subj "/CN=$cn/O=ServerInstaller/C=US" 2>&1
             Log "SSL certificate created."
         } else {
-            Log "openssl not found — skipping SSL cert generation."
+            Log "openssl not found — HTTPS not available."
         }
     }
 }
 
-# ── Step 8: Register as Windows Scheduled Task ───────────────────────────────
+# ── Step 9: Register as Scheduled Task ───────────────────────────────────────
 Log "Registering auto-start task..."
 $taskName = $OLLAMA_SERVICE_NAME
 try {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 } catch {}
 
+$taskEnvArgs = "`"$startScript`""
 $action = New-ScheduledTaskAction `
     -Execute $venvPython `
-    -Argument "`"$startScript`"" `
+    -Argument $taskEnvArgs `
     -WorkingDirectory $installDir
 
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval ([TimeSpan]::FromMinutes(1))
 
+# Set environment variables for the task
+$env:OLLAMA_WEB_PORT = $webPort
+$env:OLLAMA_HTTPS_PORT = $httpsPort
+$env:OLLAMA_CERT_FILE = $certFile
+$env:OLLAMA_KEY_FILE = $keyFile
+$env:OLLAMA_API_BASE = "http://127.0.0.1:${OLLAMA_INTERNAL_PORT}"
+
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -User "SYSTEM" -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 Log "Task '$taskName' registered and started."
 
-# ── Step 9: Open firewall ports ──────────────────────────────────────────────
+# ── Step 10: Firewall ────────────────────────────────────────────────────────
 Log "Configuring firewall..."
-foreach ($p in @($httpPort, $webUiPort)) {
-    try {
-        New-NetFirewallRule -DisplayName "Ollama $p" -Direction Inbound -LocalPort $p -Protocol TCP -Action Allow -ErrorAction SilentlyContinue | Out-Null
-    } catch {}
+if ($httpPort) {
+    try { New-NetFirewallRule -DisplayName "Ollama HTTP $httpPort" -Direction Inbound -LocalPort $httpPort -Protocol TCP -Action Allow -ErrorAction SilentlyContinue | Out-Null } catch {}
 }
-if ($httpsPort -and $httpsPort -ne "0") {
-    try {
-        New-NetFirewallRule -DisplayName "Ollama HTTPS $httpsPort" -Direction Inbound -LocalPort $httpsPort -Protocol TCP -Action Allow -ErrorAction SilentlyContinue | Out-Null
-    } catch {}
+if ($httpsPort) {
+    try { New-NetFirewallRule -DisplayName "Ollama HTTPS $httpsPort" -Direction Inbound -LocalPort $httpsPort -Protocol TCP -Action Allow -ErrorAction SilentlyContinue | Out-Null } catch {}
 }
 
-# ── Step 10: Save state ──────────────────────────────────────────────────────
+# ── Step 11: Save state ──────────────────────────────────────────────────────
 $displayHost = $hostIp
 if ($displayHost -eq "0.0.0.0" -or $displayHost -eq "*" -or $displayHost -eq "") {
     $displayHost = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne "127.0.0.1" -and $_.PrefixOrigin -ne "WellKnown" } | Select-Object -First 1).IPAddress
     if (-not $displayHost) { $displayHost = "127.0.0.1" }
 }
+
+$httpUrl = ""
+$httpsUrl = ""
+if ($httpPort) { $httpUrl = "http://${displayHost}:${httpPort}" }
+if ($httpsPort) { $httpsUrl = "https://${displayHost}:${httpsPort}" }
 
 $state = @{
     installed         = $true
@@ -221,18 +276,16 @@ $state = @{
     domain            = $domain
     http_port         = $httpPort
     https_port        = $httpsPort
-    webui_port        = "$webUiPort"
-    http_url          = "http://${displayHost}:${httpPort}"
-    webui_url         = "http://${displayHost}:${webUiPort}"
-    https_url         = ""
+    http_url          = $httpUrl
+    https_url         = $httpsUrl
     deploy_mode       = "os"
     auth_enabled      = [bool]$username
     auth_username     = $username
     running           = $true
     version           = ""
+    ollama_internal   = "http://127.0.0.1:${OLLAMA_INTERNAL_PORT}"
 }
 try { $state.version = (& ollama --version 2>&1) -replace "ollama version ", "" } catch {}
-if ($httpsPort) { $state.https_url = "https://${displayHost}:${httpsPort}" }
 
 $state | ConvertTo-Json -Depth 10 | Set-Content -Path $statePath -Encoding UTF8
 
@@ -241,12 +294,10 @@ Log ""
 Log "================================================================="
 Log " Ollama Installation Complete!"
 Log "================================================================="
-Log " Ollama API:  http://${displayHost}:${httpPort}"
-Log " Web UI:      http://${displayHost}:${webUiPort}"
-if ($httpsPort) { Log " HTTPS:       https://${displayHost}:${httpsPort}" }
-Log " Service:     $OLLAMA_SERVICE_NAME"
-Log " State:       $statePath"
+if ($httpUrl) { Log " Web UI (HTTP):  $httpUrl" }
+if ($httpsUrl) { Log " Web UI (HTTPS): $httpsUrl" }
+Log " Ollama API:     http://127.0.0.1:${OLLAMA_INTERNAL_PORT}"
+Log " Service:        $OLLAMA_SERVICE_NAME"
 Log "================================================================="
 Log ""
 Log "Quick start: ollama pull llama3.2"
-Log "Then chat:   ollama run llama3.2"
