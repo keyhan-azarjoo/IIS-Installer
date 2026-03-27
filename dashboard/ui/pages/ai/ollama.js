@@ -71,6 +71,11 @@
     var handlePull = function() {
       if (!pullName.trim()) return;
       setPulling(true);
+      // Use the run system to show progress in web terminal
+      var fd = new FormData();
+      fd.append("OLLAMA_MODEL_NAME", pullName.trim());
+      run(null, "/run/ollama_pull_model", "Pull " + pullName, fd);
+      // Also try direct API for quick feedback
       fetch("/api/ollama/pull", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
@@ -82,10 +87,20 @@
             if (setInfoMessage) setInfoMessage("Model \"" + pullName + "\" pulled successfully.");
             refreshModels();
           } else {
-            if (setInfoMessage) setInfoMessage("Pull failed: " + (j.error || "Unknown error"));
+            var errMsg = j.error || "Unknown error";
+            if (errMsg.indexOf("Connection refused") !== -1 || errMsg.indexOf("10061") !== -1 || errMsg.indexOf("111") !== -1) {
+              errMsg = "Ollama server is not running. Click Start in the Services list below, or install Ollama first.";
+            }
+            if (setInfoMessage) setInfoMessage("Pull: " + errMsg);
           }
         })
-        .catch(function(e) { if (setInfoMessage) setInfoMessage("Pull error: " + e); })
+        .catch(function(e) {
+          var errMsg = String(e);
+          if (errMsg.indexOf("Connection refused") !== -1 || errMsg.indexOf("10061") !== -1) {
+            errMsg = "Ollama server is not running. Start the service first.";
+          }
+          if (setInfoMessage) setInfoMessage("Pull: " + errMsg);
+        })
         .finally(function() { setPulling(false); });
     };
 

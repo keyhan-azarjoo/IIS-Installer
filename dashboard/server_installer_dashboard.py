@@ -14178,6 +14178,58 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_ollama_docker(form)
                 self.respond_run_result(title, code, output)
             return
+        if self.path == "/run/ollama_pull_model":
+            model_name = (form.get("OLLAMA_MODEL_NAME", [""])[0] or "").strip()
+            title = "Ollama Pull: " + (model_name or "model")
+            def _pull_model(cb):
+                output = []
+                def log(m):
+                    output.append(m)
+                    if cb: cb(m + "\n")
+                log("=== Pulling Ollama model: " + model_name + " ===")
+                # First check if ollama is running
+                ollama_bin = shutil.which("ollama")
+                if not ollama_bin:
+                    log("ERROR: Ollama is not installed. Install it first using the Install card above.")
+                    return 1, "\n".join(output)
+                # Try to start Ollama if not running
+                try:
+                    import urllib.request
+                    urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=3)
+                    log("Ollama server is running.")
+                except Exception:
+                    log("Ollama server not responding. Trying to start it...")
+                    if os.name == "nt":
+                        subprocess.Popen([ollama_bin, "serve"], creationflags=0x00000008)
+                    else:
+                        subprocess.Popen([ollama_bin, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    import time
+                    for i in range(15):
+                        time.sleep(2)
+                        try:
+                            urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=3)
+                            log("Ollama server started.")
+                            break
+                        except Exception:
+                            log("Waiting for Ollama to start... (" + str(i+1) + "/15)")
+                    else:
+                        log("ERROR: Could not start Ollama server. Please start it manually.")
+                        return 1, "\n".join(output)
+                # Pull the model using ollama CLI (shows progress)
+                log("Downloading model: " + model_name)
+                code = _run_install_cmd([ollama_bin, "pull", model_name], log, timeout=1800)
+                if code == 0:
+                    log("\nModel '" + model_name + "' pulled successfully!")
+                else:
+                    log("\nFailed to pull model '" + model_name + "'")
+                return code, "\n".join(output)
+            if self.is_fetch():
+                job_id = start_live_job(title, _pull_model)
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = _pull_model(None)
+                self.respond_run_result(title, code, output)
+            return
         # ── Text Generation WebUI routes ──────────────────────────────────────
         if self.path in ("/run/tgwui_windows_os", "/run/tgwui_unix_os"):
             title = "Text Gen WebUI Install"
