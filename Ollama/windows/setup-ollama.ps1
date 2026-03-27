@@ -128,29 +128,32 @@ if (Test-Path $commonDir) {
 # ── Step 6: Generate startup script ──────────────────────────────────────────
 Log "Creating startup script..."
 $startScript = Join-Path $installDir "start-ollama-webui.py"
-@"
-#!/usr/bin/env python3
-import os, sys, subprocess, threading, time
-
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "0.0.0.0:${httpPort}")
-WEB_UI_PORT = int(os.environ.get("OLLAMA_WEBUI_PORT", "${webUiPort}"))
-
-# Ensure Ollama is running
-def ensure_ollama():
-    try:
-        import urllib.request
-        urllib.request.urlopen(f"http://127.0.0.1:${httpPort}/api/tags", timeout=3)
-    except Exception:
-        print("[Startup] Starting Ollama server...")
-        subprocess.Popen(["ollama", "serve"], env={**os.environ, "OLLAMA_HOST": OLLAMA_HOST})
-        time.sleep(5)
-
-if __name__ == "__main__":
-    ensure_ollama()
-    sys.path.insert(0, os.path.dirname(__file__))
-    from ollama_web import app
-    app.run(host="0.0.0.0", port=WEB_UI_PORT)
-"@ | Set-Content -Path $startScript -Encoding UTF8
+$pyLines = @(
+    "#!/usr/bin/env python3",
+    "import os, sys, subprocess, time",
+    "",
+    "OLLAMA_PORT = os.environ.get('OLLAMA_PORT', '$httpPort')",
+    "OLLAMA_HOST_BIND = os.environ.get('OLLAMA_HOST', '0.0.0.0:' + OLLAMA_PORT)",
+    "WEB_UI_PORT = int(os.environ.get('OLLAMA_WEBUI_PORT', '$webUiPort'))",
+    "",
+    "def ensure_ollama():",
+    "    try:",
+    "        import urllib.request",
+    "        urllib.request.urlopen('http://127.0.0.1:' + OLLAMA_PORT + '/api/tags', timeout=3)",
+    "    except Exception:",
+    "        print('[Startup] Starting Ollama server...')",
+    "        env = dict(os.environ)",
+    "        env['OLLAMA_HOST'] = OLLAMA_HOST_BIND",
+    "        subprocess.Popen(['ollama', 'serve'], env=env)",
+    "        time.sleep(5)",
+    "",
+    "if __name__ == '__main__':",
+    "    ensure_ollama()",
+    "    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))",
+    "    from ollama_web import app",
+    "    app.run(host='0.0.0.0', port=WEB_UI_PORT)"
+)
+$pyLines -join "`n" | Set-Content -Path $startScript -Encoding UTF8
 
 # ── Step 7: Generate self-signed SSL cert ────────────────────────────────────
 if ($httpsPort -and $httpsPort -ne "0") {
