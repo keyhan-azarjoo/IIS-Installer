@@ -51,7 +51,73 @@ log "OpenClaw installed."
 # ── Step 3: Copy web UI files ────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_DIR="$(dirname "$SCRIPT_DIR")/common"
-[ -d "$COMMON_DIR" ] && cp -r "$COMMON_DIR"/* "$INSTALL_DIR/"
+if [ -d "$COMMON_DIR" ]; then
+    cp -r "$COMMON_DIR"/* "$INSTALL_DIR/"
+    log "Web UI files copied from $COMMON_DIR"
+else
+    log "WARNING: Common dir not found at $COMMON_DIR"
+    log "Checking alternative paths..."
+    # Try to find the common dir relative to the root
+    for alt in "$(dirname "$(dirname "$SCRIPT_DIR")")/OpenClaw/common" "$(dirname "$SCRIPT_DIR")/../OpenClaw/common"; do
+        if [ -d "$alt" ]; then
+            cp -r "$alt"/* "$INSTALL_DIR/"
+            log "Files copied from $alt"
+            break
+        fi
+    done
+fi
+# Verify critical files
+if [ ! -f "${INSTALL_DIR}/openclaw_web.py" ]; then
+    log "openclaw_web.py missing — creating minimal web server..."
+    cat > "${INSTALL_DIR}/openclaw_web.py" <<'WEBEOF'
+import os, json, subprocess
+from flask import Flask, request, jsonify, Response
+app = Flask(__name__)
+@app.route("/")
+def index():
+    return """<!DOCTYPE html><html><head><meta charset=utf-8><title>OpenClaw</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+    .c{background:#1e293b;border-radius:16px;padding:48px;max-width:600px;text-align:center;border:1px solid #334155}
+    h1{font-size:32px;margin-bottom:16px;color:#f97316}p{color:#94a3b8;line-height:1.8;margin-bottom:16px}
+    input{width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:12px;font-size:15px;margin-bottom:12px}
+    button{background:#f97316;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%}
+    button:hover{background:#ea580c}pre{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;text-align:left;margin-top:16px;font-size:13px;white-space:pre-wrap;max-height:300px;overflow:auto;color:#94a3b8}</style></head>
+    <body><div class=c><h1>OpenClaw</h1><p>AI Agent Framework</p>
+    <input id=t placeholder="Describe a task..." onkeydown="if(event.key==='Enter')run()">
+    <button onclick="run()">Run Task</button><pre id=o></pre>
+    <script>async function run(){const t=document.getElementById('t').value;if(!t)return;document.getElementById('o').textContent='Running...';
+    try{const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task:t})});
+    const j=await r.json();document.getElementById('o').textContent=j.output||j.error||JSON.stringify(j);}catch(e){document.getElementById('o').textContent='Error: '+e;}}</script>
+    </div></body></html>"""
+@app.route("/api/health")
+def health():
+    return jsonify({"ok": True, "status": "healthy", "service": "openclaw"})
+@app.route("/api/run", methods=["POST"])
+def run_task():
+    data = request.get_json(silent=True) or {}
+    task = data.get("task", "")
+    if not task:
+        return jsonify({"ok": False, "error": "Task required"}), 400
+    try:
+        proc = subprocess.run(["openclaw", "run", task], capture_output=True, text=True, timeout=120)
+        return jsonify({"ok": proc.returncode == 0, "output": proc.stdout, "error": proc.stderr})
+    except FileNotFoundError:
+        return jsonify({"ok": False, "error": "openclaw not found. Run: pip install openclaw"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+@app.route("/api/version")
+def version():
+    try:
+        proc = subprocess.run(["openclaw", "--version"], capture_output=True, text=True, timeout=10)
+        return jsonify({"ok": True, "version": proc.stdout.strip()})
+    except:
+        return jsonify({"ok": False, "version": "unknown"})
+WEBEOF
+    log "Minimal openclaw_web.py created."
+fi
+if [ ! -d "${INSTALL_DIR}/web/templates" ]; then
+    mkdir -p "${INSTALL_DIR}/web/templates"
+fi
 
 # ── Step 4: Skip web UI if no ports ──────────────────────────────────────────
 if [ -z "${HTTP_PORT}" ] && [ -z "${HTTPS_PORT}" ]; then
@@ -127,8 +193,30 @@ SVCEOF
 else
     log "Starting Web UI in background on port ${WEB_PORT}..."
     export OPENCLAW_WEB_PORT="${WEB_PORT}"
+    # Verify files exist before starting
+    if [ ! -f "${INSTALL_DIR}/openclaw_web.py" ]; then
+        log "WARNING: openclaw_web.py not found in ${INSTALL_DIR}. Listing files:"
+        ls -la "${INSTALL_DIR}/" 2>&1 | while read line; do log "  $line"; done
+    fi
+    if [ ! -f "${INSTALL_DIR}/start-openclaw-webui.py" ]; then
+        log "WARNING: start-openclaw-webui.py not found in ${INSTALL_DIR}"
+    fi
     nohup "${VENV_PYTHON}" "${INSTALL_DIR}/start-openclaw-webui.py" >> "${LOG_FILE}" 2>&1 &
-    log "Web UI started (PID: $!)."
+    WEBUI_PID=$!
+    sleep 3
+    # Check if still running
+    if kill -0 "$WEBUI_PID" 2>/dev/null; then
+        log "Web UI running (PID: ${WEBUI_PID})."
+        # Verify it's responding
+        if curl -sf "http://127.0.0.1:${WEB_PORT}/api/health" >/dev/null 2>&1; then
+            log "Web UI responding on port ${WEB_PORT}."
+        else
+            log "Web UI process running but not responding yet. Check log: ${LOG_FILE}"
+        fi
+    else
+        log "WARNING: Web UI process died. Last log lines:"
+        tail -20 "${LOG_FILE}" 2>/dev/null | while read line; do log "  $line"; done
+    fi
 fi
 
 # ── Step 8: Firewall ────────────────────────────────────────────────────────

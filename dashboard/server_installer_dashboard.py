@@ -2531,7 +2531,6 @@ def _run_install_cmd(cmd, log, timeout=300):
 
 def _install_engine_docker(log):
     """Install Docker."""
-    output_lines = []
     if command_exists("docker"):
         log("Docker is already installed.")
         return 0, "Docker is already installed."
@@ -2539,10 +2538,35 @@ def _install_engine_docker(log):
     if os.name == "nt":
         log("On Windows, Docker Desktop must be installed manually.")
         log("Download from: https://www.docker.com/products/docker-desktop/")
-        log("After installing, enable WSL2 backend and restart.")
-        return 1, "\n".join(["Docker Desktop must be installed manually on Windows.",
-                             "Download: https://www.docker.com/products/docker-desktop/"])
+        return 1, "Docker Desktop must be installed manually on Windows."
+
+    if sys.platform == "darwin":
+        # macOS: use brew to install Docker
+        log("macOS detected. Installing Docker via Homebrew...")
+        if command_exists("brew"):
+            code = _run_install_cmd(["brew", "install", "--cask", "docker"], log, timeout=300)
+            if code == 0:
+                log("Docker Desktop installed. Opening it...")
+                _run_install_cmd(["open", "/Applications/Docker.app"], log, timeout=10)
+                log("Wait for Docker to start, then retry.")
+                import time
+                for i in range(30):
+                    time.sleep(2)
+                    if command_exists("docker"):
+                        log("Docker is ready.")
+                        return 0, "Docker installed."
+                    log(f"Waiting for Docker... ({i+1}/30)")
+                return 0, "Docker installed. Open Docker Desktop to complete setup."
+            else:
+                log("brew install failed. Install Docker Desktop manually:")
+                log("https://www.docker.com/products/docker-desktop/")
+                return 1, "Docker installation failed."
+        else:
+            log("Homebrew not found. Install Docker Desktop manually:")
+            log("https://www.docker.com/products/docker-desktop/")
+            return 1, "Install Docker Desktop from docker.com"
     else:
+        # Linux
         log("Installing Docker via official script...")
         code = _run_install_cmd("curl -fsSL https://get.docker.com | sh", log)
         if code == 0:
