@@ -1248,18 +1248,31 @@ def main() -> int:
     if args.key:
         os.environ["DASHBOARD_KEY"] = args.key
 
-    # Save custom credentials if provided
+    # Save custom credentials if provided — write to ALL possible locations
     if dash_user and dash_pass:
-        creds_dir = cache_root()
-        creds_dir.mkdir(parents=True, exist_ok=True)
-        creds_file = creds_dir / "dashboard-credentials.json"
         import hashlib
         hashed = hashlib.sha256(dash_pass.encode()).hexdigest()
-        creds_file.write_text(json.dumps({"username": dash_user, "password_hash": hashed}, indent=2), encoding="utf-8")
-        try:
-            os.chmod(str(creds_file), 0o600)
-        except Exception:
-            pass
+        creds_data = json.dumps({"username": dash_user, "password_hash": hashed}, indent=2)
+        # Write to multiple locations so the dashboard finds it regardless of which user runs it
+        creds_paths = [
+            cache_root() / "dashboard-credentials.json",  # current user
+        ]
+        # Also write to the real user's home (in case running with sudo)
+        real_home = os.environ.get("SUDO_USER", "")
+        if real_home:
+            creds_paths.append(Path("/Users") / real_home / ".server-installer" / "dashboard-credentials.json")
+            creds_paths.append(Path("/home") / real_home / ".server-installer" / "dashboard-credentials.json")
+        # Also write to root's location
+        if os.name != "nt":
+            creds_paths.append(Path("/var/root/.server-installer/dashboard-credentials.json"))
+            creds_paths.append(Path("/root/.server-installer/dashboard-credentials.json"))
+        for creds_file in creds_paths:
+            try:
+                creds_file.parent.mkdir(parents=True, exist_ok=True)
+                creds_file.write_text(creds_data, encoding="utf-8")
+                os.chmod(str(creds_file), 0o644)
+            except Exception:
+                pass
         print(f"[INFO] Dashboard credentials set: user={dash_user}")
         os.environ["DASHBOARD_CUSTOM_USER"] = dash_user
         os.environ["DASHBOARD_CUSTOM_PASS_HASH"] = hashed

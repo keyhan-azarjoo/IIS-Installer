@@ -8609,14 +8609,28 @@ def validate_os_credentials(username, password):
     try:
         creds_file = SERVER_INSTALLER_DATA / "dashboard-credentials.json"
         if not creds_file.exists():
-            # Also check the cache root used by start-server-dashboard.py
-            for alt in [
+            # Search ALL possible locations (sudo user, root, real user, etc.)
+            search_paths = [
                 Path.home() / ".server-installer" / "dashboard-credentials.json",
+                Path("/var/root/.server-installer/dashboard-credentials.json"),
+                Path("/root/.server-installer/dashboard-credentials.json"),
                 Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "dashboard-credentials.json",
-            ]:
-                if alt.exists():
-                    creds_file = alt
-                    break
+            ]
+            # Also check each user's home on macOS
+            if sys.platform == "darwin":
+                try:
+                    for entry in Path("/Users").iterdir():
+                        if entry.is_dir() and not entry.name.startswith("."):
+                            search_paths.append(entry / ".server-installer" / "dashboard-credentials.json")
+                except Exception:
+                    pass
+            for alt in search_paths:
+                try:
+                    if alt.exists():
+                        creds_file = alt
+                        break
+                except Exception:
+                    pass
         if creds_file.exists():
             import hashlib
             creds = json.loads(creds_file.read_text(encoding="utf-8"))
