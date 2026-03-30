@@ -138,10 +138,19 @@ def chat():
     if not model:
         return jsonify({"ok": False, "error": "Model name required"}), 400
 
+    # Pass through options (temperature, top_p, num_ctx, num_predict, etc.)
+    options = data.get("options", {})
+    payload = {"model": model, "messages": messages, "stream": stream}
+    if options:
+        payload["options"] = options
+
     if stream:
         def generate():
             try:
-                r = _ollama("POST", "/api/chat", {"model": model, "messages": messages, "stream": True}, stream=True)
+                r = _ollama("POST", "/api/chat", {**payload, "stream": True}, stream=True)
+                if isinstance(r, dict) and "error" in r:
+                    yield f'data: {{"error":"{r["error"]}"}}\n\n'
+                    return
                 for line in r.iter_lines():
                     if line:
                         yield f"data: {line.decode()}\n\n"
@@ -149,7 +158,7 @@ def chat():
                 yield f'data: {{"error":"{e}"}}\n\n'
         return Response(stream_with_context(generate()), mimetype="text/event-stream")
     else:
-        result = _ollama("POST", "/api/chat", {"model": model, "messages": messages, "stream": False})
+        result = _ollama("POST", "/api/chat", {**payload, "stream": False})
         if "error" in result:
             return jsonify({"ok": False, "error": result["error"]}), 500
         return jsonify({"ok": True, **result})

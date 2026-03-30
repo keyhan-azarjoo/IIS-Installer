@@ -82,7 +82,7 @@ def chat():
     data = request.get_json(silent=True) or {}
     model = data.get("model", "")
     messages = data.get("messages", [])
-    stream = data.get("stream", False)
+    stream = data.get("stream", True)
 
     if not model:
         # Auto-select first available model
@@ -91,14 +91,27 @@ def chat():
             model = models["data"][0].get("id", "")
 
     payload = {"model": model, "messages": messages, "stream": stream}
+    # Pass through optional parameters
+    for key in ("temperature", "top_p", "max_tokens", "frequency_penalty", "presence_penalty"):
+        if key in data:
+            payload[key] = data[key]
 
     if stream:
         def generate():
             try:
                 r = _lms("POST", "/v1/chat/completions", payload, stream=True)
+                if isinstance(r, dict) and "error" in r:
+                    yield f'data: {{"error":"{r["error"]}"}}\n\n'
+                    return
                 for line in r.iter_lines():
                     if line:
-                        yield f"data: {line.decode()}\n\n"
+                        decoded = line.decode()
+                        # LM Studio returns "data: ..." lines, strip prefix if present
+                        if decoded.startswith("data: "):
+                            yield f"{decoded}\n\n"
+                        else:
+                            yield f"data: {decoded}\n\n"
+                yield "data: [DONE]\n\n"
             except Exception as e:
                 yield f'data: {{"error":"{e}"}}\n\n'
         return Response(stream_with_context(generate()), mimetype="text/event-stream")
