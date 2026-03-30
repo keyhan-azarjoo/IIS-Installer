@@ -104,6 +104,61 @@ def _chat_with_llm(messages, model=None):
     return {"ok": False, "content": "", "error": "No LLM backend available. Install Ollama and pull a model, or set OPENAI_API_KEY."}
 
 
+def _chat_with_llm_stream(messages, model=None):
+    """Stream messages from the LLM as a generator of content chunks.
+
+    Yields individual content token strings from Ollama's streaming /api/chat
+    endpoint.  Falls back to a single-chunk yield from OpenAI (non-streaming)
+    when Ollama is unavailable.
+    """
+    import requests
+
+    # Try Ollama streaming
+    ollama_url, default_model = _find_ollama()
+    if ollama_url:
+        use_model = model or default_model
+        try:
+            r = requests.post(
+                f"{ollama_url}/api/chat",
+                json={"model": use_model, "messages": messages, "stream": True},
+                timeout=300,
+                stream=True,
+            )
+            if r.status_code == 200:
+                for raw_line in r.iter_lines():
+                    if not raw_line:
+                        continue
+                    try:
+                        chunk = json.loads(raw_line)
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            yield token
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+                return
+        except Exception:
+            pass
+
+    # Fallback: OpenAI (non-streaming, yield entire response at once)
+    if OPENAI_API_KEY:
+        try:
+            r = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                json={"model": model or "gpt-4o-mini", "messages": messages},
+                timeout=120,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                content = data["choices"][0]["message"]["content"]
+                yield content
+                return
+        except Exception:
+            pass
+
+    yield "[Error] No LLM backend available. Install Ollama and pull a model, or set OPENAI_API_KEY."
+
+
 AGENT_SYSTEM_PROMPT = """You are OpenClaw, an AI agent assistant. You help users by:
 1. Answering questions clearly and helpfully
 2. Writing code when asked
@@ -144,6 +199,7 @@ def chat():
     messages = data.get("messages", [])
     model = data.get("model", "")
     task = data.get("task", "")
+    stream = data.get("stream", False)
 
     if task and not messages:
         messages = [
@@ -153,6 +209,14 @@ def chat():
 
     if not messages:
         return jsonify({"ok": False, "error": "No messages or task provided."}), 400
+
+    if stream:
+        def _generate():
+            for token in _chat_with_llm_stream(messages, model):
+                yield f"data: {json.dumps({'token': token})}\n\n"
+            yield "data: [DONE]\n\n"
+        return Response(_generate(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     result = _chat_with_llm(messages, model)
     return jsonify(result)
@@ -180,6 +244,37 @@ def run_task():
             "backend": result.get("backend", ""),
         })
     return jsonify({"ok": False, "error": result.get("error", "Failed"), "output": ""})
+
+
+@app.route("/api/run/stream", methods=["POST"])
+@_require_auth
+def run_task_stream():
+    """Streaming version of /api/run — sends SSE events as the LLM generates tokens."""
+    data = request.get_json(silent=True) or {}
+    task = data.get("task", "").strip()
+    if not task:
+        return jsonify({"ok": False, "error": "Task description required."}), 400
+
+    messages = [
+        {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+        {"role": "user", "content": task},
+    ]
+
+    def _generate():
+        buffer = ""
+        for token in _chat_with_llm_stream(messages):
+            buffer += token
+            # Emit each complete line as it forms; also emit partial tokens
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                yield f"data: {json.dumps({'line': line})}\n\n"
+        # Flush any remaining text that didn't end with a newline
+        if buffer:
+            yield f"data: {json.dumps({'line': buffer})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return Response(_generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.route("/api/models")
