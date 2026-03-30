@@ -199,9 +199,42 @@ else
     # macOS — run in background
     log "Starting gateway in background (macOS)..."
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        "$OPENCLAW_BIN" gateway $BIND_ARG --allow-unconfigured --port "$HTTP_PORT" --verbose >> "$LOG_FILE" 2>&1 &
-        log "Gateway started (PID $!)."
-        sleep 3
+        if [ ! -x "$OPENCLAW_BIN" ]; then
+            log "ERROR: OpenClaw binary not found at $OPENCLAW_BIN"
+            log "Trying to find it..."
+            for p in "$(which openclaw 2>/dev/null)" "$NPM_GLOBAL/bin/openclaw" "/usr/local/bin/openclaw" "$STATE_DIR/.npm-global/bin/openclaw"; do
+                if [ -x "$p" ] 2>/dev/null; then
+                    OPENCLAW_BIN="$p"
+                    log "Found: $OPENCLAW_BIN"
+                    break
+                fi
+            done
+        fi
+        if [ -x "$OPENCLAW_BIN" ]; then
+            export PATH="$(dirname "$OPENCLAW_BIN"):$PATH"
+            log "Running: $OPENCLAW_BIN gateway $BIND_ARG --allow-unconfigured --port $HTTP_PORT --verbose"
+            "$OPENCLAW_BIN" gateway $BIND_ARG --allow-unconfigured --port "$HTTP_PORT" --verbose >> "$LOG_FILE" 2>&1 &
+            GW_PID=$!
+            log "Gateway process started (PID $GW_PID)."
+            sleep 5
+            # Check if it's still running
+            if kill -0 "$GW_PID" 2>/dev/null; then
+                log "Gateway is running."
+                # Verify port is listening
+                if curl -sf "http://127.0.0.1:${HTTP_PORT}/" >/dev/null 2>&1; then
+                    log "Gateway responding on port ${HTTP_PORT}."
+                else
+                    log "Gateway running but not responding yet. Check log: $LOG_FILE"
+                    tail -10 "$LOG_FILE" 2>/dev/null | while read line; do log "  $line"; done
+                fi
+            else
+                log "ERROR: Gateway process died. Check log: $LOG_FILE"
+                tail -20 "$LOG_FILE" 2>/dev/null | while read line; do log "  $line"; done
+            fi
+        else
+            log "FATAL: Cannot find openclaw binary. Install failed."
+            log "Try manually: npm install -g openclaw@latest"
+        fi
     fi
 fi
 
