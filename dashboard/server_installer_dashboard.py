@@ -7947,6 +7947,19 @@ def run_openclaw_docker(form=None, live_cb=None):
     build_dir = str(OPENCLAW_STATE_DIR / "docker-build")
     Path(build_dir).mkdir(parents=True, exist_ok=True)
 
+    # Create entrypoint script that runs onboard then gateway
+    entrypoint_sh = f"""#!/bin/bash
+set -e
+# Run onboard if not already done
+if [ ! -f /root/.openclaw/gateway.json ] && [ ! -f /root/.openclaw/config.yaml ]; then
+    echo "Running OpenClaw onboard..."
+    openclaw onboard --install-daemon 2>&1 || echo "Onboard needs manual config via dashboard"
+fi
+echo "Starting OpenClaw gateway on port {http_port}..."
+exec openclaw gateway --bind lan --port {http_port} --verbose
+"""
+    Path(build_dir, "entrypoint.sh").write_text(entrypoint_sh, encoding="utf-8")
+
     dockerfile = f"""FROM node:22-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -7959,8 +7972,10 @@ RUN npm install -g openclaw@latest
 ENV OPENCLAW_PORT={http_port}
 EXPOSE {http_port}
 
-# Run the gateway bound to all interfaces so it's accessible from outside
-CMD ["openclaw", "gateway", "--bind", "lan", "--port", "{http_port}", "--verbose"]
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]
 """
     Path(build_dir, "Dockerfile").write_text(dockerfile, encoding="utf-8")
 
