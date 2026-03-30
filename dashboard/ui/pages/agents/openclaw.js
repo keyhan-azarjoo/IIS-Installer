@@ -31,26 +31,157 @@
     var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
     var commonFields = [
       { name: "OPENCLAW_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },
-      { name: "OPENCLAW_HTTP_PORT", label: "Web UI HTTP Port", defaultValue: httpPort || "8088", checkPort: true, placeholder: "Leave empty for CLI only" },
-      { name: "OPENCLAW_HTTPS_PORT", label: "Web UI HTTPS Port", defaultValue: "", checkPort: true, certSelect: "SSL_CERT_NAME", placeholder: "Leave empty to skip HTTPS" },
+      { name: "OPENCLAW_HTTP_PORT", label: "Gateway Port", defaultValue: httpPort || "18789", checkPort: true, placeholder: "Default: 18789" },
+      { name: "OPENCLAW_HTTPS_PORT", label: "HTTPS Port (optional)", defaultValue: "", checkPort: true, certSelect: "SSL_CERT_NAME", placeholder: "Leave empty to skip" },
       { name: "OPENCLAW_DOMAIN", label: "Domain (optional)", defaultValue: "", placeholder: "e.g. openclaw.example.com" },
       { name: "OPENCLAW_USERNAME", label: "Username (optional)", defaultValue: "", placeholder: "Leave empty for no auth" },
       { name: "OPENCLAW_PASSWORD", label: "Password (optional)", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
     ];
 
+    var CodeBlock = function(props) {
+      return React.createElement(Paper, { elevation: 0, sx: { bgcolor: "#0f172a", borderRadius: 2, p: 2, mt: 0.5, mb: 1.5, position: "relative", overflow: "auto" } },
+        React.createElement(Button, { size: "small", onClick: function() { if (copyText) copyText(props.code, "Code"); },
+          sx: { position: "absolute", top: 8, right: 8, minWidth: 0, px: 1.5, py: 0.3, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 11, "&:hover": { bgcolor: "#334155" } } }, "Copy"),
+        React.createElement("pre", { style: { margin: 0, color: "#e2e8f0", fontSize: 12, lineHeight: 1.7, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" } }, props.code)
+      );
+    };
+
     return (
       <Grid container spacing={2}>
+        {/* Header */}
         <Grid item xs={12}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
             <CardContent>
-              <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5, color: "#dc2626" }}>OpenClaw — AI Agent Framework</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Open-source AI agent framework with tool use, memory, planning, and self-reflection.
-                Modular plugin architecture supports custom tools, multiple LLM backends, and persistent memory.
-                Includes a web UI for running agent tasks remotely.
+              <Stack direction="row" alignItems="center" spacing={2}>
+                <Box>
+                  <Typography variant="h5" fontWeight={900} sx={{ color: "#dc2626" }}>OpenClaw</Typography>
+                  <Typography variant="body2" color="text.secondary">Free, open-source, self-hosted AI agent platform</Typography>
+                </Box>
+                <Box sx={{ flexGrow: 1 }} />
+                <Chip label="Node.js" size="small" sx={{ bgcolor: "#dcfce7", color: "#166534", fontWeight: 700 }} />
+                <Chip label="20+ Channels" size="small" sx={{ bgcolor: "#dbeafe", color: "#1e40af", fontWeight: 700 }} />
+                <Chip label="MIT License" size="small" sx={{ bgcolor: "#fef3c7", color: "#92400e", fontWeight: 700 }} />
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, lineHeight: 1.8 }}>
+                OpenClaw connects to WhatsApp, Telegram, Discord, Slack, Signal, iMessage, and 15+ more channels.
+                Features browser automation, code execution, file management, persistent memory, cron jobs, voice support, and multi-agent workflows.
+                Powered by local LLMs via Ollama or cloud APIs (OpenAI, Anthropic).
               </Typography>
-              <Alert severity="info" sx={{ mt: 1, borderRadius: 2 }}>
-                OpenClaw requires an LLM backend (Ollama, OpenAI API, or Claude API). Install Ollama first for fully local operation.
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Install Cards */}
+        <Grid item xs={12} md={6}>
+          <ActionCard
+            title={"Install OpenClaw \u2014 OS (" + installOsLabel + ")"}
+            description="Full automated setup: Node.js, OpenClaw, Ollama, systemd service, dashboard. Follows the official remote server guide."
+            action={cfg.os === "windows" ? "/run/openclaw_windows_os" : "/run/openclaw_unix_os"}
+            fields={commonFields} onRun={run} color="#dc2626"
+          />
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <ActionCard
+            title="Install OpenClaw \u2014 Docker"
+            description="Deploy OpenClaw gateway as a Docker container with Node.js. Runs the real OpenClaw dashboard on your selected port."
+            action="/run/openclaw_docker"
+            fields={commonFields} onRun={run} color="#dc2626"
+          />
+        </Grid>
+
+        {/* Status */}
+        <Grid item xs={12} md={6}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 1, color: "#dc2626" }}>Status</Typography>
+              <Typography variant="body2">Installed: <Chip size="small" label={installed ? "Yes" : "No"} color={installed ? "success" : "default"} sx={{ ml: 0.5 }} /></Typography>
+              {installed && <Typography variant="body2">Running: <Chip size="small" label={running ? "Running" : "Stopped"} color={running ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>}
+              {installed && displayHost && <Typography variant="body2">Host: <b>{displayHost}</b></Typography>}
+              {installed && httpPort && <Typography variant="body2">Gateway Port: <b>{httpPort}</b></Typography>}
+              {computedHttpUrl && <Typography variant="body2" sx={{ mt: 0.5, wordBreak: "break-all" }}>Dashboard: <a href={computedHttpUrl} target="_blank" rel="noopener">{computedHttpUrl}</a></Typography>}
+              {computedHttpsUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>HTTPS: <a href={computedHttpsUrl} target="_blank" rel="noopener">{computedHttpsUrl}</a></Typography>}
+              <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
+                {bestUrl && <Button variant="contained" size="small" onClick={function() { window.open(bestUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" } }}>Open Dashboard</Button>}
+                {installed && <Button variant="outlined" size="small" color="error" disabled={serviceBusy} onClick={function() { if (confirm("Delete OpenClaw and all data?")) onServiceAction("delete", services[0] || { name: "serverinstaller-openclaw", kind: "systemd" }); }} sx={{ textTransform: "none" }}>Delete OpenClaw</Button>}
+              </Stack>
+              <Stack direction="row" spacing={1} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #e8edf6" }} flexWrap="wrap" useFlexGap>
+                <Button variant="outlined" size="small" href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>GitHub</Button>
+                <Button variant="outlined" size="small" href="https://openclaw.ai" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>Website</Button>
+                <Button variant="outlined" size="small" href="https://mer.vin/2026/02/openclaw-remote-server-setup/" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>Setup Guide</Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Services */}
+        <Grid item xs={12} md={6}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Services</Typography>
+              {services.length === 0 && <Typography variant="body2" color="text.secondary">No services running. Install OpenClaw first.</Typography>}
+              {services.map(function(svc) {
+                var svcRunning = isServiceRunningStatus(svc.status, svc.sub_status);
+                return (
+                  <Paper key={"oc-" + svc.name} variant="outlined" sx={{ p: 1.5, mb: 1, borderRadius: 2 }}>
+                    <Typography variant="body2" fontWeight={700}>{svc.display_name || svc.name}</Typography>
+                    <Typography variant="caption" color="text.secondary">{svc.kind} &middot; {svc.status}</Typography>
+                    {renderServiceUrls(svc)}
+                    <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
+                      <Button size="small" variant="outlined" color={svcRunning ? "error" : "success"} disabled={serviceBusy} onClick={function() { onServiceAction(svcRunning ? "stop" : "start", svc); }} sx={{ textTransform: "none", fontSize: 11, py: 0.3 }}>{svcRunning ? "Stop" : "Start"}</Button>
+                      <Button size="small" variant="outlined" disabled={serviceBusy} onClick={function() { onServiceAction("restart", svc); }} sx={{ textTransform: "none", fontSize: 11, py: 0.3 }}>Restart</Button>
+                      <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={function() { onServiceAction("delete", svc); }} sx={{ textTransform: "none", fontSize: 11, py: 0.3 }}>Delete</Button>
+                    </Stack>
+                  </Paper>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Manual Setup Guide */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #dc262633" }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
+                <Box sx={{ width: 5, height: 32, borderRadius: 3, bgcolor: "#dc2626" }} />
+                <Typography variant="h6" fontWeight={800} sx={{ color: "#dc2626" }}>Manual Setup Guide</Typography>
+                <Chip label="Remote Server" size="small" sx={{ bgcolor: "#dc262610", color: "#dc2626", fontWeight: 600 }} />
+                <Box sx={{ flexGrow: 1 }} />
+                <Button variant="text" size="small" href="https://mer.vin/2026/02/openclaw-remote-server-setup/" target="_blank" sx={{ textTransform: "none", color: "#dc2626" }}>Source Article</Button>
+              </Stack>
+
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>1. Create User</Typography>
+              {React.createElement(CodeBlock, { code: 'adduser --disabled-password --gecos "" openclaw\nusermod -aG sudo openclaw\necho "openclaw ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/openclaw\nchmod 440 /etc/sudoers.d/openclaw\npasswd openclaw' })}
+
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>2. Install Required Packages</Typography>
+              {React.createElement(CodeBlock, { code: 'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\napt-get install -y nodejs build-essential python3' })}
+
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>3a. Install OpenClaw</Typography>
+              {React.createElement(CodeBlock, { code: "su - openclaw -c 'npm config set prefix ~/.npm-global && npm install -g openclaw@latest && echo \"export PATH=\\\"\\$HOME/.npm-global/bin:\\$PATH\\\"\" >> ~/.bashrc'\nls -la /home/openclaw/.npm-global/bin/openclaw" })}
+
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>3b. Create Systemd Service</Typography>
+              {React.createElement(CodeBlock, { code: "tee /etc/systemd/system/clawdbot-gateway.service > /dev/null << 'EOF'\n[Unit]\nDescription=Clawdbot Gateway (always-on)\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nUser=openclaw\nWorkingDirectory=/home/openclaw\nEnvironment=PATH=/usr/bin:/bin:/home/openclaw/.npm-global/bin\nExecStart=/home/openclaw/.npm-global/bin/openclaw gateway --bind loopback --port 18789 --verbose\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\nEOF" })}
+
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>3c. Configure OpenClaw</Typography>
+              {React.createElement(CodeBlock, { code: "su - openclaw -c '/home/openclaw/.npm-global/bin/openclaw onboard'" })}
+
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>3d. Enable & Start Service</Typography>
+              {React.createElement(CodeBlock, { code: 'systemctl daemon-reload\nsystemctl enable clawdbot-gateway.service\nsystemctl start clawdbot-gateway.service\nsystemctl status clawdbot-gateway.service' })}
+
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>4a. Install Ollama & Configure Model</Typography>
+              {React.createElement(CodeBlock, { code: "curl -fsSL https://ollama.com/install.sh | sh\nollama pull llama3.2:3b\nsystemctl stop clawdbot-gateway.service\nmkdir -p /tmp/ollama-backups && chmod 1777 /tmp/ollama-backups\nsu - openclaw -c 'ollama launch openclaw --model llama3.2:3b --config'" })}
+
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>4b. Get Dashboard URL</Typography>
+              {React.createElement(CodeBlock, { code: "systemctl start clawdbot-gateway.service\nsystemctl status clawdbot-gateway.service\nsu - openclaw -c '/home/openclaw/.npm-global/bin/openclaw dashboard --no-open'" })}
+
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>5. SSH Tunnel (run from your local machine)</Typography>
+              {React.createElement(CodeBlock, { code: 'ssh -N -L 18789:127.0.0.1:18789 openclaw@YOUR_SERVER_IP' })}
+
+              <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
+                <Typography variant="body2"><b>Notes:</b> To remove a previously configured OpenAI model:</Typography>
+                <Paper elevation={0} sx={{ bgcolor: "#0f172a", borderRadius: 1, p: 1, mt: 1 }}>
+                  <pre style={{ margin: 0, color: "#e2e8f0", fontSize: 12, fontFamily: "monospace" }}>{"su - openclaw -c '/home/openclaw/.npm-global/bin/openclaw models list'\nsu - openclaw -c '/home/openclaw/.npm-global/bin/openclaw models aliases remove GPT'"}</pre>
+                </Paper>
               </Alert>
             </CardContent>
           </Card>
@@ -64,87 +195,13 @@
                 <Box sx={{ width: 6, height: 36, borderRadius: 3, bgcolor: "#dc2626" }} />
                 <Box sx={{ flexGrow: 1 }}>
                   <Typography variant="h6" fontWeight={800} sx={{ color: "#dc2626" }}>OpenClaw API Documentation</Typography>
-                  <Typography variant="caption" color="text.secondary">Run tasks, manage plugins, stream output</Typography>
+                  <Typography variant="caption" color="text.secondary">Gateway WebSocket API, REST endpoints</Typography>
                 </Box>
-                <Chip label="6 endpoints" size="small" sx={{ bgcolor: "#dc262615", color: "#dc2626", fontWeight: 700, border: "1px solid #dc262633" }} />
                 <Button variant="contained" size="small" onClick={function() { setPage("agent-openclaw-api"); }}
                   sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, px: 3 }}>
                   API Documents
                 </Button>
               </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Install */}
-        <Grid item xs={12} md={6}>
-          <ActionCard
-            title={"Install OpenClaw \u2014 OS (" + installOsLabel + ")"}
-            description="Install OpenClaw AI Agent via npm + web UI. Includes Node.js, OpenClaw daemon, 20+ messaging channels, browser automation, code execution."
-            action={cfg.os === "windows" ? "/run/openclaw_windows_os" : "/run/openclaw_unix_os"}
-            fields={commonFields} onRun={run} color="#dc2626"
-          />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <ActionCard
-            title="Install OpenClaw \u2014 Docker"
-            description="Deploy OpenClaw Web UI as Docker container. Connects to Ollama on the host for local LLM support. Includes chat, code exec, file management."
-            action="/run/openclaw_docker"
-            fields={commonFields} onRun={run} color="#dc2626"
-          />
-        </Grid>
-
-        {/* Status */}
-        <Grid item xs={12} md={6}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-            <CardContent>
-              <Typography variant="h6" fontWeight={800} sx={{ mb: 1, color: "#dc2626" }}>OpenClaw Status</Typography>
-              <Typography variant="body2">Installed: <Chip size="small" label={installed ? "Yes" : "No"} color={installed ? "success" : "default"} sx={{ ml: 0.5 }} /></Typography>
-              {installed && <Typography variant="body2">Running: <Chip size="small" label={running ? "Running" : "Stopped"} color={running ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>}
-              {installed && displayHost && <Typography variant="body2">Host: <b>{displayHost}</b></Typography>}
-              {installed && httpPort && <Typography variant="body2">Port: <b>{httpPort}</b></Typography>}
-              {computedHttpUrl && <Typography variant="body2" sx={{ mt: 0.5, wordBreak: "break-all" }}>HTTP: <a href={computedHttpUrl} target="_blank" rel="noopener">{computedHttpUrl}</a></Typography>}
-              {computedHttpsUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>HTTPS: <a href={computedHttpsUrl} target="_blank" rel="noopener">{computedHttpsUrl}</a></Typography>}
-              {bestUrl && (
-                <Button variant="contained" size="small" sx={{ mt: 1.5, textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" } }}
-                  onClick={function() { window.open(bestUrl, "_blank"); }}>Open OpenClaw</Button>
-              )}
-              <Box sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #e8edf6" }}>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Button variant="outlined" size="small" href="https://github.com/openclaw-ai/openclaw" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>GitHub</Button>
-                  <Button variant="outlined" size="small" href="https://pypi.org/project/openclaw/" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>PyPI</Button>
-                  <Button variant="outlined" size="small" href="https://openclaw-ai.github.io/openclaw/" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>Documentation</Button>
-                </Stack>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Services */}
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                <Typography variant="h6" fontWeight={800}>OpenClaw Services</Typography>
-                <Box sx={{ flexGrow: 1 }} />
-                {bestUrl && running && <Button variant="contained" size="small" onClick={function(){ window.open(bestUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626" }}>Open</Button>}
-                <Button variant="outlined" sx={{ textTransform: "none" }}>Refresh</Button>
-              </Stack>
-              {services.length === 0 && <Typography variant="body2" color="text.secondary">No OpenClaw services deployed yet.</Typography>}
-              {services.map(function(svc) {
-                var svcRunning = isServiceRunningStatus(svc.status, svc.sub_status);
-                return (
-                  <Paper key={"oc-" + (svc.kind || "") + "-" + svc.name} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                    <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                      <Box sx={{ minWidth: 250 }}><Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>{renderServiceUrls(svc)}{renderServicePorts(svc)}</Box>
-                      {renderServiceStatus(svc)}<Box sx={{ flexGrow: 1 }} />{renderFolderIcon(svc)}
-                      <Button size="small" variant="outlined" color={svcRunning ? "error" : "success"} disabled={serviceBusy} onClick={function(){ onServiceAction(svcRunning ? "stop" : "start", svc); }} sx={{ textTransform: "none" }}>{svcRunning ? "Stop" : "Start"}</Button>
-                      <Button size="small" variant="outlined" disabled={serviceBusy} onClick={function(){ onServiceAction("restart", svc); }} sx={{ textTransform: "none" }}>Restart</Button>
-                      <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={function(){ onServiceAction("delete", svc); }} sx={{ textTransform: "none" }}>Delete</Button>
-                    </Stack>
-                  </Paper>
-                );
-              })}
             </CardContent>
           </Card>
         </Grid>
@@ -161,7 +218,7 @@
     var ocInfo = p.openclawService || {};
     var host = String(ocInfo.host || "").trim();
     var urlHost = (host && host !== "0.0.0.0") ? host : "{host}";
-    var httpPort = String(ocInfo.http_port || "8088").trim();
+    var httpPort = String(ocInfo.http_port || "18789").trim();
     var httpsPort = String(ocInfo.https_port || "").trim();
     var httpBase = "http://" + urlHost + ":" + httpPort;
     var httpsBase = httpsPort ? "https://" + urlHost + ":" + httpsPort : "";
@@ -171,17 +228,19 @@
     var doCopy = function(text) { if (copyText) copyText(text, "cURL"); };
 
     var sections = [
-      { name: "Agent Tasks", color: "#dc2626", eps: [
-        { m: "POST", p: "/api/run", d: "Run an agent task. The agent will plan and execute steps to complete the task.", body: '{\n  "task": "List all Python files in the current directory"\n}', res: '{\n  "ok": true,\n  "output": "found 5 Python files:\\n  app.py\\n  ...",\n  "error": ""\n}' },
-        { m: "POST", p: "/api/run/stream", d: "Run a task with streaming output (SSE). Each line of agent output is streamed in real-time.", body: '{\n  "task": "Create a hello world Flask app"\n}', res: 'text/event-stream:\\n  data: {"line": "Planning task..."}\n  data: {"line": "Creating app.py..."}\n  data: {"done": true, "exit_code": 0}' },
+      { name: "Gateway", color: "#dc2626", eps: [
+        { m: "GET", p: "/", d: "OpenClaw Dashboard — the main web interface with WebChat, channels, skills, and configuration." },
+        { m: "GET", p: "/api/health", d: "Health check.", res: '{ "ok": true, "status": "healthy" }' },
       ]},
-      { name: "Management", color: "#059669", eps: [
-        { m: "GET", p: "/api/plugins", d: "List available OpenClaw plugins.", res: '{\n  "ok": true,\n  "output": "web_search\\nfile_manager\\ncode_runner"\n}' },
-        { m: "GET", p: "/api/config", d: "Show current OpenClaw configuration.", res: '{\n  "ok": true,\n  "output": "llm_backend: ollama\\nmodel: llama3.2"\n}' },
+      { name: "WebSocket", color: "#7c3aed", eps: [
+        { m: "GET", p: "ws://host:18789", d: "WebSocket gateway — real-time bidirectional communication for chat, events, and tool execution." },
       ]},
-      { name: "Health", color: "#b45309", eps: [
-        { m: "GET", p: "/api/health", d: "Health check — shows status and version.", res: '{\n  "ok": true,\n  "status": "healthy",\n  "version": "2026.3.20"\n}' },
-        { m: "GET", p: "/api/version", d: "Get OpenClaw version.", res: '{\n  "ok": true,\n  "version": "2026.3.20"\n}' },
+      { name: "CLI Commands", color: "#059669", eps: [
+        { m: "GET", p: "openclaw gateway --bind lan --port 18789", d: "Start the gateway server on LAN." },
+        { m: "GET", p: "openclaw onboard", d: "Interactive onboarding wizard." },
+        { m: "GET", p: "openclaw dashboard --no-open", d: "Get the dashboard URL without opening browser." },
+        { m: "GET", p: "openclaw models list", d: "List configured LLM models." },
+        { m: "GET", p: "openclaw models aliases remove GPT", d: "Remove a model alias." },
       ]},
     ];
 
@@ -192,11 +251,11 @@
             <CardContent>
               <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
                 <Button variant="outlined" size="small" onClick={function(){ setPage("agent-openclaw"); }} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#dc2626", color: "#dc2626" }}>Back to OpenClaw</Button>
-                <Typography variant="h5" fontWeight={900} sx={{ color: "#dc2626", flexGrow: 1 }}>OpenClaw API Documentation</Typography>
+                <Typography variant="h5" fontWeight={900} sx={{ color: "#dc2626", flexGrow: 1 }}>OpenClaw API & CLI Reference</Typography>
               </Stack>
               <Alert severity="info" sx={{ borderRadius: 2, mt: 1 }}>
-                <b>HTTP:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{httpBase}</code>
-                {httpsBase && <span><br/><b>HTTPS:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{httpsBase}</code></span>}
+                <b>Gateway:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{httpBase}</code>
+                {httpsBase && <span> | <b>HTTPS:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{httpsBase}</code></span>}
               </Alert>
             </CardContent>
           </Card>
@@ -208,24 +267,18 @@
                 <CardContent>
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
                     <Box sx={{ width: 5, height: 28, borderRadius: 3, bgcolor: sec.color }} />
-                    <Typography variant="h6" fontWeight={800} sx={{ color: sec.color, flexGrow: 1 }}>{sec.name}</Typography>
-                    <Chip label={sec.eps.length + " endpoints"} size="small" variant="outlined" sx={{ fontSize: 10, height: 20 }} />
+                    <Typography variant="h6" fontWeight={800} sx={{ color: sec.color }}>{sec.name}</Typography>
                   </Stack>
                   {sec.eps.map(function(ep, ei) {
                     var cl = mc(ep.m);
                     return (
-                      <Paper key={ei} variant="outlined" sx={{ p: 2, mb: 1.5, borderRadius: 2, "&:hover": { borderColor: sec.color + "66" } }}>
-                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "flex-start", md: "center" }}>
-                          <Chip label={ep.m} size="small" sx={{ bgcolor: cl.bg, color: cl.c, border: "1px solid " + cl.b, fontWeight: 800, fontFamily: "monospace", minWidth: 70, justifyContent: "center" }} />
-                          <Box sx={{ flexGrow: 1 }}>
-                            <Typography sx={{ fontFamily: "monospace", fontWeight: 600, wordBreak: "break-all", fontSize: 14 }}>{httpBase + ep.p}</Typography>
-                            {httpsBase && <Typography sx={{ fontFamily: "monospace", fontWeight: 600, wordBreak: "break-all", fontSize: 13, color: "#059669", mt: 0.3 }}>{httpsBase + ep.p}</Typography>}
-                          </Box>
-                          <Tooltip title="Copy cURL"><Button size="small" variant="outlined" onClick={function(){ doCopy("curl -X " + ep.m + " \"" + httpBase + ep.p + "\""); }} sx={{ textTransform: "none", minWidth: 0, px: 1.5, fontSize: 11, borderColor: "#e2e8f0" }}>cURL</Button></Tooltip>
+                      <Paper key={ei} variant="outlined" sx={{ p: 2, mb: 1, borderRadius: 2 }}>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Chip label={ep.m} size="small" sx={{ bgcolor: cl.bg, color: cl.c, border: "1px solid " + cl.b, fontWeight: 800, fontFamily: "monospace" }} />
+                          <Typography sx={{ fontFamily: "monospace", fontWeight: 600, fontSize: 13 }}>{ep.p}</Typography>
                         </Stack>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{ep.d}</Typography>
-                        {ep.body && <Box sx={{ mt: 1.5 }}><Typography variant="caption" fontWeight={700} sx={{ color: "#475569" }}>Request Body:</Typography><Paper elevation={0} sx={{ mt: 0.3, p: 1.5, bgcolor: "#f8fafc", borderRadius: 2, fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap", border: "1px solid #e2e8f0", lineHeight: 1.7 }}>{ep.body}</Paper></Box>}
-                        {ep.res && <Box sx={{ mt: 1.5 }}><Typography variant="caption" fontWeight={700} sx={{ color: "#475569" }}>Response:</Typography><Paper elevation={0} sx={{ mt: 0.3, p: 1.5, bgcolor: "#f0fdf4", borderRadius: 2, fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap", border: "1px solid #dcfce7", lineHeight: 1.7 }}>{ep.res}</Paper></Box>}
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{ep.d}</Typography>
+                        {ep.res && <Paper elevation={0} sx={{ mt: 1, p: 1, bgcolor: "#f0fdf4", borderRadius: 1, fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap", border: "1px solid #dcfce7" }}>{ep.res}</Paper>}
                       </Paper>
                     );
                   })}
