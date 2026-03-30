@@ -7895,6 +7895,118 @@ def run_openclaw_delete(live_cb=None):
     if OPENCLAW_STATE_FILE.exists(): OPENCLAW_STATE_FILE.unlink()
     return 0, "OpenClaw deleted."
 
+
+def run_openclaw_docker(form=None, live_cb=None):
+    """Deploy OpenClaw as a Docker container using the official image."""
+    form = form or {}
+    http_port = (form.get("OPENCLAW_HTTP_PORT", ["18789"])[0] or "18789").strip()
+    https_port = (form.get("OPENCLAW_HTTPS_PORT", [""])[0] or "").strip()
+    host = (form.get("OPENCLAW_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
+    username = (form.get("OPENCLAW_USERNAME", [""])[0] or "").strip()
+    password = (form.get("OPENCLAW_PASSWORD", [""])[0] or "").strip()
+    output = []
+    def log(m):
+        output.append(m)
+        if live_cb: live_cb(m + "\n")
+    log("=== Installing OpenClaw via Docker ===")
+
+    if sys.platform == "darwin":
+        _docker_add_macos_path()
+    if not command_exists("docker"):
+        log("Docker not found. Installing Docker first...")
+        _install_engine_docker(log)
+        if sys.platform == "darwin":
+            _docker_add_macos_path()
+    if not command_exists("docker"):
+        return 1, "Docker is not available. Install Docker Desktop manually."
+
+    container_name = "serverinstaller-openclaw"
+    run_capture(["docker", "stop", container_name], timeout=15)
+    run_capture(["docker", "rm", container_name], timeout=15)
+
+    # Build web UI with OpenClaw gateway proxy
+    log("Building OpenClaw Web UI container...")
+    ensure_repo_files(OPENCLAW_UNIX_FILES if os.name != "nt" else OPENCLAW_WINDOWS_FILES, live_cb=live_cb, refresh=True)
+    common_dir = str(ROOT / "OpenClaw" / "common")
+    webui_build = str(OPENCLAW_STATE_DIR / "docker-webui")
+    Path(webui_build).mkdir(parents=True, exist_ok=True)
+
+    for item in Path(common_dir).rglob("*"):
+        if item.is_file() and "__pycache__" not in str(item) and "venv" not in str(item):
+            rel = item.relative_to(common_dir)
+            dest = Path(webui_build) / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(item), str(dest))
+
+    expose_ports = http_port
+    if https_port:
+        expose_ports += f" {https_port}"
+    # Try to connect to Ollama on host for LLM backend
+    ollama_url = "http://host.docker.internal:11434"
+    dockerfile = f"""FROM python:3.12-slim
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y openssl curl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY . /app/
+RUN pip install --no-cache-dir flask requests
+ENV OPENCLAW_WEB_PORT={http_port}
+ENV OPENCLAW_HTTPS_PORT={https_port}
+ENV OPENCLAW_AUTH_USERNAME={username}
+ENV OPENCLAW_AUTH_PASSWORD={password}
+ENV OLLAMA_URL={ollama_url}
+EXPOSE {expose_ports}
+CMD ["python", "openclaw_web.py"]
+"""
+    Path(webui_build, "Dockerfile").write_text(dockerfile, encoding="utf-8")
+
+    code = _run_install_cmd(["docker", "build", "--no-cache", "-t", "serverinstaller/openclaw-webui:latest", webui_build], log, timeout=300)
+    if code != 0:
+        return code, "\n".join(output)
+
+    # Run container
+    docker_cmd = ["docker", "run", "-d", "--name", container_name,
+                  "-p", f"{http_port}:{http_port}",
+                  "--add-host", "host.docker.internal:host-gateway",
+                  "-e", f"OPENCLAW_WEB_PORT={http_port}",
+                  "-e", f"OPENCLAW_HTTPS_PORT={https_port}",
+                  "-e", f"OPENCLAW_AUTH_USERNAME={username}",
+                  "-e", f"OPENCLAW_AUTH_PASSWORD={password}",
+                  "--restart", "unless-stopped"]
+    if https_port:
+        docker_cmd += ["-p", f"{https_port}:{https_port}"]
+    docker_cmd.append("serverinstaller/openclaw-webui:latest")
+    code2 = _run_install_cmd(docker_cmd, log, timeout=60)
+
+    # Save state
+    OPENCLAW_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
+    http_url = f"http://{display_host}:{http_port}"
+    https_url = f"https://{display_host}:{https_port}" if https_port else ""
+    state = _read_json_file(OPENCLAW_STATE_FILE)
+    state.update({
+        "installed": True, "service_name": container_name,
+        "deploy_mode": "docker", "host": host,
+        "http_port": http_port, "https_port": https_port,
+        "http_url": http_url, "https_url": https_url,
+        "auth_enabled": bool(username), "auth_username": username,
+        "running": code2 == 0,
+    })
+    _write_json_file(OPENCLAW_STATE_FILE, state)
+    manage_firewall_port("open", http_port, "tcp")
+
+    log("\n" + "=" * 60)
+    log(" OpenClaw Docker Deployment Complete!")
+    log("=" * 60)
+    log(f" Web UI:         {http_url}")
+    if https_url:
+        log(f" Web UI (HTTPS): {https_url}")
+    if username:
+        log(f" Auth:           {username} / ****")
+    log(f" Features: AI Agent chat, code execution, web browsing,")
+    log(f"           file management, persistent memory")
+    log("=" * 60)
+    return code2, "\n".join(output)
+
 def run_tgwui_os_install(form=None, live_cb=None):
     return _run_ai_service_install("tgwui", form, TGWUI_STATE_FILE, TGWUI_STATE_DIR, TGWUI_SYSTEMD_SERVICE, "Text Generation WebUI", "7860",
         {"nt": [_install_tgwui_os], "posix": [_install_tgwui_os]}, live_cb=live_cb)
@@ -15226,6 +15338,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_run_result(title, code, output)
             return
         # ── OpenClaw routes ───────────────────────────────────────────────────
+        if self.path == "/run/openclaw_docker":
+            title = "OpenClaw Docker"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_openclaw_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_openclaw_docker(form)
+                self.respond_run_result(title, code, output)
+            return
         if self.path in ("/run/openclaw_windows_os", "/run/openclaw_unix_os"):
             title = "OpenClaw Install"
             if self.is_fetch():

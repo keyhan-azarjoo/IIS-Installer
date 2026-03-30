@@ -80,8 +80,16 @@
         <Grid item xs={12} md={6}>
           <ActionCard
             title={"Install OpenClaw \u2014 OS (" + installOsLabel + ")"}
-            description="Install OpenClaw with web UI. Sets up Python venv, installs openclaw package, and starts web server on selected port."
+            description="Install OpenClaw AI Agent via npm + web UI. Includes Node.js, OpenClaw daemon, 20+ messaging channels, browser automation, code execution."
             action={cfg.os === "windows" ? "/run/openclaw_windows_os" : "/run/openclaw_unix_os"}
+            fields={commonFields} onRun={run} color="#dc2626"
+          />
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <ActionCard
+            title="Install OpenClaw \u2014 Docker"
+            description="Deploy OpenClaw Web UI as Docker container. Connects to Ollama on the host for local LLM support. Includes chat, code exec, file management."
+            action="/run/openclaw_docker"
             fields={commonFields} onRun={run} color="#dc2626"
           />
         </Grid>

@@ -22,7 +22,9 @@ AUTH_USERNAME = os.environ.get("OPENCLAW_AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("OPENCLAW_AUTH_PASSWORD", "")
 
 # LLM backend — try Ollama first, then OpenAI
-OLLAMA_URLS = ["http://127.0.0.1:11434", "http://127.0.0.1:8080"]
+# LLM backend — try Ollama at multiple locations (host, Docker bridge, custom)
+_ollama_env = os.environ.get("OLLAMA_URL", "").strip()
+OLLAMA_URLS = [u for u in [_ollama_env, "http://host.docker.internal:11434", "http://127.0.0.1:11434", "http://127.0.0.1:8080"] if u]
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 
