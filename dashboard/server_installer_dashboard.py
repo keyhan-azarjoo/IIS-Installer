@@ -2365,11 +2365,16 @@ def _validate_website_target(stack_kind, runtime, target):
             raise RuntimeError("IIS target is only available on Windows.")
         if runtime_value != "static":
             raise RuntimeError(f"{stack or 'This'} website cannot run directly on IIS from this dashboard. Use Docker or OS service.")
-    if selected == "docker" and not command_exists("docker"):
-        # Auto-install Docker
-        _install_website_engine("docker")
+    if selected == "docker":
+        if sys.platform == "darwin":
+            _docker_add_macos_path()
         if not command_exists("docker"):
-            raise RuntimeError("Docker target requires Docker to be installed and running.")
+            # Auto-install Docker
+            _install_website_engine("docker")
+            if sys.platform == "darwin":
+                _docker_add_macos_path()
+            if not command_exists("docker"):
+                raise RuntimeError("Docker target requires Docker to be installed and running.")
     if selected == "nginx":
         if os.name == "nt":
             raise RuntimeError("Nginx is not available on Windows. Use IIS or Docker instead.")
@@ -2529,8 +2534,70 @@ def _run_install_cmd(cmd, log, timeout=300):
         return 1
 
 
+def _docker_add_macos_path():
+    """Add Docker Desktop binary paths to PATH on macOS."""
+    docker_paths = [
+        "/Applications/Docker.app/Contents/Resources/bin",
+        "/usr/local/bin",
+        str(Path.home() / ".docker" / "bin"),
+    ]
+    current_path = os.environ.get("PATH", "")
+    for dp in docker_paths:
+        if dp not in current_path and Path(dp).exists():
+            os.environ["PATH"] = dp + os.pathsep + current_path
+            current_path = os.environ["PATH"]
+
+
+def _docker_wait_macos(log):
+    """Wait for Docker Desktop to finish initialization on macOS."""
+    import time
+    log("Waiting for Docker Desktop to initialize...")
+    # First add Docker bin to PATH
+    _docker_add_macos_path()
+    # Docker Desktop creates symlinks in /usr/local/bin after first launch
+    # Also check the embedded binary directly
+    docker_bin = "/Applications/Docker.app/Contents/Resources/bin/docker"
+    for i in range(60):
+        time.sleep(3)
+        _docker_add_macos_path()
+        # Check if docker CLI is available via PATH or direct path
+        if command_exists("docker"):
+            log("Docker CLI found in PATH.")
+            # Now wait for Docker daemon to be ready
+            try:
+                rc, out = run_capture(["docker", "info"], timeout=10)
+                if rc == 0:
+                    log("Docker is ready.")
+                    return 0, "Docker installed."
+            except Exception:
+                pass
+            log(f"Docker CLI available, waiting for daemon... ({i+1}/60)")
+        elif Path(docker_bin).exists():
+            # Docker binary exists but not in PATH yet — use it directly
+            os.environ["PATH"] = str(Path(docker_bin).parent) + os.pathsep + os.environ.get("PATH", "")
+            log(f"Found Docker at {docker_bin}, waiting for daemon... ({i+1}/60)")
+            try:
+                rc, out = run_capture([docker_bin, "info"], timeout=10)
+                if rc == 0:
+                    log("Docker is ready.")
+                    return 0, "Docker installed."
+            except Exception:
+                pass
+        else:
+            log(f"Waiting for Docker... ({i+1}/60)")
+    # If we get here, Docker Desktop is installed but not ready yet
+    if command_exists("docker") or Path(docker_bin).exists():
+        log("Docker Desktop is installed but still initializing.")
+        log("Please wait for Docker Desktop to finish setup, then retry.")
+        return 0, "Docker installed. Docker Desktop is still initializing — retry in a moment."
+    return 1, "Docker Desktop installed but CLI not found. Restart Docker Desktop."
+
+
 def _install_engine_docker(log):
     """Install Docker."""
+    # On macOS, Docker Desktop puts the CLI in a non-standard path
+    if sys.platform == "darwin":
+        _docker_add_macos_path()
     if command_exists("docker"):
         log("Docker is already installed.")
         return 0, "Docker is already installed."
@@ -2553,15 +2620,8 @@ def _install_engine_docker(log):
             if code == 0:
                 log("Docker Desktop installed. Opening it...")
                 _run_install_cmd(["open", "/Applications/Docker.app"], log, timeout=10)
-                log("Wait for Docker to start, then retry.")
-                import time
-                for i in range(30):
-                    time.sleep(2)
-                    if command_exists("docker"):
-                        log("Docker is ready.")
-                        return 0, "Docker installed."
-                    log(f"Waiting for Docker... ({i+1}/30)")
-                return 0, "Docker installed. Open Docker Desktop to complete setup."
+                _docker_add_macos_path()
+                return _docker_wait_macos(log)
             else:
                 log("brew install failed. Install Docker Desktop manually:")
                 log("https://www.docker.com/products/docker-desktop/")
@@ -2585,14 +2645,8 @@ def _install_engine_docker(log):
                 Path(dmg_path).unlink(missing_ok=True)
                 log("Docker Desktop installed. Opening...")
                 _run_install_cmd(["open", "/Applications/Docker.app"], log, timeout=10)
-                import time
-                for i in range(30):
-                    time.sleep(2)
-                    if command_exists("docker"):
-                        log("Docker is ready.")
-                        return 0, "Docker installed."
-                    log(f"Waiting for Docker... ({i+1}/30)")
-                return 0, "Docker installed. Open Docker Desktop to complete setup."
+                _docker_add_macos_path()
+                return _docker_wait_macos(log)
             else:
                 log("Download failed. Install Docker Desktop manually:")
                 log("https://www.docker.com/products/docker-desktop/")
@@ -5159,7 +5213,15 @@ def choose_s3_host(preferred=""):
 
 
 def choose_service_host():
-    return choose_s3_host("")
+    """Pick the best host IP for service URLs — prefer LAN IP over public IP."""
+    # Prefer local/LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x) over public
+    for ip in get_ip_addresses():
+        if ip and not ip.startswith("127."):
+            return ip
+    public_ip = get_public_ipv4()
+    if public_ip:
+        return public_ip
+    return "localhost"
 
 
 def get_windows_locals3_config():
@@ -7173,6 +7235,45 @@ def _get_ai_service_info(state_file, state_dir, systemd_service, display_name, d
             "ports": [p for p in [info["http_port"], info["https_port"]] if p],
             "urls": [u for u in [info["http_url"], info["https_url"]] if u],
         })
+    elif sys.platform == "darwin" and info["installed"]:
+        # macOS: check launchd plist or running background process
+        _macos_running = False
+        # Check launchd
+        plist_path = f"/Library/LaunchDaemons/{systemd_service}.plist"
+        plist_user = str(Path.home() / "Library" / "LaunchAgents" / f"{systemd_service}.plist")
+        if Path(plist_path).exists() or Path(plist_user).exists():
+            try:
+                rc, out = run_capture(["launchctl", "list", systemd_service], timeout=5)
+                _macos_running = rc == 0
+            except Exception:
+                pass
+        # Check if port is listening (background process)
+        if not _macos_running:
+            hp = str(info.get("http_port") or "").strip()
+            if hp.isdigit():
+                try:
+                    _macos_running = is_local_tcp_port_listening(int(hp))
+                except Exception:
+                    pass
+        # Check if the binary process is running
+        if not _macos_running:
+            bin_name = systemd_service.replace("serverinstaller-", "")
+            try:
+                rc, out = run_capture(["pgrep", "-f", bin_name], timeout=5)
+                if rc == 0 and out.strip():
+                    _macos_running = True
+            except Exception:
+                pass
+        info["running"] = _macos_running
+        info["services"].append({
+            "name": systemd_service, "display_name": display_name,
+            "kind": "launchd" if (Path(plist_path).exists() or Path(plist_user).exists()) else "process",
+            "status": "running" if _macos_running else "stopped",
+            "manageable": True, "deletable": True,
+            "project_path": info["install_dir"],
+            "ports": [p for p in [info["http_port"], info["https_port"]] if p],
+            "urls": [u for u in [info["http_url"], info["https_url"]] if u],
+        })
     elif os.name == "nt" and info["installed"]:
         svc_name = str(state.get("service_name") or systemd_service.replace("serverinstaller-", "ServerInstaller-").title())
         # Check if running
@@ -7815,9 +7916,15 @@ def run_ollama_docker(form=None, live_cb=None):
         output.append(m)
         if live_cb: live_cb(m + "\n")
     log("=== Installing Ollama via Docker ===")
+    if sys.platform == "darwin":
+        _docker_add_macos_path()
     if not command_exists("docker"):
         log("Docker not found. Installing Docker first...")
         _install_engine_docker(log)
+        if sys.platform == "darwin":
+            _docker_add_macos_path()
+    if not command_exists("docker"):
+        return 1, "Docker is not available. Install Docker Desktop manually."
     cmd = ["docker", "run", "-d", "--name", "serverinstaller-ollama",
            "-p", f"{port}:11434",
            "-v", f"ollama-data:/root/.ollama",
@@ -7855,8 +7962,12 @@ def _run_ai_docker_generic(service_id, image, form, default_port, container_port
         output.append(m)
         if live_cb: live_cb(m + "\n")
     log(f"=== Installing {display_name} via Docker ===")
+    if sys.platform == "darwin":
+        _docker_add_macos_path()
     if not command_exists("docker"):
         _install_engine_docker(log)
+        if sys.platform == "darwin":
+            _docker_add_macos_path()
     if not command_exists("docker"):
         log("Docker is not available. Install Docker Desktop manually from https://www.docker.com/products/docker-desktop/")
         return 1, "\n".join(output)
@@ -10051,10 +10162,14 @@ def run_sam3_docker(form=None, live_cb=None):
     username = (form.get("SAM3_USERNAME", [""])[0] or "").strip()
     password = (form.get("SAM3_PASSWORD", [""])[0] or "").strip()
 
+    if sys.platform == "darwin":
+        _docker_add_macos_path()
     if not command_exists("docker"):
         if live_cb:
             live_cb("Docker not found. Installing Docker...\n")
         _install_engine_docker(lambda m: live_cb(m + "\n") if live_cb else None)
+        if sys.platform == "darwin":
+            _docker_add_macos_path()
         if not command_exists("docker"):
             return 1, "Docker is not installed and could not be auto-installed. Install Docker Desktop manually from https://www.docker.com/products/docker-desktop/"
 
