@@ -929,4 +929,5 @@ if __name__ == "__main__":
     print(f"Device: {DEVICE}")
     print("="*50 + "\n")
 
-    app.run(debug=False, host='0.0.0.0', port=5000, threaded=True)
+    port = int(os.environ.get("SAM3_PORT", "5000"))
+    app.run(debug=False, host='0.0.0.0', port=port, threaded=True)

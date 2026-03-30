@@ -10312,19 +10312,65 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     if code2 == 0:
         if not host_ip:
             host_ip = choose_service_host()
+        http_url = f"http://{host_ip}:{http_port}"
+        https_url = f"https://{host_ip}:{https_port}" if https_port else ""
         state = _read_json_file(SAM3_STATE_FILE)
         state.update({
+            "installed": True,
             "service_name": container_name,
             "deploy_mode": "docker",
             "host": host_ip,
             "http_port": http_port,
             "https_port": https_port,
-            "http_url": f"http://{host_ip}:{http_port}",
-            "https_url": f"https://{host_ip}:{https_port}",
+            "http_url": http_url,
+            "https_url": https_url,
             "device": gpu_device,
             "running": True,
         })
         _write_json_file(SAM3_STATE_FILE, state)
+
+        # Wait for container to be healthy, then show URLs
+        if live_cb:
+            live_cb("\nWaiting for SAM3 container to start...\n")
+        import time
+        ready = False
+        for i in range(20):
+            time.sleep(3)
+            try:
+                if is_local_tcp_port_listening(int(http_port)):
+                    ready = True
+                    break
+            except Exception:
+                pass
+            # Check container is still running
+            try:
+                rc, out = run_capture(["docker", "ps", "--filter", f"name={container_name}", "--format", "{{.Status}}"], timeout=10)
+                if rc != 0 or not out.strip():
+                    if live_cb:
+                        live_cb("Container stopped unexpectedly. Checking logs...\n")
+                    rc2, logs = run_capture(["docker", "logs", "--tail", "30", container_name], timeout=10)
+                    if live_cb and logs:
+                        live_cb(logs + "\n")
+                    return 1, f"SAM3 container failed to start. Check Docker logs."
+            except Exception:
+                pass
+            if live_cb:
+                live_cb(f"Waiting for SAM3... ({i+1}/20)\n")
+
+        if live_cb:
+            live_cb("\n" + "=" * 60 + "\n")
+            live_cb(" SAM3 Docker Deployment Complete!\n")
+            live_cb("=" * 60 + "\n")
+            live_cb(f" Web UI (HTTP):  {http_url}\n")
+            if https_url:
+                live_cb(f" Web UI (HTTPS): {https_url}\n")
+            live_cb(f" Device: {gpu_device}\n")
+            live_cb(f" Container: {container_name}\n")
+            if ready:
+                live_cb(f" Status: Running\n")
+            else:
+                live_cb(f" Status: Starting (may take a moment to load the model)\n")
+            live_cb("=" * 60 + "\n")
     return code2, combined
 
 
