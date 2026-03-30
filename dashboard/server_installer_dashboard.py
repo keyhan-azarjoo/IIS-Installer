@@ -7947,16 +7947,23 @@ def run_openclaw_docker(form=None, live_cb=None):
     build_dir = str(OPENCLAW_STATE_DIR / "docker-build")
     Path(build_dir).mkdir(parents=True, exist_ok=True)
 
-    # Create entrypoint script that runs onboard then gateway
+    # Create entrypoint that skips interactive onboard and starts gateway
     entrypoint_sh = f"""#!/bin/bash
-set -e
-# Run onboard if not already done
-if [ ! -f /root/.openclaw/gateway.json ] && [ ! -f /root/.openclaw/config.yaml ]; then
-    echo "Running OpenClaw onboard..."
-    openclaw onboard --install-daemon 2>&1 || echo "Onboard needs manual config via dashboard"
+echo "=== OpenClaw Docker Container ==="
+echo "Port: {http_port}"
+
+# Create minimal config if not exists (skip interactive onboard)
+mkdir -p /root/.openclaw
+if [ ! -f /root/.openclaw/gateway.json ]; then
+    echo '{{"port":{http_port},"bind":"custom","customHost":"0.0.0.0"}}' > /root/.openclaw/gateway.json
+    echo "Created default gateway config."
 fi
-echo "Starting OpenClaw gateway on port {http_port}..."
-exec openclaw gateway --bind lan --port {http_port} --verbose
+
+echo "Starting OpenClaw gateway on 0.0.0.0:{http_port}..."
+# Use custom bind with 0.0.0.0 so Docker port mapping works
+exec openclaw gateway --bind custom --host 0.0.0.0 --port {http_port} --verbose 2>&1 || \\
+exec openclaw gateway --bind auto --port {http_port} --verbose 2>&1 || \\
+echo "Gateway failed to start. Check: docker logs serverinstaller-openclaw"
 """
     Path(build_dir, "entrypoint.sh").write_text(entrypoint_sh, encoding="utf-8")
 
@@ -7967,6 +7974,9 @@ RUN apt-get update && apt-get install -y curl python3 build-essential && rm -rf 
 
 # Install OpenClaw globally
 RUN npm install -g openclaw@latest
+
+# Pre-create config dir
+RUN mkdir -p /root/.openclaw
 
 # Gateway port
 ENV OPENCLAW_PORT={http_port}
@@ -8010,16 +8020,37 @@ CMD ["/entrypoint.sh"]
     _write_json_file(OPENCLAW_STATE_FILE, state)
     manage_firewall_port("open", http_port, "tcp")
 
+    # Wait and check container logs
+    import time
+    time.sleep(5)
+    try:
+        rc, logs = run_capture(["docker", "logs", "--tail", "20", container_name], timeout=10)
+        if logs:
+            log("\nContainer logs:")
+            log(logs.strip())
+    except Exception:
+        pass
+
+    # Check if container is running
+    try:
+        rc, status = run_capture(["docker", "ps", "--filter", f"name={container_name}", "--format", "{{.Status}}"], timeout=10)
+        if status.strip():
+            log(f"\nContainer status: {status.strip()}")
+        else:
+            log("\nWARNING: Container may have stopped. Check: docker logs " + container_name)
+    except Exception:
+        pass
+
     log("\n" + "=" * 60)
     log(" OpenClaw Docker Deployment Complete!")
     log("=" * 60)
-    log(f" Web UI:         {http_url}")
+    log(f" Dashboard:      {http_url}")
     if https_url:
-        log(f" Web UI (HTTPS): {https_url}")
+        log(f" HTTPS:          {https_url}")
     if username:
         log(f" Auth:           {username} / ****")
-    log(f" Features: AI Agent chat, code execution, web browsing,")
-    log(f"           file management, persistent memory")
+    log(f" Container:      {container_name}")
+    log(f" Logs:           docker logs {container_name}")
     log("=" * 60)
     return code2, "\n".join(output)
 
