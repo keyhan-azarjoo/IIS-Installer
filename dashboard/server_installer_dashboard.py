@@ -10302,12 +10302,37 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     docker_cmd += ["-p", f"{http_port}:{http_port}"]
     if gpu_device == "cuda":
         docker_cmd += ["--gpus", "all"]
-    # Mount the model directory — check both possible locations
-    host_model_dir = SAM3_STATE_DIR / "app" / "models"
-    if not host_model_dir.exists():
-        host_model_dir = SAM3_STATE_DIR / "models"
-    host_model_dir.mkdir(parents=True, exist_ok=True)
-    docker_cmd += ["-v", f"{str(host_model_dir)}:/app/models"]
+    # Mount the model directory — find where sam3.pt actually is
+    state = _read_json_file(SAM3_STATE_FILE)
+    host_model_dir = None
+    # Check state file for model_path first
+    state_model_path = str(state.get("model_path") or "").strip()
+    if state_model_path and Path(state_model_path).exists():
+        host_model_dir = str(Path(state_model_path).parent)
+    # Search known locations for sam3.pt
+    if not host_model_dir:
+        search_dirs = [
+            SAM3_STATE_DIR / "app" / "models",
+            SAM3_STATE_DIR / "models",
+            SAM3_STATE_DIR / "docker-app" / "models",
+            Path(str(state.get("install_dir") or "")) / "models",
+        ]
+        for d in search_dirs:
+            sam3_file = d / "sam3.pt"
+            if sam3_file.exists() and sam3_file.stat().st_size > 1000000:
+                host_model_dir = str(d)
+                if live_cb:
+                    live_cb(f"Found model at {sam3_file}\n")
+                break
+    if not host_model_dir:
+        host_model_dir = str(SAM3_STATE_DIR / "app" / "models")
+        if live_cb:
+            live_cb(f"Warning: sam3.pt not found. Download it from the SAM3 dashboard page.\n")
+            live_cb(f"Expected locations: {SAM3_STATE_DIR / 'app' / 'models' / 'sam3.pt'}\n")
+    Path(host_model_dir).mkdir(parents=True, exist_ok=True)
+    docker_cmd += ["-v", f"{host_model_dir}:/app/models"]
+    if live_cb:
+        live_cb(f"Mounting model directory: {host_model_dir} -> /app/models\n")
     docker_cmd.append(image_name)
 
     if live_cb:
