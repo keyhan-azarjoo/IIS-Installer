@@ -10162,6 +10162,44 @@ def run_sam3_docker(form=None, live_cb=None):
     username = (form.get("SAM3_USERNAME", [""])[0] or "").strip()
     password = (form.get("SAM3_PASSWORD", [""])[0] or "").strip()
 
+    # ── Pre-flight: check port availability ──────────────────────────────
+    try:
+        port_int = int(http_port)
+        if is_local_tcp_port_listening(port_int):
+            # Check if it's our own container
+            try:
+                rc, out = run_capture(["docker", "ps", "--filter", "name=serverinstaller-sam3", "--format", "{{.ID}}"], timeout=10)
+                if rc == 0 and out.strip():
+                    if live_cb:
+                        live_cb(f"Port {http_port} is in use by existing SAM3 container — will replace it.\n")
+                else:
+                    return 1, f"Port {http_port} is already in use by another process. Choose a different port or stop the process using port {http_port}."
+            except Exception:
+                return 1, f"Port {http_port} is already in use. Choose a different port or stop the process using port {http_port}."
+    except (ValueError, Exception):
+        pass
+
+    # ── Pre-flight: resolve GPU device for platform ──────────────────────
+    # macOS has no NVIDIA GPU — always use CPU
+    if sys.platform == "darwin" and gpu_device in ("cuda", "auto"):
+        gpu_device = "cpu"
+        if live_cb:
+            live_cb("macOS detected — using CPU mode (no NVIDIA GPU support in Docker on Mac).\n")
+    elif gpu_device == "auto":
+        # Check if NVIDIA runtime is available in Docker
+        try:
+            rc, out = run_capture(["docker", "info", "--format", "{{.Runtimes}}"], timeout=10)
+            if "nvidia" not in str(out).lower():
+                gpu_device = "cpu"
+                if live_cb:
+                    live_cb("No NVIDIA GPU runtime detected in Docker — using CPU mode.\n")
+            else:
+                gpu_device = "cuda"
+                if live_cb:
+                    live_cb("NVIDIA GPU detected — using CUDA mode.\n")
+        except Exception:
+            gpu_device = "cpu"
+
     if sys.platform == "darwin":
         _docker_add_macos_path()
     if not command_exists("docker"):
@@ -10179,10 +10217,13 @@ def run_sam3_docker(form=None, live_cb=None):
     sam3_data = str(SAM3_STATE_DIR / "docker-app")
     Path(sam3_data).mkdir(parents=True, exist_ok=True)
 
-    # Create Dockerfile
-    gpu_base = "nvidia/cuda:12.4.0-runtime-ubuntu22.04" if gpu_device in ("cuda", "auto") else "python:3.12-slim"
+    # Create Dockerfile — use appropriate base image for platform/GPU
+    use_cuda = gpu_device == "cuda"
+    gpu_base = "nvidia/cuda:12.4.0-runtime-ubuntu22.04" if use_cuda else "python:3.12-slim"
+    torch_index = "--index-url https://download.pytorch.org/whl/cu124" if use_cuda else "--index-url https://download.pytorch.org/whl/cpu"
     dockerfile_content = f"""FROM {gpu_base}
 
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y python3 python3-pip python3-venv git curl libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -10190,7 +10231,7 @@ COPY . /app/
 
 RUN python3 -m venv /app/venv && \\
     /app/venv/bin/pip install --upgrade pip setuptools wheel && \\
-    /app/venv/bin/pip install torch torchvision{'  --index-url https://download.pytorch.org/whl/cu124' if gpu_device in ('cuda', 'auto') else ' --index-url https://download.pytorch.org/whl/cpu'} && \\
+    /app/venv/bin/pip install torch torchvision {torch_index} && \\
     /app/venv/bin/pip install -r /app/requirements.txt && \\
     /app/venv/bin/pip install "git+https://github.com/ultralytics/CLIP.git" || true
 
@@ -10221,24 +10262,40 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     container_name = "serverinstaller-sam3"
     image_name = "serverinstaller/sam3:latest"
 
-    # Stop and remove existing container
-    run_process(["docker", "stop", container_name], live_cb=live_cb)
-    run_process(["docker", "rm", container_name], live_cb=live_cb)
+    # Stop and remove existing container (suppress errors for non-existent containers)
+    run_process(["docker", "stop", container_name], live_cb=None)
+    run_process(["docker", "rm", container_name], live_cb=None)
 
     # Build image
     if live_cb:
-        live_cb("Building SAM3 Docker image...\n")
+        live_cb(f"Building SAM3 Docker image ({gpu_base})...\n")
     code, output = run_process(
         ["docker", "build", "-t", image_name, str(sam3_data)],
         live_cb=live_cb,
     )
     if code != 0:
-        return code, output
+        # Check common build errors
+        if "no matching manifest" in output.lower() or "platform" in output.lower():
+            if live_cb:
+                live_cb("\nBuild failed — base image may not support this platform. Retrying with CPU image...\n")
+            # Retry with python:3.12-slim base
+            dockerfile_content = dockerfile_content.replace(gpu_base, "python:3.12-slim")
+            dockerfile_content = dockerfile_content.replace("--index-url https://download.pytorch.org/whl/cu124", "--index-url https://download.pytorch.org/whl/cpu")
+            dockerfile_path.write_text(dockerfile_content, encoding="utf-8")
+            gpu_device = "cpu"
+            code, output = run_process(
+                ["docker", "build", "-t", image_name, str(sam3_data)],
+                live_cb=live_cb,
+            )
+            if code != 0:
+                return code, output
+        else:
+            return code, output
 
     # Run container
     docker_cmd = ["docker", "run", "-d", "--name", container_name, "--restart", "unless-stopped"]
     docker_cmd += ["-p", f"{http_port}:{http_port}"]
-    if gpu_device in ("cuda", "auto"):
+    if gpu_device == "cuda":
         docker_cmd += ["--gpus", "all"]
     docker_cmd += ["-v", f"{str(SAM3_STATE_DIR / 'models')}:/app/models"]
     docker_cmd.append(image_name)
@@ -10246,6 +10303,10 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     if live_cb:
         live_cb("Starting SAM3 Docker container...\n")
     code2, output2 = run_process(docker_cmd, live_cb=live_cb)
+
+    # If container start fails due to port conflict, give a clear error
+    if code2 != 0 and ("port is already allocated" in output2.lower() or "bind" in output2.lower()):
+        return code2, f"Failed to start container: port {http_port} is already in use. Choose a different port."
 
     combined = f"{output.rstrip()}\n{output2}".strip()
     if code2 == 0:
