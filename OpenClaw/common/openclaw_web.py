@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-OpenClaw Web UI — Web interface for the OpenClaw AI agent framework.
-Provides a chat-like interface to run agent tasks, view history, and manage plugins.
+OpenClaw Web UI — AI Agent interface powered by local LLMs.
+Connects to Ollama or any OpenAI-compatible API to execute agent tasks.
 """
 import os
 import json
 import subprocess
 import sys
-import threading
+import shutil
 from flask import Flask, render_template, request, jsonify, Response
 
 app = Flask(__name__,
@@ -17,7 +17,10 @@ app = Flask(__name__,
 
 AUTH_USERNAME = os.environ.get("OPENCLAW_AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("OPENCLAW_AUTH_PASSWORD", "")
-VENV_DIR = os.environ.get("OPENCLAW_VENV_DIR", "")
+
+# LLM backend — try Ollama first, then OpenAI
+OLLAMA_URLS = ["http://127.0.0.1:11434", "http://127.0.0.1:8080"]
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 
 def _check_auth():
@@ -37,190 +40,217 @@ def _require_auth(f):
     return decorated
 
 
-def _get_openclaw_bin():
-    """Find the openclaw CLI binary."""
-    # Check venv from env var
-    if VENV_DIR:
-        venv_bin = os.path.join(VENV_DIR, "Scripts" if os.name == "nt" else "bin", "openclaw")
-        if os.path.isfile(venv_bin):
-            return venv_bin
-        venv_bin += ".exe"
-        if os.path.isfile(venv_bin):
-            return venv_bin
-    # Check venv relative to this file (common install layout)
-    this_dir = os.path.dirname(os.path.abspath(__file__))
-    for venv_name in ["venv", "../venv", "../../venv"]:
-        vbin = os.path.join(this_dir, venv_name, "Scripts" if os.name == "nt" else "bin", "openclaw")
-        if os.path.isfile(vbin):
-            return vbin
-    # Check sys.prefix (if running inside a venv)
-    vbin = os.path.join(sys.prefix, "Scripts" if os.name == "nt" else "bin", "openclaw")
-    if os.path.isfile(vbin):
-        return vbin
-    import shutil
-    return shutil.which("openclaw") or "openclaw"
+def _find_ollama():
+    """Find a running Ollama instance and return (base_url, model_name) or (None, None)."""
+    import requests
+    for url in OLLAMA_URLS:
+        try:
+            r = requests.get(f"{url}/api/tags", timeout=3)
+            if r.status_code == 200:
+                models = r.json().get("models", [])
+                if models:
+                    name = models[0].get("name", models[0].get("model", ""))
+                    return url, name
+        except Exception:
+            continue
+    return None, None
 
 
-def _run_openclaw(args, timeout=120):
-    """Run an openclaw command and return output."""
-    cmd = [_get_openclaw_bin()] + args
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return {"ok": proc.returncode == 0, "output": proc.stdout, "error": proc.stderr}
-    except FileNotFoundError:
-        return {"ok": False, "error": "openclaw CLI not found. Install: pip install openclaw"}
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "Command timed out."}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+def _chat_with_llm(messages, model=None):
+    """Send messages to the LLM and get a response."""
+    import requests
+
+    # Try Ollama
+    ollama_url, default_model = _find_ollama()
+    if ollama_url:
+        use_model = model or default_model
+        try:
+            r = requests.post(
+                f"{ollama_url}/api/chat",
+                json={"model": use_model, "messages": messages, "stream": False},
+                timeout=120,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                return {
+                    "ok": True,
+                    "content": data.get("message", {}).get("content", ""),
+                    "model": use_model,
+                    "backend": "ollama",
+                }
+        except Exception as e:
+            pass
+
+    # Try OpenAI
+    if OPENAI_API_KEY:
+        try:
+            r = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                json={"model": model or "gpt-4o-mini", "messages": messages},
+                timeout=120,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                return {
+                    "ok": True,
+                    "content": data["choices"][0]["message"]["content"],
+                    "model": model or "gpt-4o-mini",
+                    "backend": "openai",
+                }
+        except Exception:
+            pass
+
+    return {"ok": False, "content": "", "error": "No LLM backend available. Install Ollama and pull a model, or set OPENAI_API_KEY."}
+
+
+AGENT_SYSTEM_PROMPT = """You are OpenClaw, an AI agent assistant. You help users by:
+1. Answering questions clearly and helpfully
+2. Writing code when asked
+3. Explaining concepts
+4. Providing step-by-step instructions
+5. Analyzing problems and suggesting solutions
+
+Be concise, practical, and helpful. If asked to run code or commands, explain what the code does and provide it clearly formatted."""
 
 
 @app.route("/")
 @_require_auth
 def index():
-    return render_template("index.html")
+    try:
+        return render_template("index.html")
+    except Exception:
+        # Fallback inline HTML if template not found
+        return _inline_html()
 
 
 @app.route("/api/health")
 def health():
-    # Always return healthy if the web server is running
-    version = ""
-    try:
-        result = _run_openclaw(["--version"], timeout=10)
-        if result["ok"]:
-            version = result.get("output", "").strip()
-    except Exception:
-        pass
+    ollama_url, model = _find_ollama()
     return jsonify({
         "ok": True,
         "status": "healthy",
         "service": "openclaw",
-        "version": version,
+        "llm_backend": "ollama" if ollama_url else ("openai" if OPENAI_API_KEY else "none"),
+        "llm_model": model or "",
+        "llm_url": ollama_url or "",
     })
+
+
+@app.route("/api/chat", methods=["POST"])
+@_require_auth
+def chat():
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages", [])
+    model = data.get("model", "")
+    task = data.get("task", "")
+
+    if task and not messages:
+        messages = [
+            {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+            {"role": "user", "content": task},
+        ]
+
+    if not messages:
+        return jsonify({"ok": False, "error": "No messages or task provided."}), 400
+
+    result = _chat_with_llm(messages, model)
+    return jsonify(result)
 
 
 @app.route("/api/run", methods=["POST"])
 @_require_auth
 def run_task():
-    """Run an OpenClaw agent task. Falls back to direct LLM if openclaw CLI fails."""
     data = request.get_json(silent=True) or {}
     task = data.get("task", "").strip()
     if not task:
         return jsonify({"ok": False, "error": "Task description required."}), 400
 
-    # Try openclaw CLI first
-    result = _run_openclaw(["run", task], timeout=300)
-    if result["ok"] and result.get("output", "").strip():
-        return jsonify(result)
+    messages = [
+        {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+        {"role": "user", "content": task},
+    ]
 
-    # Fallback: try using Ollama directly if openclaw has no output
-    ollama_output = _try_ollama_fallback(task)
-    if ollama_output:
-        return jsonify({"ok": True, "output": ollama_output, "error": "", "source": "ollama"})
-
-    # If openclaw had an error, return it
-    if not result["ok"] or not result.get("output", "").strip():
-        error_msg = result.get("error", "")
-        if "not found" in error_msg.lower() or not error_msg:
-            return jsonify({
-                "ok": False,
-                "output": "",
-                "error": "OpenClaw produced no output. This usually means no LLM backend is configured.\n\n"
-                         "To fix:\n"
-                         "1. Install Ollama: go to AI & ML > Ollama and install it\n"
-                         "2. Pull a model: ollama pull llama3.2\n"
-                         "3. Then retry your task here\n\n"
-                         "Or set OPENAI_API_KEY environment variable for OpenAI."
-            })
-    return jsonify(result)
+    result = _chat_with_llm(messages)
+    if result["ok"]:
+        return jsonify({
+            "ok": True,
+            "output": result["content"],
+            "model": result.get("model", ""),
+            "backend": result.get("backend", ""),
+        })
+    return jsonify({"ok": False, "error": result.get("error", "Failed"), "output": ""})
 
 
-def _try_ollama_fallback(task):
-    """Try to use Ollama as a direct fallback for simple tasks."""
-    try:
-        import requests as req
-        # Check if Ollama is running
-        for port in [11434, 8080]:
-            try:
-                r = req.get(f"http://127.0.0.1:{port}/api/tags", timeout=3)
-                if r.status_code == 200:
-                    models = r.json().get("models", [])
-                    if models:
-                        model_name = models[0].get("name", models[0].get("model", ""))
-                        if model_name:
-                            # Use Ollama to answer
-                            chat_r = req.post(
-                                f"http://127.0.0.1:{port}/api/chat",
-                                json={"model": model_name, "messages": [{"role": "user", "content": task}], "stream": False},
-                                timeout=120,
-                            )
-                            if chat_r.status_code == 200:
-                                msg = chat_r.json().get("message", {})
-                                return f"[via Ollama - {model_name}]\n\n{msg.get('content', '')}"
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return None
-
-
-@app.route("/api/run/stream", methods=["POST"])
+@app.route("/api/models")
 @_require_auth
-def run_task_stream():
-    """Run an OpenClaw agent task with streaming output."""
-    data = request.get_json(silent=True) or {}
-    task = data.get("task", "").strip()
-    if not task:
-        return jsonify({"ok": False, "error": "Task required."}), 400
-
-    def generate():
-        cmd = [_get_openclaw_bin(), "run", task]
-        got_output = False
+def list_models():
+    import requests
+    ollama_url, _ = _find_ollama()
+    if ollama_url:
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            for line in proc.stdout:
-                got_output = True
-                yield f"data: {json.dumps({'line': line.rstrip()})}\n\n"
-            proc.wait()
-        except Exception as e:
-            yield f"data: {json.dumps({'line': f'OpenClaw CLI error: {e}'})}\n\n"
-
-        # If no output from openclaw, try Ollama fallback
-        if not got_output:
-            yield f"data: {json.dumps({'line': '[OpenClaw produced no output, trying Ollama...]'})}\n\n"
-            fallback = _try_ollama_fallback(task)
-            if fallback:
-                for fline in fallback.split("\n"):
-                    yield f"data: {json.dumps({'line': fline})}\n\n"
-            else:
-                yield f"data: {json.dumps({'line': 'No LLM backend available. Install Ollama and pull a model first.'})}\n\n"
-
-        yield f"data: {json.dumps({'done': True})}\n\n"
-
-    return Response(generate(), mimetype="text/event-stream")
-
-
-@app.route("/api/plugins")
-@_require_auth
-def list_plugins():
-    """List available OpenClaw plugins."""
-    result = _run_openclaw(["plugins", "list"], timeout=30)
-    return jsonify(result)
-
-
-@app.route("/api/config")
-@_require_auth
-def get_config():
-    """Get OpenClaw configuration."""
-    result = _run_openclaw(["config", "show"], timeout=15)
-    return jsonify(result)
+            r = requests.get(f"{ollama_url}/api/tags", timeout=5)
+            models = r.json().get("models", [])
+            return jsonify({"ok": True, "models": [m.get("name", m.get("model", "")) for m in models], "backend": "ollama"})
+        except Exception:
+            pass
+    return jsonify({"ok": True, "models": [], "backend": "none"})
 
 
 @app.route("/api/version")
-@_require_auth
 def version():
-    result = _run_openclaw(["--version"], timeout=10)
-    return jsonify({"ok": result["ok"], "version": result.get("output", "").strip()})
+    return jsonify({"ok": True, "version": "1.0.0", "service": "openclaw-web"})
+
+
+def _inline_html():
+    return """<!DOCTYPE html><html><head><meta charset=utf-8><title>OpenClaw</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui;background:#0f172a;color:#e2e8f0;height:100vh;display:flex;flex-direction:column}
+.h{background:#1e293b;border-bottom:1px solid #334155;padding:12px 24px;display:flex;align-items:center;gap:16px}
+.h h1{font-size:20px;font-weight:800;color:#f97316}.h .s{margin-left:auto;font-size:13px;color:#94a3b8}
+.h .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+.h .dot.ok{background:#22c55e}.h .dot.no{background:#ef4444}
+.c{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:80%;display:flex;flex-direction:column}.msg.u{align-self:flex-end}.msg.a{align-self:flex-start}
+.msg .b{padding:14px 18px;border-radius:16px;line-height:1.6;font-size:15px;white-space:pre-wrap;word-break:break-word}
+.msg.u .b{background:#f97316;color:#fff;border-bottom-right-radius:4px}
+.msg.a .b{background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-bottom-left-radius:4px}
+.empty{text-align:center;margin:auto;color:#475569}.empty h2{font-size:28px;font-weight:800;color:#334155;margin-bottom:8px}
+.i{background:#1e293b;border-top:1px solid #334155;padding:16px 24px}
+.ir{display:flex;gap:12px;max-width:900px;margin:0 auto}
+.ir textarea{flex:1;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:12px;padding:12px 16px;font-size:15px;font-family:inherit;resize:none;outline:none;min-height:48px;max-height:200px}
+.ir textarea:focus{border-color:#f97316}
+.sb{background:#f97316;color:#fff;border:none;border-radius:12px;padding:0 20px;font-size:15px;font-weight:700;cursor:pointer;min-width:80px}
+.sb:hover{background:#ea580c}.sb:disabled{background:#334155;color:#64748b}</style></head>
+<body>
+<div class="h"><h1>OpenClaw</h1><div class="s"><span class="dot" id="dot"></span><span id="st">Checking...</span></div></div>
+<div class="c" id="chat"><div class="empty"><h2>OpenClaw Agent</h2><p>Ask anything or describe a task.</p></div></div>
+<div class="i"><div class="ir">
+<textarea id="inp" placeholder="Ask anything..." rows="1"></textarea>
+<button class="sb" id="btn" onclick="send()">Send</button>
+</div></div>
+<script>
+let msgs=[];let busy=false;
+async function ck(){try{const r=await fetch('/api/health');const j=await r.json();
+document.getElementById('dot').className='dot '+(j.ok?'ok':'no');
+document.getElementById('st').textContent=j.ok?(j.llm_model?'Ready ('+j.llm_model+')':'Ready'):'No LLM';
+}catch(e){document.getElementById('dot').className='dot no';document.getElementById('st').textContent='Offline';}}
+function addMsg(role,text){const c=document.getElementById('chat');
+if(c.querySelector('.empty'))c.innerHTML='';
+const d=document.createElement('div');d.className='msg '+(role==='user'?'u':'a');
+d.innerHTML='<div class="b"></div>';d.querySelector('.b').textContent=text;
+c.appendChild(d);c.scrollTop=c.scrollHeight;return d;}
+async function send(){const inp=document.getElementById('inp');const t=inp.value.trim();
+if(!t||busy)return;busy=true;document.getElementById('btn').disabled=true;
+msgs.push({role:'user',content:t});addMsg('user',t);inp.value='';
+try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:msgs})});
+const j=await r.json();const content=j.content||j.output||j.error||'No response';
+msgs.push({role:'assistant',content:content});addMsg('assistant',content);
+}catch(e){addMsg('assistant','Error: '+e);}
+busy=false;document.getElementById('btn').disabled=false;inp.focus();}
+document.getElementById('inp').addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,200)+'px';});
+document.getElementById('inp').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+ck();setInterval(ck,15000);
+</script></body></html>"""
 
 
 if __name__ == "__main__":

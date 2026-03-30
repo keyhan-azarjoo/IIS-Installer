@@ -7857,6 +7857,9 @@ def _run_ai_docker_generic(service_id, image, form, default_port, container_port
     log(f"=== Installing {display_name} via Docker ===")
     if not command_exists("docker"):
         _install_engine_docker(log)
+    if not command_exists("docker"):
+        log("Docker is not available. Install Docker Desktop manually from https://www.docker.com/products/docker-desktop/")
+        return 1, "\n".join(output)
     container_name = f"serverinstaller-{service_id}"
     # Remove existing
     run_capture(["docker", "rm", "-f", container_name], timeout=15)
@@ -10049,7 +10052,11 @@ def run_sam3_docker(form=None, live_cb=None):
     password = (form.get("SAM3_PASSWORD", [""])[0] or "").strip()
 
     if not command_exists("docker"):
-        return 1, "Docker is not installed. Please install Docker first."
+        if live_cb:
+            live_cb("Docker not found. Installing Docker...\n")
+        _install_engine_docker(lambda m: live_cb(m + "\n") if live_cb else None)
+        if not command_exists("docker"):
+            return 1, "Docker is not installed and could not be auto-installed. Install Docker Desktop manually from https://www.docker.com/products/docker-desktop/"
 
     ensure_repo_files(SAM3_WINDOWS_FILES if os.name == "nt" else SAM3_UNIX_FILES, live_cb=live_cb, refresh=True)
 
