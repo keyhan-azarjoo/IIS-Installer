@@ -8117,13 +8117,15 @@ CMD ["/entrypoint.sh"]
     OPENCLAW_STATE_DIR.mkdir(parents=True, exist_ok=True)
     display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
     http_url = f"http://{display_host}:{http_port}"
-    https_url = f"https://{display_host}:{https_port}" if https_port else ""
+    # The Docker container serves HTTPS on the http_port (via nginx)
+    https_url = f"https://{display_host}:{http_port}"
     state = _read_json_file(OPENCLAW_STATE_FILE)
     state.update({
         "installed": True, "service_name": container_name,
         "deploy_mode": "docker", "host": host,
-        "http_port": http_port, "https_port": https_port,
-        "http_url": http_url, "https_url": https_url,
+        "http_port": http_port, "https_port": http_port,
+        "http_url": f"https://{display_host}:{http_port}",
+        "https_url": f"https://{display_host}:{http_port}",
         "auth_enabled": bool(username), "auth_username": username,
         "running": code2 == 0,
     })
