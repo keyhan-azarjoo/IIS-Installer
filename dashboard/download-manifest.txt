@@ -73,12 +73,14 @@ LMStudio/linux-macos/setup-lmstudio.sh
 LMStudio/common/lmstudio_web.py
 LMStudio/common/requirements.txt
 LMStudio/common/web/templates/index.html
+LMStudio/common/web/templates/login.html
 # Ollama
 Ollama/windows/setup-ollama.ps1
 Ollama/linux-macos/setup-ollama.sh
 Ollama/common/ollama_web.py
 Ollama/common/requirements.txt
 Ollama/common/web/templates/index.html
+Ollama/common/web/templates/login.html
 # Python
 Python/windows/setup-python.ps1
 # MongoDB

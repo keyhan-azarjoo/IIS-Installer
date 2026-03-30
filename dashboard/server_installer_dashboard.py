@@ -162,12 +162,14 @@ LMSTUDIO_WINDOWS_FILES = [
     "LMStudio/common/lmstudio_web.py",
     "LMStudio/common/requirements.txt",
     "LMStudio/common/web/templates/index.html",
+    "LMStudio/common/web/templates/login.html",
 ]
 LMSTUDIO_UNIX_FILES = [
     "LMStudio/linux-macos/setup-lmstudio.sh",
     "LMStudio/common/lmstudio_web.py",
     "LMStudio/common/requirements.txt",
     "LMStudio/common/web/templates/index.html",
+    "LMStudio/common/web/templates/login.html",
 ]
 
 OLLAMA_WINDOWS_INSTALLER = ROOT / "Ollama" / "windows" / "setup-ollama.ps1"
@@ -177,12 +179,14 @@ OLLAMA_WINDOWS_FILES = [
     "Ollama/common/ollama_web.py",
     "Ollama/common/requirements.txt",
     "Ollama/common/web/templates/index.html",
+    "Ollama/common/web/templates/login.html",
 ]
 OLLAMA_UNIX_FILES = [
     "Ollama/linux-macos/setup-ollama.sh",
     "Ollama/common/ollama_web.py",
     "Ollama/common/requirements.txt",
     "Ollama/common/web/templates/index.html",
+    "Ollama/common/web/templates/login.html",
 ]
 JUPYTER_SYSTEMD_SERVICE = "serverinstaller-jupyter.service"
 WINDOWS_LOCALS3_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "install-state.json"

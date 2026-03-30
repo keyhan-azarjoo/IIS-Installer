@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """
-Ollama Web UI — A beautiful chat interface for Ollama LLMs.
-Provides a web-based chat, model management, and API proxy.
+Ollama Web UI — A professional chat interface for Ollama LLMs.
+Provides web-based chat, model management, and API proxy.
 """
 import os
 import json
 import time
+import hashlib
+import secrets
 import requests
-from flask import Flask, render_template, request, jsonify, Response, stream_with_context
+from functools import wraps
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context, session, redirect, url_for
 
 app = Flask(__name__,
     template_folder=os.path.join(os.path.dirname(__file__), "web", "templates"),
     static_folder=os.path.join(os.path.dirname(__file__), "web", "static"),
 )
+app.secret_key = os.environ.get("OLLAMA_SECRET_KEY", secrets.token_hex(32))
 
 OLLAMA_BASE = os.environ.get("OLLAMA_API_BASE", "http://127.0.0.1:11434")
 AUTH_USERNAME = os.environ.get("OLLAMA_AUTH_USERNAME", "")
@@ -20,9 +24,13 @@ AUTH_PASSWORD = os.environ.get("OLLAMA_AUTH_PASSWORD", "")
 
 
 def _check_auth():
-    """Check basic auth if configured."""
+    """Check session or basic auth."""
     if not AUTH_USERNAME:
         return True
+    # Session auth
+    if session.get("authenticated"):
+        return True
+    # Basic auth (for API clients)
     auth = request.authorization
     if auth and auth.username == AUTH_USERNAME and auth.password == AUTH_PASSWORD:
         return True
@@ -30,12 +38,14 @@ def _check_auth():
 
 
 def _require_auth(f):
-    """Decorator requiring auth."""
-    from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
         if not _check_auth():
-            return Response("Unauthorized", 401, {"WWW-Authenticate": 'Basic realm="Ollama"'})
+            # For API requests, return 401
+            if request.path.startswith("/api/") or request.path.startswith("/v1/"):
+                return Response("Unauthorized", 401, {"WWW-Authenticate": 'Basic realm="Ollama"'})
+            # For page requests, redirect to login
+            return redirect(url_for("login_page"))
         return f(*args, **kwargs)
     return decorated
 
@@ -47,14 +57,48 @@ def _ollama(method, path, json_data=None, stream=False, timeout=120):
         r = requests.request(method, url, json=json_data, stream=stream, timeout=timeout)
         if stream:
             return r
-        return r.json() if r.headers.get("content-type", "").startswith("application/json") else {"raw": r.text}
+        ct = r.headers.get("content-type", "")
+        if "json" in ct:
+            return r.json()
+        return {"raw": r.text}
     except requests.exceptions.ConnectionError:
         return {"error": "Cannot connect to Ollama. Is the server running?"}
     except Exception as e:
         return {"error": str(e)}
 
 
-# ── Web UI Routes ────────────────────────────────────────────────────────────
+# ── Auth Routes ─────────────────────────────────────────────────────────────
+
+@app.route("/login", methods=["GET"])
+def login_page():
+    if not AUTH_USERNAME or _check_auth():
+        return redirect("/")
+    return render_template("login.html")
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    if not AUTH_USERNAME:
+        return jsonify({"ok": True})
+    data = request.get_json(silent=True) or {}
+    if data.get("username") == AUTH_USERNAME and data.get("password") == AUTH_PASSWORD:
+        session["authenticated"] = True
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Invalid username or password"}), 401
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/auth-status")
+def auth_status():
+    return jsonify({"ok": True, "auth_required": bool(AUTH_USERNAME), "authenticated": _check_auth()})
+
+
+# ── Web UI Routes ───────────────────────────────────────────────────────────
 
 @app.route("/")
 @_require_auth
@@ -66,17 +110,30 @@ def index():
 def health():
     try:
         r = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=5)
-        return jsonify({"ok": True, "status": "healthy", "ollama": OLLAMA_BASE})
+        models = r.json().get("models", [])
+        return jsonify({
+            "ok": True, "status": "healthy", "ollama": OLLAMA_BASE,
+            "model_count": len(models),
+        })
     except Exception:
         return jsonify({"ok": False, "status": "unhealthy", "ollama": OLLAMA_BASE}), 503
 
 
-# ── Model Management ─────────────────────────────────────────────────────────
+# ── Model Management ────────────────────────────────────────────────────────
 
 @app.route("/api/models")
 @_require_auth
 def list_models():
     result = _ollama("GET", "/api/tags")
+    if "error" in result:
+        return jsonify({"ok": False, "error": result["error"]}), 500
+    return jsonify({"ok": True, "models": result.get("models", [])})
+
+
+@app.route("/api/models/running")
+@_require_auth
+def running_models():
+    result = _ollama("GET", "/api/ps")
     if "error" in result:
         return jsonify({"ok": False, "error": result["error"]}), 500
     return jsonify({"ok": True, "models": result.get("models", [])})
@@ -93,6 +150,9 @@ def pull_model():
     def generate():
         try:
             r = _ollama("POST", "/api/pull", {"name": name, "stream": True}, stream=True)
+            if isinstance(r, dict) and "error" in r:
+                yield f'data: {{"error":"{r["error"]}"}}\n\n'
+                return
             for line in r.iter_lines():
                 if line:
                     yield f"data: {line.decode()}\n\n"
@@ -125,7 +185,19 @@ def model_info():
     return jsonify({"ok": True, **result})
 
 
-# ── Chat ─────────────────────────────────────────────────────────────────────
+@app.route("/api/models/copy", methods=["POST"])
+@_require_auth
+def copy_model():
+    data = request.get_json(silent=True) or {}
+    source = data.get("source", "")
+    destination = data.get("destination", "")
+    if not source or not destination:
+        return jsonify({"ok": False, "error": "Source and destination required"}), 400
+    result = _ollama("POST", "/api/copy", {"source": source, "destination": destination})
+    return jsonify({"ok": "error" not in result})
+
+
+# ── Chat ────────────────────────────────────────────────────────────────────
 
 @app.route("/api/chat", methods=["POST"])
 @_require_auth
@@ -138,7 +210,6 @@ def chat():
     if not model:
         return jsonify({"ok": False, "error": "Model name required"}), 400
 
-    # Pass through options (temperature, top_p, num_ctx, num_predict, etc.)
     options = data.get("options", {})
     payload = {"model": model, "messages": messages, "stream": stream}
     if options:
@@ -149,14 +220,15 @@ def chat():
             try:
                 r = _ollama("POST", "/api/chat", {**payload, "stream": True}, stream=True)
                 if isinstance(r, dict) and "error" in r:
-                    yield f'data: {{"error":"{r["error"]}"}}\n\n'
+                    yield f'data: {json.dumps({"error": r["error"]})}\n\n'
                     return
                 for line in r.iter_lines():
                     if line:
                         yield f"data: {line.decode()}\n\n"
             except Exception as e:
-                yield f'data: {{"error":"{e}"}}\n\n'
-        return Response(stream_with_context(generate()), mimetype="text/event-stream")
+                yield f'data: {json.dumps({"error": str(e)})}\n\n'
+        return Response(stream_with_context(generate()), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
     else:
         result = _ollama("POST", "/api/chat", {**payload, "stream": False})
         if "error" in result:
@@ -166,49 +238,51 @@ def chat():
 
 @app.route("/api/generate", methods=["POST"])
 @_require_auth
-def generate():
+def generate_text():
     data = request.get_json(silent=True) or {}
     model = data.get("model", "")
     prompt = data.get("prompt", "")
-    result = _ollama("POST", "/api/generate", {"model": model, "prompt": prompt, "stream": False})
+    options = data.get("options", {})
+    payload = {"model": model, "prompt": prompt, "stream": False}
+    if options:
+        payload["options"] = options
+    result = _ollama("POST", "/api/generate", payload)
     if "error" in result:
         return jsonify({"ok": False, "error": result["error"]}), 500
     return jsonify({"ok": True, **result})
 
 
-# ── Proxy all other Ollama API calls ─────────────────────────────────────────
+# ── Proxy / OpenAI-compatible ───────────────────────────────────────────────
 
 @app.route("/api/tags")
 @_require_auth
 def proxy_tags():
     return jsonify(_ollama("GET", "/api/tags"))
 
-
 @app.route("/api/ps")
 @_require_auth
 def proxy_ps():
     return jsonify(_ollama("GET", "/api/ps"))
-
 
 @app.route("/api/embeddings", methods=["POST"])
 @_require_auth
 def proxy_embeddings():
     return jsonify(_ollama("POST", "/api/embeddings", request.get_json(silent=True)))
 
-
 @app.route("/v1/chat/completions", methods=["POST"])
 @_require_auth
 def proxy_v1_chat():
-    """OpenAI-compatible endpoint proxy."""
-    data = request.get_json(silent=True) or {}
-    result = _ollama("POST", "/v1/chat/completions", data)
-    return jsonify(result)
-
+    return jsonify(_ollama("POST", "/v1/chat/completions", request.get_json(silent=True)))
 
 @app.route("/v1/models")
 @_require_auth
 def proxy_v1_models():
     return jsonify(_ollama("GET", "/v1/models"))
+
+@app.route("/v1/completions", methods=["POST"])
+@_require_auth
+def proxy_v1_completions():
+    return jsonify(_ollama("POST", "/v1/completions", request.get_json(silent=True)))
 
 
 if __name__ == "__main__":
