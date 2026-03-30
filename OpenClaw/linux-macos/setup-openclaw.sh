@@ -43,12 +43,16 @@ if id "$OPENCLAW_USER" &>/dev/null; then
     log "User $OPENCLAW_USER already exists."
 else
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS — use current user, skip user creation
+        # macOS — use current user, writable home dir
         OPENCLAW_USER="$(whoami)"
         OPENCLAW_HOME="$HOME"
+        # /var/root is read-only on macOS, use state dir instead
+        if [ ! -w "$OPENCLAW_HOME" ]; then
+            OPENCLAW_HOME="$STATE_DIR"
+        fi
         NPM_GLOBAL="${OPENCLAW_HOME}/.npm-global"
         OPENCLAW_BIN="${NPM_GLOBAL}/bin/openclaw"
-        log "macOS — using current user: $OPENCLAW_USER"
+        log "macOS — using user: $OPENCLAW_USER (home: $OPENCLAW_HOME)"
     else
         adduser --disabled-password --gecos "" "$OPENCLAW_USER" 2>/dev/null || useradd -m "$OPENCLAW_USER" 2>/dev/null || true
         usermod -aG sudo "$OPENCLAW_USER" 2>/dev/null || true
@@ -61,12 +65,32 @@ fi
 # ── Step 2: Install required packages ────────────────────────────────────────
 log "Step 2: Installing Node.js & build tools..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS
+    # macOS — find brew or install node directly
     if ! command -v node &>/dev/null || [ "$(node --version | sed 's/v//' | cut -d. -f1)" -lt 22 ] 2>/dev/null; then
-        if command -v brew &>/dev/null; then
-            brew install node@22 2>/dev/null || brew install node 2>/dev/null || true
+        BREW_CMD=""
+        for bp in /opt/homebrew/bin/brew /usr/local/bin/brew "$(which brew 2>/dev/null)"; do
+            if [ -x "$bp" ] 2>/dev/null; then BREW_CMD="$bp"; break; fi
+        done
+        if [ -n "$BREW_CMD" ]; then
+            log "Found brew at $BREW_CMD"
+            "$BREW_CMD" install node@22 2>/dev/null || "$BREW_CMD" install node 2>/dev/null || true
+            # Add brew node to PATH
+            for np in /opt/homebrew/opt/node@22/bin /opt/homebrew/bin /usr/local/bin; do
+                if [ -x "$np/node" ]; then export PATH="$np:$PATH"; break; fi
+            done
         else
-            log "Install Node.js 22+ from https://nodejs.org/"
+            # Direct download from nodejs.org
+            log "Downloading Node.js directly..."
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "arm64" ]; then
+                NODE_PKG="https://nodejs.org/dist/v22.16.0/node-v22.16.0-darwin-arm64.tar.gz"
+            else
+                NODE_PKG="https://nodejs.org/dist/v22.16.0/node-v22.16.0-darwin-x64.tar.gz"
+            fi
+            curl -fsSL "$NODE_PKG" -o /tmp/node.tar.gz 2>&1 && \
+            tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 2>&1 && \
+            rm -f /tmp/node.tar.gz && \
+            log "Node.js installed from binary." || log "Node.js download failed."
         fi
     fi
 else
@@ -82,16 +106,26 @@ else
         fi
     fi
 fi
-log "Node.js: $(node --version 2>/dev/null || echo 'not found')"
+if command -v node &>/dev/null; then
+    log "Node.js: $(node --version)"
+else
+    log "ERROR: Node.js not found. Cannot continue."
+    log "Install manually: https://nodejs.org/en/download"
+    exit 1
+fi
+if ! command -v npm &>/dev/null; then
+    log "ERROR: npm not found. Cannot continue."
+    exit 1
+fi
 
 # ── Step 3a: Install OpenClaw ────────────────────────────────────────────────
 log "Step 3a: Installing OpenClaw..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS — install as current user
-    mkdir -p "$NPM_GLOBAL"
+    # macOS — install as current user in writable dir
+    mkdir -p "$NPM_GLOBAL" 2>/dev/null || { NPM_GLOBAL="$STATE_DIR/.npm-global"; mkdir -p "$NPM_GLOBAL"; OPENCLAW_BIN="$NPM_GLOBAL/bin/openclaw"; }
     npm config set prefix "$NPM_GLOBAL" 2>/dev/null || true
     export PATH="$NPM_GLOBAL/bin:$PATH"
-    npm install -g openclaw@latest 2>&1
+    npm install -g openclaw@latest 2>&1 || { log "npm install failed, trying with --prefix"; npm install --prefix "$NPM_GLOBAL" openclaw@latest 2>&1 || true; }
 else
     # Linux — install as openclaw user
     su - "$OPENCLAW_USER" -c "npm config set prefix ~/.npm-global && npm install -g openclaw@latest" 2>&1
