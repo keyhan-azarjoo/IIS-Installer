@@ -917,8 +917,17 @@ def model_info():
 # ====================================
 
 if __name__ == "__main__":
-    # Pre-load model at startup so first request doesn't timeout
-    _ensure_detector()
+    # Pre-load model at startup (non-fatal — web UI works without model)
+    if os.path.exists(MODEL_PATH):
+        try:
+            detector = SAM3Detector(model_path=MODEL_PATH, device=DEVICE, default_conf=0.25)
+            print(f"Model loaded: {MODEL_PATH}")
+        except Exception as e:
+            print(f"Warning: Model loading failed: {e}")
+            print("The web UI will still start — you can download the model from the dashboard.")
+    else:
+        print(f"Note: Model not found at {MODEL_PATH}")
+        print("The web UI will start without a model. Use the dashboard to download sam3.pt.")
 
     print("\n" + "="*50)
     print("SAM3 Professional Dashboard")
