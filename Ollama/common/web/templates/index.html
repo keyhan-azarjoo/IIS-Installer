@@ -128,6 +128,18 @@ pre:hover .copy-btn{opacity:1}
 .send-btn:disabled{background:var(--border);color:var(--text3);cursor:not-allowed}
 .send-btn.stop{background:var(--danger)}
 .send-btn.stop:hover{background:#dc2626}
+.attach-btn{background:var(--border);color:var(--text2);border:1px solid var(--border2);border-radius:12px;padding:10px 14px;font-size:18px;cursor:pointer;transition:all .15s;line-height:1;flex-shrink:0}
+.attach-btn:hover{background:var(--border2);color:var(--text)}
+.file-preview{display:flex;gap:8px;flex-wrap:wrap;padding:8px 0}
+.file-thumb{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--border)}
+.file-thumb img{width:80px;height:80px;object-fit:cover;display:block}
+.file-thumb .file-icon{width:80px;height:80px;display:flex;align-items:center;justify-content:center;background:var(--bg2);font-size:11px;color:var(--text2);text-align:center;padding:8px;word-break:break-all}
+.file-thumb .file-remove{position:absolute;top:2px;right:2px;background:var(--danger);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.msg-images{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.msg-images img{max-width:200px;max-height:200px;border-radius:8px;border:1px solid var(--border);cursor:pointer}
+.msg-images img:hover{opacity:.85}
+.img-modal{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:300;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.img-modal img{max-width:90%;max-height:90%;border-radius:8px}
 .input-hint{font-size:11px;color:var(--text4);margin-top:6px;text-align:center}
 
 /* Models panel */
@@ -233,7 +245,9 @@ pre:hover .copy-btn{opacity:1}
   <!-- Input -->
   <div class="input-area">
     <div class="input-container">
+      <div class="file-preview" id="filePreview"></div>
       <div class="input-row">
+        <button class="attach-btn" onclick="document.getElementById('fileInput').click()" title="Attach image or file">&#128206;</button>
         <textarea id="msgInput" placeholder="Message Ollama... (Enter to send, Shift+Enter for new line)" rows="1"></textarea>
         <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send</button>
       </div>
@@ -268,6 +282,8 @@ pre:hover .copy-btn{opacity:1}
 </div>
 
 <input type="file" id="importFile" accept=".json" style="display:none" onchange="handleImport(event)">
+<input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.html,.css,.xml,.yaml,.yml,.log,.sh,.bat" multiple style="display:none" onchange="handleFiles(event)">
+<div class="img-modal" id="imgModal" style="display:none" onclick="this.style.display='none'"><img id="imgModalImg"></div>
 
 <script>
 var BASE = '';
@@ -435,7 +451,15 @@ function renderMessages() {
     var m = msgs[i]; if (m.role === 'system') continue;
     var t = m.time ? new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
     if (m.role === 'user') {
-      html += '<div class="msg user"><div class="bubble">' + esc(m.content) + '</div><div class="meta">' + t + ' <button onclick="copyMessage(' + i + ')" title="Copy">Copy</button></div></div>';
+      var userImgs = '';
+      if (m.images && m.images.length > 0) {
+        userImgs = '<div class="msg-images">';
+        for (var ii = 0; ii < m.images.length; ii++) {
+          userImgs += '<img src="' + m.images[ii] + '" onclick="showImage(this.src)">';
+        }
+        userImgs += '</div>';
+      }
+      html += '<div class="msg user"><div class="bubble">' + userImgs + esc(m.content) + '</div><div class="meta">' + t + ' <button onclick="copyMessage(' + i + ')" title="Copy">Copy</button></div></div>';
     } else {
       var info = (m.model ? esc(m.model) + ' &middot; ' : '') + t;
       html += '<div class="msg assistant"><div class="bubble">' + md(m.content) + '</div><div class="meta">' + info + ' <button onclick="copyMessage(' + i + ')" title="Copy">Copy</button></div></div>';
@@ -541,7 +565,24 @@ function sendMessage() {
   var rp = parseFloat(document.getElementById('repeatPenalty').value);
   var seedVal = parseInt(document.getElementById('seed').value);
 
-  conv.messages.push({ role: 'user', content: text, time: Date.now() });
+  // Collect attached files
+  var msgImages = []; var msgFiles = []; var imageBase64s = [];
+  for (var fi = 0; fi < pendingFiles.length; fi++) {
+    if (pendingFiles[fi].isImage) {
+      msgImages.push(pendingFiles[fi].dataUrl);
+      imageBase64s.push(pendingFiles[fi].base64);
+    } else {
+      msgFiles.push({ name: pendingFiles[fi].name, content: atob(pendingFiles[fi].base64).substring(0, 5000) });
+    }
+  }
+  // Add file contents to message text
+  var fullText = text;
+  for (var fi2 = 0; fi2 < msgFiles.length; fi2++) {
+    fullText += '\n\n[File: ' + msgFiles[fi2].name + ']\n' + msgFiles[fi2].content;
+  }
+
+  conv.messages.push({ role: 'user', content: fullText, time: Date.now(), images: msgImages });
+  pendingFiles = []; renderFilePreview();
   if (conv.messages.length <= 2) updateTitle(currentChatId);
   renderMessages(); input.value = ''; input.style.height = 'auto'; saveConvs(); saveSettings();
 
@@ -556,7 +597,20 @@ function sendMessage() {
 
   var apiMsgs = [];
   if (sysPr) apiMsgs.push({ role: 'system', content: sysPr });
-  for (var i = 0; i < conv.messages.length; i++) apiMsgs.push({ role: conv.messages[i].role, content: conv.messages[i].content });
+  for (var i = 0; i < conv.messages.length; i++) {
+    var apiMsg = { role: conv.messages[i].role, content: conv.messages[i].content };
+    // Include images for Ollama multimodal models (llava, bakllava, etc.)
+    if (conv.messages[i].images && conv.messages[i].images.length > 0) {
+      apiMsg.images = [];
+      for (var ii = 0; ii < conv.messages[i].images.length; ii++) {
+        // Ollama expects base64 without data URL prefix
+        var imgData = conv.messages[i].images[ii];
+        if (imgData.indexOf(',') > -1) imgData = imgData.split(',')[1];
+        apiMsg.images.push(imgData);
+      }
+    }
+    apiMsgs.push(apiMsg);
+  }
 
   var options = {};
   if (temp !== 0.7) options.temperature = temp;
@@ -675,6 +729,51 @@ function clearAllChats() {
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed'); document.getElementById('sidebar').classList.toggle('mobile-open'); }
 function toggleSettings() { document.getElementById('settingsPanel').classList.toggle('open'); document.getElementById('settingsBtn').classList.toggle('active'); }
 function toggleModels() { var o = document.getElementById('modelsOverlay'); o.classList.toggle('open'); if (o.classList.contains('open')) loadRunningModels(); }
+// ── File Upload ──────────────────────────────────────────
+var pendingFiles = []; // [{name, type, base64, isImage}]
+
+function handleFiles(e) {
+  var files = e.target.files;
+  for (var i = 0; i < files.length; i++) {
+    (function(file) {
+      var reader = new FileReader();
+      var isImage = file.type.startsWith('image/');
+      reader.onload = function(ev) {
+        var base64 = ev.target.result.split(',')[1];
+        pendingFiles.push({ name: file.name, type: file.type, base64: base64, dataUrl: ev.target.result, isImage: isImage, size: file.size });
+        renderFilePreview();
+      };
+      reader.readAsDataURL(file);
+    })(files[i]);
+  }
+  e.target.value = '';
+}
+
+function removeFile(idx) {
+  pendingFiles.splice(idx, 1);
+  renderFilePreview();
+}
+
+function renderFilePreview() {
+  var el = document.getElementById('filePreview');
+  if (!pendingFiles.length) { el.innerHTML = ''; return; }
+  var html = '';
+  for (var i = 0; i < pendingFiles.length; i++) {
+    var f = pendingFiles[i];
+    if (f.isImage) {
+      html += '<div class="file-thumb"><img src="' + f.dataUrl + '"><button class="file-remove" onclick="removeFile(' + i + ')">&times;</button></div>';
+    } else {
+      html += '<div class="file-thumb"><div class="file-icon">' + esc(f.name) + '</div><button class="file-remove" onclick="removeFile(' + i + ')">&times;</button></div>';
+    }
+  }
+  el.innerHTML = html;
+}
+
+function showImage(src) {
+  document.getElementById('imgModalImg').src = src;
+  document.getElementById('imgModal').style.display = 'flex';
+}
+
 function doLogout() { fetch(BASE + '/api/logout', {method:'POST'}).then(function() { window.location.href = '/login'; }); }
 
 // ── Sliders ──────────────────────────────────────────────
@@ -682,6 +781,21 @@ document.getElementById('temperature').addEventListener('input', function() { do
 document.getElementById('topP').addEventListener('input', function() { document.getElementById('topPVal').textContent = this.value; });
 document.getElementById('repeatPenalty').addEventListener('input', function() { document.getElementById('rpVal').textContent = this.value; });
 document.getElementById('msgInput').addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 200) + 'px'; });
+// Drag & drop files
+var inputArea = document.querySelector('.input-area');
+inputArea.addEventListener('dragover', function(e) { e.preventDefault(); e.stopPropagation(); inputArea.style.borderColor = 'var(--accent)'; });
+inputArea.addEventListener('dragleave', function(e) { e.preventDefault(); inputArea.style.borderColor = ''; });
+inputArea.addEventListener('drop', function(e) { e.preventDefault(); inputArea.style.borderColor = ''; if (e.dataTransfer.files.length) { handleFiles({target: {files: e.dataTransfer.files, value: ''}}); } });
+// Paste images
+document.getElementById('msgInput').addEventListener('paste', function(e) {
+  var items = (e.clipboardData || e.originalEvent.clipboardData).items;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') !== -1) {
+      var file = items[i].getAsFile();
+      handleFiles({target: {files: [file], value: ''}});
+    }
+  }
+});
 document.getElementById('msgInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!streaming) sendMessage(); } });
 document.getElementById('modelSelect').addEventListener('change', function() { savedModel = this.value; saveSettings(); });
 

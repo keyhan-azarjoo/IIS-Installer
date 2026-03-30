@@ -44,19 +44,31 @@
     var _cl = React.useState(false);
     var chatLoading = _cl[0], setChatLoading = _cl[1];
 
+    var _lmsUrl = React.useState(bestUrl || "http://127.0.0.1:1234");
+    var lmsUrl = _lmsUrl[0], setLmsUrl = _lmsUrl[1];
+    var _lmsConnected = React.useState(false);
+    var lmsConnected = _lmsConnected[0], setLmsConnected = _lmsConnected[1];
+
     var refreshModels = function() {
-      if (!running && !installed) return;
-      var url = bestUrl || "http://127.0.0.1:1234";
-      fetch("/api/ollama/tags", { headers: { "X-Requested-With": "fetch" } }).catch(function(){});
-      // Try LM Studio v1/models
-      fetch(url + "/v1/models").then(function(r) { return r.json(); }).then(function(j) {
-        var m = j.data || j.models || [];
-        setModels(m);
-        if (!chatModel && m.length > 0) setChatModel(m[0].id || m[0].name || "");
-      }).catch(function(){});
+      var tryUrls = [bestUrl, "http://127.0.0.1:1234", "http://localhost:1234"].filter(function(u) { return u; });
+      var tryNext = function(idx) {
+        if (idx >= tryUrls.length) return;
+        fetch(tryUrls[idx] + "/v1/models").then(function(r) { return r.json(); }).then(function(j) {
+          var m = j.data || j.models || [];
+          if (m.length > 0) {
+            setModels(m);
+            setLmsUrl(tryUrls[idx]);
+            setLmsConnected(true);
+            if (!chatModel) setChatModel(m[0].id || m[0].name || "");
+          } else {
+            tryNext(idx + 1);
+          }
+        }).catch(function() { tryNext(idx + 1); });
+      };
+      tryNext(0);
     };
 
-    React.useEffect(function() { if (running || installed) refreshModels(); }, [running, installed]);
+    React.useEffect(function() { refreshModels(); var iv = setInterval(refreshModels, 15000); return function() { clearInterval(iv); }; }, []);
 
     var handleChat = function() {
       if (!chatInput.trim() || !chatModel) return;
@@ -65,7 +77,7 @@
       setChatMessages(newMsgs);
       setChatInput("");
       setChatLoading(true);
-      var url = bestUrl || "http://127.0.0.1:1234";
+      var url = lmsUrl || bestUrl || "http://127.0.0.1:1234";
       fetch(url + "/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -174,12 +186,13 @@
         </Grid>
 
         {/* Chat */}
-        {installed && models.length > 0 && (
+        {models.length > 0 && (
           <Grid item xs={12}>
             <Card sx={{ borderRadius: 3, border: "1px solid #7c3aed33" }}>
               <CardContent>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
                   <Typography variant="h6" fontWeight={800} sx={{ color: "#7c3aed" }}>Chat</Typography>
+                  {lmsConnected && <Chip size="small" label="Connected" color="success" sx={{ ml: 1 }} />}
                   <FormControl size="small" sx={{ minWidth: 200 }}>
                     <Select value={chatModel} onChange={function(e) { setChatModel(e.target.value); setChatMessages([]); }} size="small">
                       {models.map(function(m) { var n = m.id || m.name; return <MenuItem key={n} value={n}>{n}</MenuItem>; })}
