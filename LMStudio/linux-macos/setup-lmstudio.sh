@@ -45,51 +45,102 @@ if [ "$LMSTUDIO_APP_INSTALLED" = "true" ]; then
     log "LM Studio already installed."
 else
     log "Downloading and installing LM Studio..."
+    INSTALLED_OK=false
+
     if [ "$OS_TYPE" = "Darwin" ]; then
-        # macOS: download .dmg and install
-        if [ "$ARCH" = "arm64" ]; then
-            DMG_URL="https://installers.lmstudio.ai/darwin/arm64/LM-Studio-latest.dmg"
-        else
-            DMG_URL="https://installers.lmstudio.ai/darwin/x64/LM-Studio-latest.dmg"
-        fi
-        DMG_PATH="/tmp/LMStudio.dmg"
-        log "Downloading from ${DMG_URL}..."
-        curl -fSL "$DMG_URL" -o "$DMG_PATH" || true
-        if [ -f "$DMG_PATH" ]; then
-            log "Mounting DMG..."
-            MOUNT_POINT=$(hdiutil attach "$DMG_PATH" -nobrowse -noverify 2>/dev/null | grep "/Volumes" | awk '{print $NF}')
-            if [ -n "$MOUNT_POINT" ]; then
-                log "Copying LM Studio to /Applications..."
-                cp -R "${MOUNT_POINT}/LM Studio.app" /Applications/ 2>/dev/null || \
-                    cp -R "${MOUNT_POINT}/"*".app" /Applications/ 2>/dev/null || true
-                hdiutil detach "$MOUNT_POINT" 2>/dev/null || true
-                log "LM Studio installed to /Applications."
-                # Launch it once to initialize
-                open "/Applications/LM Studio.app" 2>/dev/null || true
-                sleep 5
-            else
-                log "WARNING: Could not mount DMG."
+        # macOS: Method 1 — brew (most reliable)
+        if command -v brew &>/dev/null; then
+            log "Installing via Homebrew..."
+            brew install --cask lm-studio 2>&1 || true
+            if [ -d "/Applications/LM Studio.app" ]; then
+                log "LM Studio installed via Homebrew."
+                INSTALLED_OK=true
             fi
-            rm -f "$DMG_PATH"
+        fi
+
+        # macOS: Method 2 — get URL from brew API and download directly
+        if [ "$INSTALLED_OK" = "false" ]; then
+            log "Trying direct download..."
+            # Get the real versioned URL from Homebrew API
+            DMG_URL=""
+            if command -v python3 &>/dev/null; then
+                DMG_URL=$(curl -s "https://formulae.brew.sh/api/cask/lm-studio.json" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('url',''))" 2>/dev/null)
+            fi
+            if [ -z "$DMG_URL" ]; then
+                # Fallback: construct URL from known pattern
+                if [ "$ARCH" = "arm64" ]; then
+                    DMG_URL="https://installers.lmstudio.ai/darwin/arm64/0.4.8-1/LM-Studio-0.4.8-1-arm64.dmg"
+                else
+                    DMG_URL="https://installers.lmstudio.ai/darwin/x64/0.4.8-1/LM-Studio-0.4.8-1-x64.dmg"
+                fi
+            fi
+            DMG_PATH="/tmp/LMStudio.dmg"
+            log "Downloading from ${DMG_URL}..."
+            curl -fSL "$DMG_URL" -o "$DMG_PATH" 2>&1 || true
+            if [ -f "$DMG_PATH" ] && [ "$(stat -f%z "$DMG_PATH" 2>/dev/null || stat -c%s "$DMG_PATH" 2>/dev/null)" -gt 1000000 ]; then
+                log "Mounting DMG..."
+                MOUNT_OUTPUT=$(hdiutil attach "$DMG_PATH" -nobrowse -noverify 2>&1)
+                MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | grep "/Volumes" | sed 's/.*\(\/Volumes\/.*\)/\1/' | head -1)
+                if [ -n "$MOUNT_POINT" ]; then
+                    log "Copying LM Studio to /Applications..."
+                    # Find the .app in the mounted volume
+                    APP_PATH=$(find "$MOUNT_POINT" -maxdepth 1 -name "*.app" -type d | head -1)
+                    if [ -n "$APP_PATH" ]; then
+                        cp -R "$APP_PATH" /Applications/ 2>&1
+                        log "LM Studio installed to /Applications."
+                        INSTALLED_OK=true
+                    fi
+                    hdiutil detach "$MOUNT_POINT" 2>/dev/null || true
+                else
+                    log "WARNING: Could not mount DMG. Output: $MOUNT_OUTPUT"
+                fi
+                rm -f "$DMG_PATH"
+            else
+                rm -f "$DMG_PATH" 2>/dev/null
+                log "WARNING: Download failed or file too small."
+            fi
+        fi
+
+        if [ "$INSTALLED_OK" = "false" ]; then
+            log ""
+            log "=============================================="
+            log " Could not auto-install LM Studio."
+            log " Please install manually:"
+            log "   1. Go to https://lmstudio.ai/download"
+            log "   2. Download the macOS version"
+            log "   3. Open the .dmg and drag to Applications"
+            log "   4. Open LM Studio and enable the local server"
+            log "   5. Re-run this installer"
+            log "=============================================="
         else
-            log "WARNING: Download failed. Install manually from https://lmstudio.ai/download"
+            # Open the app
+            log "Opening LM Studio..."
+            open "/Applications/LM Studio.app" 2>/dev/null || true
+            sleep 5
         fi
     else
-        # Linux: download AppImage
-        if [ "$ARCH" = "x86_64" ]; then
-            APPIMAGE_URL="https://installers.lmstudio.ai/linux/x64/LM-Studio-latest.AppImage"
-        else
-            APPIMAGE_URL="https://installers.lmstudio.ai/linux/arm64/LM-Studio-latest.AppImage"
-        fi
+        # Linux: download AppImage via brew API
         APPIMAGE_PATH="/opt/lmstudio/lm-studio"
         mkdir -p /opt/lmstudio
-        log "Downloading from ${APPIMAGE_URL}..."
-        curl -fSL "$APPIMAGE_URL" -o "$APPIMAGE_PATH" || true
-        if [ -f "$APPIMAGE_PATH" ]; then
+        APPIMAGE_URL=""
+        if command -v python3 &>/dev/null; then
+            APPIMAGE_URL=$(curl -s "https://formulae.brew.sh/api/cask/lm-studio.json" 2>/dev/null | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+url=d.get('url','')
+# Convert mac URL to linux URL pattern
+url=url.replace('/darwin/','/linux/').replace('-arm64.dmg','.AppImage').replace('-x64.dmg','.AppImage')
+print(url)" 2>/dev/null)
+        fi
+        if [ -n "$APPIMAGE_URL" ]; then
+            log "Downloading from ${APPIMAGE_URL}..."
+            curl -fSL "$APPIMAGE_URL" -o "$APPIMAGE_PATH" 2>&1 || true
+        fi
+        if [ -f "$APPIMAGE_PATH" ] && [ "$(stat -c%s "$APPIMAGE_PATH" 2>/dev/null || echo 0)" -gt 1000000 ]; then
             chmod +x "$APPIMAGE_PATH"
             log "LM Studio installed to ${APPIMAGE_PATH}."
         else
-            log "WARNING: Download failed. Install manually from https://lmstudio.ai/download"
+            log "Download failed. Install manually from https://lmstudio.ai/download"
         fi
     fi
 fi
