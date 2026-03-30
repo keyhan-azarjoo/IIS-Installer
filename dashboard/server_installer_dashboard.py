@@ -7964,64 +7964,61 @@ def run_openclaw_docker(form=None, live_cb=None):
     build_dir = str(OPENCLAW_STATE_DIR / "docker-build")
     Path(build_dir).mkdir(parents=True, exist_ok=True)
 
-    # Create entrypoint that skips interactive onboard and starts gateway
-    # Use socat to forward 0.0.0.0:port to 127.0.0.1:port
-    # This lets OpenClaw bind to loopback (no controlUi error) while Docker port mapping works
     gw_internal_port = str(int(http_port) + 1)
-    entrypoint_sh = f"""#!/bin/bash
-echo "=== OpenClaw Docker Container ==="
-echo "Port: {http_port}"
 
-# Configure gateway to allow external origins (required for non-loopback access)
-mkdir -p /root/.openclaw
-openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
-openclaw config set gateway.controlUi.allowedOrigins '["*"]' 2>/dev/null || true
-openclaw config set gateway.trustedProxies '["127.0.0.1","::1"]' 2>/dev/null || true
-
-# Generate self-signed SSL cert
-mkdir -p /root/.openclaw/certs
-openssl req -x509 -nodes -newkey rsa:2048 \\
-    -keyout /root/.openclaw/certs/key.pem \\
-    -out /root/.openclaw/certs/cert.pem \\
-    -days 3650 -subj "/CN=openclaw/O=ServerInstaller/C=US" 2>/dev/null
-echo "SSL cert generated."
-
-# Create nginx config for HTTPS reverse proxy with WebSocket support
-cat > /tmp/nginx.conf << 'NGXEOF'
+    # Write nginx config as a separate file (no shell escaping issues)
+    nginx_conf = f"""daemon off;
 worker_processes 1;
+error_log /dev/stderr info;
+pid /tmp/nginx.pid;
 events {{ worker_connections 1024; }}
 http {{
+    access_log /dev/stdout;
     server {{
         listen {http_port} ssl;
         ssl_certificate /root/.openclaw/certs/cert.pem;
         ssl_certificate_key /root/.openclaw/certs/key.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
         location / {{
             proxy_pass http://127.0.0.1:{gw_internal_port};
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
-            proxy_set_header Host "127.0.0.1:{gw_internal_port}";
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header Host 127.0.0.1:{gw_internal_port};
             proxy_read_timeout 86400;
+            proxy_send_timeout 86400;
         }}
     }}
 }}
-NGXEOF
-
-# Start gateway on loopback
-openclaw gateway --allow-unconfigured --bind loopback --port {gw_internal_port} --verbose &
-GW_PID=$!
-sleep 3
-
-# Start nginx HTTPS reverse proxy
-echo "Starting HTTPS reverse proxy on 0.0.0.0:{http_port} -> 127.0.0.1:{gw_internal_port}"
-nginx -c /tmp/nginx.conf &
-
-wait $GW_PID
 """
-    Path(build_dir, "entrypoint.sh").write_text(entrypoint_sh, encoding="utf-8")
+    Path(build_dir, "nginx.conf").write_text(nginx_conf, encoding="utf-8")
+
+    # Simple entrypoint — no escaping issues
+    entrypoint_lines = [
+        "#!/bin/bash",
+        f'echo "=== OpenClaw Docker Container (port {http_port}) ==="',
+        "",
+        "# Configure gateway",
+        "openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true",
+        'openclaw config set gateway.controlUi.allowedOrigins \'["*"]\' 2>/dev/null || true',
+        'openclaw config set gateway.trustedProxies \'["127.0.0.1","::1"]\' 2>/dev/null || true',
+        "",
+        "# Generate SSL cert",
+        "mkdir -p /root/.openclaw/certs",
+        'openssl req -x509 -nodes -newkey rsa:2048 -keyout /root/.openclaw/certs/key.pem -out /root/.openclaw/certs/cert.pem -days 3650 -subj "/CN=openclaw/O=ServerInstaller" 2>/dev/null',
+        "",
+        f"# Start gateway on loopback port {gw_internal_port}",
+        f"openclaw gateway --allow-unconfigured --bind loopback --port {gw_internal_port} --verbose &",
+        "GW_PID=$!",
+        "sleep 3",
+        "",
+        f'echo "Starting nginx HTTPS proxy on port {http_port}..."',
+        "nginx -c /app/nginx.conf &",
+        "sleep 1",
+        "",
+        "wait $GW_PID",
+    ]
+    Path(build_dir, "entrypoint.sh").write_text("\n".join(entrypoint_lines) + "\n", encoding="utf-8")
 
     dockerfile = f"""FROM node:22-slim
 
@@ -8039,6 +8036,7 @@ ENV OPENCLAW_PORT={http_port}
 EXPOSE {http_port}
 
 COPY entrypoint.sh /entrypoint.sh
+COPY nginx.conf /app/nginx.conf
 RUN chmod +x /entrypoint.sh
 
 CMD ["/entrypoint.sh"]
