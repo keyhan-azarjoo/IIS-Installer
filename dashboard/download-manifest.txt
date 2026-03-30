@@ -67,6 +67,7 @@ OpenClaw/linux-macos/setup-openclaw.sh
 OpenClaw/common/openclaw_web.py
 OpenClaw/common/requirements.txt
 OpenClaw/common/web/templates/index.html
+OpenClaw/common/web/templates/login.html
 # LM Studio
 LMStudio/windows/setup-lmstudio.ps1
 LMStudio/linux-macos/setup-lmstudio.sh

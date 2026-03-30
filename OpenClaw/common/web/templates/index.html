@@ -125,6 +125,7 @@ pre:hover .copy-btn{opacity:1}
     <span class="backend-badge" id="backendBadge" style="display:none"></span>
     <div class="spacer"></div>
     <button class="btn-sm" id="settingsBtn" onclick="toggleSettings()">Settings</button>
+    <button class="btn-sm" id="logoutBtn" onclick="doLogout()" style="display:none">Logout</button>
   </div>
 
   <div class="settings-panel" id="settingsPanel">
@@ -549,9 +550,13 @@ if (keys.length > 0) {
   keys.sort(function(a, b) { return (conversations[b].created || 0) - (conversations[a].created || 0); });
   currentChatId = keys[0];
 }
+function doLogout() { fetch(BASE + '/api/logout', {method:'POST'}).then(function() { window.location.href = '/login'; }); }
+function checkAuth() { fetch(BASE + '/api/auth-status').then(function(r) { return r.json(); }).then(function(j) { if (j.auth_required) document.getElementById('logoutBtn').style.display = ''; }).catch(function() {}); }
+
 renderChatList();
 renderMessages();
 checkHealth();
+checkAuth();
 setInterval(checkHealth, 15000);
 </script>
 </body>

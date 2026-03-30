@@ -144,12 +144,14 @@ OPENCLAW_WINDOWS_FILES = [
     "OpenClaw/common/openclaw_web.py",
     "OpenClaw/common/requirements.txt",
     "OpenClaw/common/web/templates/index.html",
+    "OpenClaw/common/web/templates/login.html",
 ]
 OPENCLAW_UNIX_FILES = [
     "OpenClaw/linux-macos/setup-openclaw.sh",
     "OpenClaw/common/openclaw_web.py",
     "OpenClaw/common/requirements.txt",
     "OpenClaw/common/web/templates/index.html",
+    "OpenClaw/common/web/templates/login.html",
 ]
 
 LMSTUDIO_STATE_DIR = SERVER_INSTALLER_DATA / "lmstudio"
