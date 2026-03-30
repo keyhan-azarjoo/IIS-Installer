@@ -97,6 +97,7 @@ def index():
 
 @app.route("/api/health")
 def health():
+    global LMSTUDIO_BASE
     # Try configured URL first, then fallbacks
     urls_to_try = [LMSTUDIO_BASE]
     for fallback in ["http://host.docker.internal:1234", "http://127.0.0.1:1234", "http://localhost:1234"]:
@@ -107,8 +108,6 @@ def health():
             r = requests.get(f"{url}/v1/models", timeout=3)
             if r.status_code == 200:
                 models = r.json().get("data", [])
-                # Update the base URL if a fallback worked
-                global LMSTUDIO_BASE
                 if url != LMSTUDIO_BASE:
                     LMSTUDIO_BASE = url
                 return jsonify({"ok": True, "status": "healthy", "lmstudio": url, "model_count": len(models), "lm_server": True})
