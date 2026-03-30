@@ -172,7 +172,7 @@ Wants=network-online.target
 User=${OPENCLAW_USER}
 WorkingDirectory=${OPENCLAW_HOME}
 Environment=PATH=/usr/bin:/bin:${NPM_GLOBAL}/bin:/usr/local/bin
-ExecStart=${OPENCLAW_BIN} gateway ${BIND_ARG} --allow-unconfigured --port ${HTTP_PORT} --verbose
+ExecStart=${OPENCLAW_BIN} gateway --bind loopback --allow-unconfigured --port ${HTTP_PORT} --verbose
 Restart=always
 RestartSec=5
 StandardOutput=append:${LOG_FILE}
@@ -186,13 +186,13 @@ SVCEOF
     log "Systemd service created."
 fi
 
-# ── Step 3c: Configure OpenClaw (onboard) ────────────────────────────────────
-log "Step 3c: Running OpenClaw onboarding..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    "$OPENCLAW_BIN" onboard 2>&1 || log "Onboarding may need manual completion."
-else
-    su - "$OPENCLAW_USER" -c "'$OPENCLAW_BIN' onboard" 2>&1 || log "Onboarding may need manual completion."
-fi
+# ── Step 3c: Skip interactive onboard — configure via CLI instead ─────────────
+log "Step 3c: Configuring OpenClaw (non-interactive)..."
+# Onboard is interactive (requires TTY). Skip it and configure directly.
+# The gateway will start with --allow-unconfigured and user can configure via dashboard.
+"$OPENCLAW_BIN" config set gateway.mode local 2>/dev/null || true
+"$OPENCLAW_BIN" config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
+log "Config set. User can configure channels via the dashboard after install."
 
 # ── Step 3d: Enable & start service ──────────────────────────────────────────
 log "Step 3d: Enabling & starting gateway service..."
@@ -219,8 +219,8 @@ else
         fi
         if [ -x "$OPENCLAW_BIN" ]; then
             export PATH="$(dirname "$OPENCLAW_BIN"):$PATH"
-            log "Running: $OPENCLAW_BIN gateway $BIND_ARG --allow-unconfigured --port $HTTP_PORT --verbose"
-            "$OPENCLAW_BIN" gateway $BIND_ARG --allow-unconfigured --port "$HTTP_PORT" --verbose >> "$LOG_FILE" 2>&1 &
+            log "Running: $OPENCLAW_BIN gateway --bind loopback --allow-unconfigured --port $HTTP_PORT --verbose"
+            "$OPENCLAW_BIN" gateway --bind loopback --allow-unconfigured --port "$HTTP_PORT" --verbose >> "$LOG_FILE" 2>&1 &
             GW_PID=$!
             log "Gateway process started (PID $GW_PID)."
             sleep 5
@@ -261,19 +261,14 @@ if command -v ollama &>/dev/null; then
     fi
     mkdir -p /tmp/ollama-backups && chmod 1777 /tmp/ollama-backups 2>/dev/null || true
 
-    # Configure OpenClaw to use the Ollama model
+    # Configure OpenClaw to use Ollama as LLM backend
     OLLAMA_MODEL=$(ollama list 2>/dev/null | grep -v "^NAME" | head -1 | awk '{print $1}')
     if [ -n "$OLLAMA_MODEL" ]; then
-        log "Configuring OpenClaw with model: $OLLAMA_MODEL"
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            "$OPENCLAW_BIN" launch openclaw --model "$OLLAMA_MODEL" --config 2>&1 || \
-            "$OPENCLAW_BIN" models add ollama "$OLLAMA_MODEL" 2>&1 || \
-            log "Model config may need manual setup in dashboard."
-        else
-            su - "$OPENCLAW_USER" -c "ollama launch openclaw --model '$OLLAMA_MODEL' --config" 2>&1 || \
-            su - "$OPENCLAW_USER" -c "'$OPENCLAW_BIN' launch openclaw --model '$OLLAMA_MODEL' --config" 2>&1 || \
-            log "Model config may need manual setup in dashboard."
-        fi
+        log "Ollama model available: $OLLAMA_MODEL"
+        # Set model config via config CLI
+        "$OPENCLAW_BIN" config set models.default.provider ollama 2>/dev/null || true
+        "$OPENCLAW_BIN" config set models.default.model "$OLLAMA_MODEL" 2>/dev/null || true
+        log "Configure the model in the OpenClaw dashboard after install."
     fi
 else
     log "WARNING: Ollama not installed."
