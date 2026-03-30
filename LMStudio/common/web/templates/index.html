@@ -273,10 +273,16 @@ function useSug(el){var t=el.textContent.replace(/^(Explain|Write|Analyze|Help)/
 
 function checkHealth(){
   fetch(BASE+'/api/health').then(function(r){return r.json();}).then(function(j){
-    document.getElementById('statusDot').className='hdr-dot'+(j.ok?' ok':'');
-    document.getElementById('statusText').textContent=j.ok?'Connected':'Disconnected';
-    if(j.ok){loadModels();if(j.model_count!==undefined)document.getElementById('modelCount').textContent=j.model_count+' loaded';}
-  }).catch(function(){document.getElementById('statusDot').className='hdr-dot';document.getElementById('statusText').textContent='Offline';});
+    var serverOk = j.lm_server !== false && j.status !== 'web_ui_only';
+    document.getElementById('statusDot').className='hdr-dot'+(serverOk?' ok':'');
+    if(serverOk){
+      document.getElementById('statusText').textContent='Connected';
+      loadModels();
+      if(j.model_count!==undefined)document.getElementById('modelCount').textContent=j.model_count+' loaded';
+    } else {
+      document.getElementById('statusText').textContent='LM Studio server not running';
+    }
+  }).catch(function(){document.getElementById('statusDot').className='hdr-dot';document.getElementById('statusText').textContent='Web UI offline';});
 }
 
 function loadModels(){

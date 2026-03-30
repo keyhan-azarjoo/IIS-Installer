@@ -116,7 +116,8 @@ def health():
             "model_count": len(models),
         })
     except Exception:
-        return jsonify({"ok": False, "status": "unhealthy", "ollama": OLLAMA_BASE}), 503
+        return jsonify({"ok": True, "status": "web_ui_only", "ollama": OLLAMA_BASE, "ollama_server": False,
+                        "message": "Web UI is running. Ollama server is not responding at " + OLLAMA_BASE})
 
 
 # ── Model Management ────────────────────────────────────────────────────────

@@ -100,9 +100,11 @@ def health():
     try:
         r = requests.get(f"{LMSTUDIO_BASE}/v1/models", timeout=5)
         models = r.json().get("data", [])
-        return jsonify({"ok": True, "status": "healthy", "lmstudio": LMSTUDIO_BASE, "model_count": len(models)})
+        return jsonify({"ok": True, "status": "healthy", "lmstudio": LMSTUDIO_BASE, "model_count": len(models), "lm_server": True})
     except Exception:
-        return jsonify({"ok": False, "status": "unhealthy", "lmstudio": LMSTUDIO_BASE}), 503
+        # Return 200 (web UI is healthy) but indicate LM Studio server is not connected
+        return jsonify({"ok": True, "status": "web_ui_only", "lmstudio": LMSTUDIO_BASE, "lm_server": False,
+                        "message": "Web UI is running. Start the local server in LM Studio desktop app (Developer > Local Server > Start)."})
 
 
 # ── Models ──────────────────────────────────────────────────────────────────
