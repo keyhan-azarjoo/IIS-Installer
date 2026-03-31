@@ -285,6 +285,27 @@ def proxy_v1_models():
 def proxy_v1_completions():
     return jsonify(_ollama("POST", "/v1/completions", request.get_json(silent=True)))
 
+# Native Ollama API pass-through (so dashboard API gateway can use standard paths)
+@app.route("/api/pull", methods=["POST"])
+@_require_auth
+def proxy_api_pull():
+    return jsonify(_ollama("POST", "/api/pull", request.get_json(silent=True)))
+
+@app.route("/api/delete", methods=["DELETE"])
+@_require_auth
+def proxy_api_delete():
+    return jsonify(_ollama("DELETE", "/api/delete", request.get_json(silent=True)))
+
+@app.route("/api/show", methods=["POST"])
+@_require_auth
+def proxy_api_show():
+    return jsonify(_ollama("POST", "/api/show", request.get_json(silent=True)))
+
+@app.route("/api/copy", methods=["POST"])
+@_require_auth
+def proxy_api_copy():
+    return jsonify(_ollama("POST", "/api/copy", request.get_json(silent=True)))
+
 
 if __name__ == "__main__":
     import ssl
