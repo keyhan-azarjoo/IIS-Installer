@@ -156,37 +156,32 @@
                     var ollamaUrl = _ou[0], setOllamaUrl = _ou[1];
 
                     React.useEffect(function() {
-                      var urls = [];
-                      // Use Ollama service info from dashboard if available
+                      // Use Ollama service info directly from dashboard props (no CORS issues)
                       var ollamaHttpUrl = String(ollamaInfo.http_url || "").trim();
-                      var ollamaHost = String(ollamaInfo.host || "").trim();
                       var ollamaPort = String(ollamaInfo.http_port || "").trim();
-                      if (ollamaHttpUrl) urls.push(ollamaHttpUrl);
-                      if (ollamaHost && ollamaPort) {
-                        urls.push("http://" + ollamaHost + ":" + ollamaPort);
-                        urls.push("http://" + ollamaHost + ":" + ollamaPort + "/api/tags");
-                      }
-                      if (ocInfo.ollama_url) urls.push(ocInfo.ollama_url);
-                      urls.push("http://127.0.0.1:11434", "http://localhost:11434");
-                      if (displayHost) {
-                        urls.push("http://" + displayHost + ":11434");
-                        if (ollamaPort && ollamaPort !== "11434") urls.push("http://" + displayHost + ":" + ollamaPort);
-                      }
-                      var tryNext = function(i) {
-                        if (i >= urls.length) { setOllamaStatus("offline"); return; }
-                        var fetchUrl = urls[i].indexOf("/api/") !== -1 ? urls[i] : urls[i] + "/api/tags";
-                        fetch(fetchUrl, { signal: AbortSignal.timeout(3000) })
+                      var ollamaHost = String(ollamaInfo.host || "").trim();
+                      var ollamaInstalled = !!ollamaInfo.installed;
+                      var ollamaRunning = !!ollamaInfo.running;
+
+                      if (ollamaInstalled && ollamaRunning) {
+                        var detectedUrl = ollamaHttpUrl || ("http://" + (ollamaHost || "127.0.0.1") + ":" + (ollamaPort || "11434"));
+                        setOllamaUrl(detectedUrl);
+                        setOllamaStatus("ready");
+                        // Try to get models via dashboard proxy API
+                        fetch("/api/ollama/tags", { headers: { "X-Requested-With": "fetch" } })
                           .then(function(r) { return r.json(); })
                           .then(function(j) {
-                            // Handle both direct Ollama API and web UI proxy responses
-                            var models = j.models || (j.ok && j.models) || [];
+                            var models = (j.models || []);
                             setOllamaModels(models);
-                            setOllamaUrl(urls[i].replace("/api/tags", ""));
-                            setOllamaStatus(models.length > 0 ? "ready" : "no-models");
+                            if (models.length === 0) setOllamaStatus("no-models");
                           })
-                          .catch(function() { tryNext(i + 1); });
-                      };
-                      tryNext(0);
+                          .catch(function() {});
+                      } else if (ollamaInstalled) {
+                        setOllamaUrl(ollamaHttpUrl || "");
+                        setOllamaStatus("no-models");
+                      } else {
+                        setOllamaStatus("offline");
+                      }
                     }, []);
 
                     return React.createElement("div", null,
