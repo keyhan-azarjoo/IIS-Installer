@@ -317,6 +317,8 @@ function App() {
     if (targetPage === "website") return loadWebsiteServices.current();
     if (String(targetPage || "").startsWith("ai-sam3")) return loadSam3Services.current();
     if (targetPage === "ai-ollama") return loadOllamaServices.current();
+    if (targetPage === "ai-lmstudio") return loadLmstudioServices.current();
+    if (targetPage === "ai-openclaw") return loadOpenclawServices.current();
     if (targetPage === "ai-tgwui") return loadTgwuiServices.current();
     if (targetPage === "ai-comfyui") return loadComfyuiServices.current();
     if (targetPage === "ai-whisper") return loadWhisperServices.current();
@@ -337,6 +339,8 @@ function App() {
     if (targetPage === "website") return loadWebsiteInfo.current();
     if (String(targetPage || "").startsWith("ai-sam3")) return loadSam3Info.current();
     if (targetPage === "ai-ollama") return loadOllamaInfo.current();
+    if (targetPage === "ai-lmstudio") return loadLmstudioInfo.current();
+    if (targetPage === "ai-openclaw") return loadOpenclawInfo.current();
     if (targetPage === "ai-tgwui") return loadTgwuiInfo.current();
     if (targetPage === "ai-comfyui") return loadComfyuiInfo.current();
     if (targetPage === "ai-whisper") return loadWhisperInfo.current();
@@ -350,14 +354,18 @@ function App() {
     return Promise.all([refreshPageStatus(targetPage), refreshPageServices(targetPage)]);
   }, [refreshPageServices, refreshPageStatus]);
 
+  const _needsAutoRefresh = (p) => {
+    return p === "api" || p === "services" || p === "dotnet" || p === "s3" || p === "mongo" || String(p).startsWith("mongo-") || p === "docker" || p === "proxy" || p === "python" || p === "website" || String(p).startsWith("dotnet-") || String(p).startsWith("python-") || String(p).startsWith("ai-");
+  };
+
   React.useEffect(() => {
-    if (page === "api" || page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-") || String(page).startsWith("ai-sam3")) {
+    if (_needsAutoRefresh(page)) {
       refreshPageContext(page);
     }
   }, [page, refreshPageContext]);
 
   React.useEffect(() => {
-    if (!(page === "api" || page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-") || String(page).startsWith("ai-sam3"))) {
+    if (!_needsAutoRefresh(page)) {
       return undefined;
     }
     const t = setInterval(() => {

@@ -14412,6 +14412,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ollama/pull":
             body = _json_body()
             return ollama_pull_model(body.get("name", ""))
+        if path == "/api/ollama/pull/stream":
+            from api_gateway import ollama_pull_model_stream
+            body = _json_body()
+            name = body.get("name", "")
+            if not name:
+                return {"ok": False, "error": "Model name required"}
+            # Stream the response directly
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            try:
+                for line in ollama_pull_model_stream(name):
+                    self.wfile.write(("data: " + line + "\n").encode("utf-8"))
+                    self.wfile.flush()
+            except Exception as e:
+                try:
+                    self.wfile.write(("data: " + json.dumps({"error": str(e)}) + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+                except Exception:
+                    pass
+            return "__streamed__"
         if path == "/api/ollama/delete":
             body = _json_body()
             return ollama_delete_model(body.get("name", ""))
@@ -15435,6 +15458,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/s3/") or self.path.startswith("/api/mongo/") or self.path.startswith("/api/proxy/") or self.path.startswith("/api/sam3/") or self.path.startswith("/api/ollama/"):
             try:
                 result = self._handle_api_gateway_post()
+                if result == "__streamed__":
+                    return  # Already streamed directly
                 if result is not None:
                     status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
                     self.write_json(result, status)

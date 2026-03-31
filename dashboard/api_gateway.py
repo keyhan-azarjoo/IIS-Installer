@@ -790,10 +790,52 @@ def ollama_list_models():
 
 def ollama_pull_model(name, stream=False):
     """Pull/download a model."""
-    result = _ollama_api_request("/api/pull", method="POST", data={"name": name, "stream": False}, timeout=300)
+    result = _ollama_api_request("/api/pull", method="POST", data={"name": name, "stream": False}, timeout=600)
     if "error" in result:
         return {"ok": False, "error": result["error"]}
     return {"ok": True, "status": result.get("status", "success")}
+
+
+def ollama_pull_model_stream(name):
+    """Pull/download a model with streaming progress. Returns a generator of SSE lines."""
+    primary, internal = _get_ollama_urls()
+    urls_to_try = [primary]
+    if internal:
+        urls_to_try.append(internal)
+    # Also try direct localhost if not already in list
+    if "http://127.0.0.1:11434" not in urls_to_try:
+        urls_to_try.append("http://127.0.0.1:11434")
+    body = json.dumps({"name": name, "stream": True}).encode("utf-8")
+    for url in urls_to_try:
+        try:
+            import ssl as _ssl
+            ctx = None
+            if url.startswith("https://"):
+                ctx = _ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = _ssl.CERT_NONE
+            req = urllib.request.Request(
+                f"{url}/api/pull", data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            resp = urllib.request.urlopen(req, timeout=600, context=ctx)
+            def _gen(resp=resp):
+                try:
+                    while True:
+                        line = resp.readline()
+                        if not line:
+                            break
+                        decoded = line.decode("utf-8", errors="replace").strip()
+                        if decoded:
+                            yield decoded + "\n"
+                finally:
+                    resp.close()
+            return _gen()
+        except Exception:
+            continue
+    # All URLs failed
+    return iter([json.dumps({"error": f"Cannot connect to Ollama at {primary}"}) + "\n"])
 
 
 def ollama_delete_model(name):

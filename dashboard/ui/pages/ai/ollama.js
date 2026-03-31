@@ -41,6 +41,10 @@
     var pullName = _pn[0], setPullName = _pn[1];
     var _pl = React.useState(false);
     var pulling = _pl[0], setPulling = _pl[1];
+    var _pp = React.useState("");
+    var pullProgress = _pp[0], setPullProgress = _pp[1];
+    var _ppct = React.useState(0);
+    var pullPercent = _ppct[0], setPullPercent = _ppct[1];
     var _cm = React.useState("");
     var chatModel = _cm[0], setChatModel = _cm[1];
     var _ci = React.useState("");
@@ -71,37 +75,84 @@
     var handlePull = function() {
       if (!pullName.trim()) return;
       setPulling(true);
-      // Use the run system to show progress in web terminal
-      var fd = new FormData();
-      fd.append("OLLAMA_MODEL_NAME", pullName.trim());
-      run(null, "/run/ollama_pull_model", "Pull " + pullName, fd);
-      // Also try direct API for quick feedback
-      fetch("/api/ollama/pull", {
+      setPullProgress("Starting download...");
+      setPullPercent(0);
+      // Stream pull progress from Ollama API via our proxy
+      fetch("/api/ollama/pull/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" },
         body: JSON.stringify({ name: pullName.trim() }),
       })
-        .then(function(r) { return r.json(); })
-        .then(function(j) {
-          if (j.ok) {
-            if (setInfoMessage) setInfoMessage("Model \"" + pullName + "\" pulled successfully.");
-            refreshModels();
-          } else {
-            var errMsg = j.error || "Unknown error";
-            if (errMsg.indexOf("Connection refused") !== -1 || errMsg.indexOf("10061") !== -1 || errMsg.indexOf("111") !== -1) {
-              errMsg = "Ollama server is not running. Click Start in the Services list below, or install Ollama first.";
-            }
-            if (setInfoMessage) setInfoMessage("Pull: " + errMsg);
+        .then(function(r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          var reader = r.body && r.body.getReader ? r.body.getReader() : null;
+          if (!reader) {
+            // Fallback: no streaming support, use run system
+            var fd = new FormData();
+            fd.append("OLLAMA_MODEL_NAME", pullName.trim());
+            run(null, "/run/ollama_pull_model", "Pull " + pullName, fd);
+            setPulling(false);
+            setPullProgress("");
+            return;
           }
+          var decoder = new TextDecoder();
+          var buf = "";
+          function readChunk() {
+            return reader.read().then(function(result) {
+              if (result.done) {
+                setPulling(false);
+                setPullProgress("Done!");
+                setPullPercent(100);
+                setTimeout(function() { setPullProgress(""); setPullPercent(0); }, 2000);
+                refreshModels();
+                return;
+              }
+              buf += decoder.decode(result.value, { stream: true });
+              var lines = buf.split("\n");
+              buf = lines.pop() || "";
+              lines.forEach(function(line) {
+                line = line.trim();
+                if (!line) return;
+                if (line.indexOf("data: ") === 0) line = line.substring(6);
+                try {
+                  var ev = JSON.parse(line);
+                  if (ev.error) {
+                    setPullProgress("Error: " + ev.error);
+                    setPulling(false);
+                    return;
+                  }
+                  var status = ev.status || "";
+                  if (ev.total && ev.completed) {
+                    var pct = Math.round((ev.completed / ev.total) * 100);
+                    var totalMB = (ev.total / 1048576).toFixed(0);
+                    var doneMB = (ev.completed / 1048576).toFixed(0);
+                    setPullPercent(pct);
+                    setPullProgress(status + ": " + doneMB + " MB / " + totalMB + " MB (" + pct + "%)");
+                  } else if (status) {
+                    setPullProgress(status);
+                  }
+                  if (status === "success") {
+                    setPullPercent(100);
+                    setPullProgress("Done!");
+                    setPulling(false);
+                    setTimeout(function() { setPullProgress(""); setPullPercent(0); }, 2000);
+                    refreshModels();
+                  }
+                } catch(e) {}
+              });
+              return readChunk();
+            });
+          }
+          return readChunk();
         })
         .catch(function(e) {
-          var errMsg = String(e);
-          if (errMsg.indexOf("Connection refused") !== -1 || errMsg.indexOf("10061") !== -1) {
-            errMsg = "Ollama server is not running. Start the service first.";
-          }
-          if (setInfoMessage) setInfoMessage("Pull: " + errMsg);
-        })
-        .finally(function() { setPulling(false); });
+          // Fallback to run system
+          var fd = new FormData();
+          fd.append("OLLAMA_MODEL_NAME", pullName.trim());
+          run(null, "/run/ollama_pull_model", "Pull " + pullName, fd);
+          setPulling(false);
+          setPullProgress("");
+        });
     };
 
     var handleDelete = function(name) {
@@ -309,6 +360,16 @@
                   {pulling ? "Pulling..." : "Pull"}
                 </Button>
               </Stack>
+
+              {/* Pull progress */}
+              {pullProgress && (
+                <Box sx={{ mb: 1.5 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>{pullProgress}</Typography>
+                  <Box sx={{ width: "100%", bgcolor: "#e2e8f0", borderRadius: 2, height: 8, overflow: "hidden" }}>
+                    <Box sx={{ width: pullPercent + "%", bgcolor: pullPercent >= 100 ? "#16a34a" : "#1e40af", height: "100%", borderRadius: 2, transition: "width 0.3s ease" }} />
+                  </Box>
+                </Box>
+              )}
 
               {/* Popular models */}
               <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ mb: 0.5, display: "block" }}>Popular Models (click to select):</Typography>
