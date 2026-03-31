@@ -6,6 +6,7 @@ SAM3 object detection, and Ollama LLM services.
 """
 import json
 import os
+import ssl
 import subprocess
 import traceback
 import urllib.request
@@ -19,6 +20,12 @@ from pathlib import Path
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# SSL context that accepts self-signed certificates for internal service calls
+_internal_ssl_ctx = ssl.create_default_context()
+_internal_ssl_ctx.check_hostname = False
+_internal_ssl_ctx.verify_mode = ssl.CERT_NONE
+
+
 def _json_request(url, method="GET", data=None, headers=None, timeout=15):
     """Make an HTTP request and return parsed JSON."""
     hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -27,7 +34,8 @@ def _json_request(url, method="GET", data=None, headers=None, timeout=15):
     body = json.dumps(data).encode("utf-8") if data is not None else None
     req = urllib.request.Request(url, data=body, headers=hdrs, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        ctx = _internal_ssl_ctx if url.startswith("https://") else None
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             return json.loads(resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as e:
         try:
@@ -46,7 +54,8 @@ def _raw_request(url, method="GET", data=None, headers=None, timeout=30):
         hdrs.update(headers)
     req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        ctx = _internal_ssl_ctx if url.startswith("https://") else None
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             return resp.status, dict(resp.headers), resp.read()
     except urllib.error.HTTPError as e:
         return e.code, {}, e.read()
@@ -128,7 +137,7 @@ def s3_list_buckets():
         endpoint, access_key, secret_key = _get_s3_config()
         try:
             req = urllib.request.Request(f"{endpoint}/minio/health/live", method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=5, context=_internal_ssl_ctx if req.full_url.startswith("https://") else None) as resp:
                 pass
         except Exception:
             return {"ok": False, "error": f"Cannot reach MinIO. {output}"}
@@ -232,7 +241,7 @@ def s3_info():
     healthy = False
     try:
         req = urllib.request.Request(f"{endpoint}/minio/health/live", method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5, context=_internal_ssl_ctx if req.full_url.startswith("https://") else None) as resp:
             healthy = resp.status == 200
     except Exception:
         pass
@@ -250,7 +259,7 @@ def s3_health():
     endpoint, _, _ = _get_s3_config()
     try:
         req = urllib.request.Request(f"{endpoint}/minio/health/live", method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5, context=_internal_ssl_ctx if req.full_url.startswith("https://") else None) as resp:
             return {"ok": True, "status": "healthy"}
     except Exception as e:
         return {"ok": False, "status": "unhealthy", "error": str(e)}
@@ -586,7 +595,7 @@ def proxy_health():
         return {"ok": False, "status": "not_installed"}
     try:
         req = urllib.request.Request(f"{panel_url}/api/system/info", method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5, context=_internal_ssl_ctx if req.full_url.startswith("https://") else None) as resp:
             return {"ok": True, "status": "healthy"}
     except Exception as e:
         return {"ok": False, "status": "unhealthy", "error": str(e)}
@@ -682,7 +691,7 @@ def sam3_health():
         return {"ok": False, "status": "not_installed"}
     try:
         req = urllib.request.Request(sam3_url, method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5, context=_internal_ssl_ctx if req.full_url.startswith("https://") else None) as resp:
             return {"ok": True, "status": "healthy"}
     except Exception as e:
         return {"ok": False, "status": "unhealthy", "error": str(e)}
@@ -851,7 +860,7 @@ def ollama_health():
     url = _get_ollama_url()
     try:
         req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5, context=_internal_ssl_ctx if req.full_url.startswith("https://") else None) as resp:
             return {"ok": True, "status": "healthy"}
     except Exception as e:
         return {"ok": False, "status": "unhealthy", "error": str(e)}
