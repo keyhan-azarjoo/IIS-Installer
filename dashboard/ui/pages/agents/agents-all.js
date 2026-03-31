@@ -245,8 +245,10 @@
     },
   };
 
-  // Generate pages for each agent
+  // Generate pages for each agent (skip those with dedicated pages)
+  var DEDICATED_PAGES = ["agent-openclaw"]; // These have their own .js files
   Object.keys(AGENTS).forEach(function(pageId) {
+    if (DEDICATED_PAGES.indexOf(pageId) !== -1) return; // Skip — has dedicated page
     var svc = AGENTS[pageId];
     var scope = pageId.replace("agent-", "");
 
