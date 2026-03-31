@@ -8022,18 +8022,11 @@ http {{
         '  echo "Using remote Ollama at: $OLLAMA_REMOTE"',
         "fi",
         "",
-        "# Configure gateway",
+        "# Pre-start config (before gateway generates its own token)",
         "echo 'Configuring OpenClaw gateway...'",
-        "openclaw config set gateway.auth.token serverinstaller 2>/dev/null || true",
         "openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true",
         'openclaw config set gateway.controlUi.allowedOrigins \'["*"]\' 2>/dev/null || true',
         'openclaw config set gateway.trustedProxies \'["127.0.0.1","::1"]\' 2>/dev/null || true',
-        "",
-        "# Disable DM pairing requirement (allows direct WebChat access)",
-        "openclaw config set gateway.dmPairing false 2>/dev/null || true",
-        "openclaw config set gateway.requirePairing false 2>/dev/null || true",
-        "openclaw config set security.dmPairing disabled 2>/dev/null || true",
-        "openclaw config set security.requirePairing false 2>/dev/null || true",
         "",
         "# Configure Ollama as the default LLM (local, offline)",
         f"openclaw config set models.default.provider ollama 2>/dev/null || true",
@@ -8048,7 +8041,26 @@ http {{
         f"# Start gateway on loopback port {gw_internal_port}",
         f"openclaw gateway --allow-unconfigured --bind loopback --port {gw_internal_port} --verbose &",
         "GW_PID=$!",
-        "sleep 3",
+        "sleep 5",
+        "",
+        "# POST-START: Override token and disable pairing AFTER gateway generated its config",
+        "echo 'Setting auth token and disabling pairing...'",
+        "openclaw config set gateway.auth.token serverinstaller 2>/dev/null || true",
+        "# Try all possible pairing config keys",
+        "openclaw config set gateway.pairing.mode open 2>/dev/null || true",
+        "openclaw config set gateway.pairing.enabled false 2>/dev/null || true",
+        "openclaw config set gateway.dmPairing open 2>/dev/null || true",
+        "openclaw config set gateway.requirePairing false 2>/dev/null || true",
+        "openclaw config set security.pairing.mode open 2>/dev/null || true",
+        "openclaw config set channels.webchat.pairing open 2>/dev/null || true",
+        "",
+        "# Restart gateway to pick up new config",
+        "echo 'Restarting gateway with new config...'",
+        "kill $GW_PID 2>/dev/null || true",
+        "sleep 2",
+        f"openclaw gateway --allow-unconfigured --bind loopback --port {gw_internal_port} --verbose &",
+        "GW_PID=$!",
+        "sleep 5",
         "",
         "# Get gateway auth token and print dashboard URL",
         "GATEWAY_TOKEN=$(openclaw config get gateway.auth.token 2>/dev/null || cat /root/.openclaw/config.yaml 2>/dev/null | grep -A1 'auth:' | grep 'token:' | awk '{print $2}' || echo '')",
@@ -8080,7 +8092,7 @@ http {{
     dockerfile = f"""FROM node:22-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y curl python3 build-essential socat openssl nginx && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl python3 build-essential socat openssl nginx zstd && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw globally
 RUN npm install -g openclaw@latest
