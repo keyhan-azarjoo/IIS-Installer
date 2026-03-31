@@ -332,9 +332,28 @@
           var _saveMsg = React.useState("");
           var saveMsg = _saveMsg[0], setSaveMsg = _saveMsg[1];
 
+          var pollJob = function(jobId) {
+            fetch("/job/" + jobId + "?offset=0", { headers: { "X-Requested-With": "fetch" } })
+              .then(function(r) { return r.json(); })
+              .then(function(j) {
+                if (j.done) {
+                  setSaving(false);
+                  if (Number(j.exit_code) === 0) {
+                    setSaveMsg("Tokens saved! Gateway restarting... refresh OpenClaw dashboard in a few seconds.");
+                  } else {
+                    setSaveMsg("Failed (exit " + j.exit_code + "). " + (j.output || "").slice(0, 200));
+                  }
+                } else {
+                  setSaveMsg("Applying tokens... " + (j.output || "").split("\n").filter(Boolean).pop() || "");
+                  setTimeout(function() { pollJob(jobId); }, 500);
+                }
+              })
+              .catch(function(e) { setSaving(false); setSaveMsg("Error: " + e); });
+          };
+
           var handleSave = function() {
             setSaving(true);
-            setSaveMsg("");
+            setSaveMsg("Saving...");
             var fd = new FormData();
             fd.append("OLLAMA_API_KEY", ollamaKey);
             fd.append("LMSTUDIO_API_KEY", lmstudioKey);
@@ -344,14 +363,16 @@
               .then(function(r) { return r.json(); })
               .then(function(j) {
                 if (j.job_id) {
-                  setSaveMsg("Saving tokens... check Web Terminal for progress.");
-                  run(null, null, "OpenClaw: Set API Tokens", null, j.job_id);
+                  pollJob(j.job_id);
+                } else if (j.output) {
+                  setSaving(false);
+                  setSaveMsg("Done! " + (j.output || "").split("\n").filter(Boolean).pop() || "");
                 } else {
-                  setSaveMsg(j.output ? "Done! Restart the gateway for changes to take effect." : "Error: " + (j.error || "Unknown"));
+                  setSaving(false);
+                  setSaveMsg("Error: " + (j.error || "Unknown response"));
                 }
               })
-              .catch(function(e) { setSaveMsg("Error: " + e); })
-              .finally(function() { setSaving(false); });
+              .catch(function(e) { setSaving(false); setSaveMsg("Error: " + e); });
           };
 
           return (
