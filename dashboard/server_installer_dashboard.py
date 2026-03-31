@@ -7936,7 +7936,10 @@ def run_openclaw_docker(form=None, live_cb=None):
     whatsapp_phone = (form.get("OPENCLAW_WHATSAPP_PHONE", [""])[0] or "").strip()
     # LLM config
     llm_provider = (form.get("OPENCLAW_LLM_PROVIDER", ["ollama (local)"])[0] or "ollama (local)").strip()
-    llm_model = (form.get("OPENCLAW_LLM_MODEL", ["llama3.2:3b"])[0] or "llama3.2:3b").strip()
+    llm_model = (form.get("OPENCLAW_LLM_MODEL", ["ministral:3b"])[0] or "ministral:3b").strip()
+    llm_model_custom = (form.get("OPENCLAW_LLM_MODEL_CUSTOM", [""])[0] or "").strip()
+    if llm_model == "custom" and llm_model_custom:
+        llm_model = llm_model_custom
     ollama_url = (form.get("OPENCLAW_OLLAMA_URL", [""])[0] or "").strip()
     openai_key = (form.get("OPENCLAW_OPENAI_KEY", [""])[0] or "").strip()
     anthropic_key = (form.get("OPENCLAW_ANTHROPIC_KEY", [""])[0] or "").strip()
@@ -8173,6 +8176,14 @@ CMD ["/entrypoint.sh"]
             log("\nWARNING: Container may have stopped. Check: docker logs " + container_name)
     except Exception:
         pass
+
+    # Also install the model on host Ollama if available
+    if not ollama_url and command_exists("ollama"):
+        log(f"\nInstalling model {llm_model} on host Ollama...")
+        try:
+            _run_install_cmd(["ollama", "pull", llm_model], log, timeout=600)
+        except Exception:
+            log("Model pull on host skipped.")
 
     log("\n" + "=" * 60)
     log(" OpenClaw Docker Deployment Complete!")
