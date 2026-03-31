@@ -596,6 +596,10 @@ SESSIONS = {}
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 
+# Interactive terminal sessions for openclaw configure
+_interactive_sessions = {}
+_interactive_sessions_lock = threading.Lock()
+
 
 def command_exists(name):
     return shutil.which(name) is not None
@@ -15108,6 +15112,26 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/status":
             self.write_json({"ok": True}, HTTPStatus.OK)
             return
+        if self.path.startswith("/run/openclaw_configure_output"):
+            query = {}
+            if "?" in self.path:
+                query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+            session_id = (query.get("session_id", [""])[0] or "").strip()
+            with _interactive_sessions_lock:
+                sess = _interactive_sessions.get(session_id)
+            if not sess:
+                self.write_json({"ok": False, "error": "Invalid session_id"})
+                return
+            with sess["buf_lock"]:
+                output = "".join(sess["buf"])
+                sess["buf"].clear()
+            done = sess["done"][0]
+            # Clean up finished sessions
+            if done:
+                with _interactive_sessions_lock:
+                    _interactive_sessions.pop(session_id, None)
+            self.write_json({"ok": True, "output": output, "done": done})
+            return
         if self.path == "/api/website/engines":
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
@@ -16117,6 +16141,62 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 code, output = _set_tokens(None)
                 self.respond_run_result(title, code, output)
+            return
+        # ── OpenClaw interactive configure terminal ─────────────────────────
+        if self.path == "/run/openclaw_configure_start":
+            import uuid
+            session_id = uuid.uuid4().hex
+            try:
+                proc = subprocess.Popen(
+                    ["docker", "exec", "-i", "serverinstaller-openclaw", "openclaw", "configure"],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)})
+                return
+            buf = []
+            buf_lock = threading.Lock()
+            done_flag = [False]
+            def _reader():
+                try:
+                    while True:
+                        chunk = proc.stdout.read(1)
+                        if not chunk:
+                            break
+                        with buf_lock:
+                            buf.append(chunk.decode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+                finally:
+                    done_flag[0] = True
+            t = threading.Thread(target=_reader, daemon=True)
+            t.start()
+            with _interactive_sessions_lock:
+                _interactive_sessions[session_id] = {
+                    "proc": proc,
+                    "buf": buf,
+                    "buf_lock": buf_lock,
+                    "done": done_flag,
+                }
+            self.write_json({"ok": True, "session_id": session_id})
+            return
+        if self.path == "/run/openclaw_configure_input":
+            session_id = (form.get("session_id", [""])[0] or "").strip()
+            user_input = form.get("input", [""])[0] or ""
+            with _interactive_sessions_lock:
+                sess = _interactive_sessions.get(session_id)
+            if not sess:
+                self.write_json({"ok": False, "error": "Invalid session_id"})
+                return
+            try:
+                sess["proc"].stdin.write((user_input + "\n").encode("utf-8"))
+                sess["proc"].stdin.flush()
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)})
+                return
+            self.write_json({"ok": True})
             return
         if self.path == "/run/openclaw_delete":
             title = "Uninstall OpenClaw"

@@ -329,6 +329,137 @@
           );
         })}
 
+        {/* Configure Providers (Interactive Terminal) */}
+        {installed && React.createElement(function ConfigureTerminal() {
+          var _sessionId = React.useState("");
+          var sessionId = _sessionId[0], setSessionId = _sessionId[1];
+          var _output = React.useState("");
+          var output = _output[0], setOutput = _output[1];
+          var _inputVal = React.useState("");
+          var inputVal = _inputVal[0], setInputVal = _inputVal[1];
+          var _running = React.useState(false);
+          var running = _running[0], setRunning = _running[1];
+          var _done = React.useState(false);
+          var done = _done[0], setDone = _done[1];
+          var outputRef = React.useRef(null);
+
+          var pollOutput = function(sid) {
+            fetch("/run/openclaw_configure_output?session_id=" + sid)
+              .then(function(r) { return r.json(); })
+              .then(function(j) {
+                if (j.output) {
+                  setOutput(function(prev) { return prev + j.output; });
+                }
+                if (j.done) {
+                  setDone(true);
+                  setRunning(false);
+                } else {
+                  setTimeout(function() { pollOutput(sid); }, 500);
+                }
+              })
+              .catch(function() {
+                setDone(true);
+                setRunning(false);
+              });
+          };
+
+          React.useEffect(function() {
+            if (outputRef.current) {
+              outputRef.current.scrollTop = outputRef.current.scrollHeight;
+            }
+          }, [output]);
+
+          var handleStart = function() {
+            setOutput("");
+            setDone(false);
+            setRunning(true);
+            setInputVal("");
+            fetch("/run/openclaw_configure_start", { method: "POST", headers: { "X-Requested-With": "fetch" } })
+              .then(function(r) { return r.json(); })
+              .then(function(j) {
+                if (j.ok && j.session_id) {
+                  setSessionId(j.session_id);
+                  pollOutput(j.session_id);
+                } else {
+                  setOutput("Error: " + (j.error || "Failed to start"));
+                  setRunning(false);
+                }
+              })
+              .catch(function(e) {
+                setOutput("Error: " + e);
+                setRunning(false);
+              });
+          };
+
+          var handleSend = function() {
+            if (!sessionId || !running) return;
+            var fd = new FormData();
+            fd.append("session_id", sessionId);
+            fd.append("input", inputVal);
+            setInputVal("");
+            fetch("/run/openclaw_configure_input", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd })
+              .then(function(r) { return r.json(); })
+              .then(function() {})
+              .catch(function() {});
+          };
+
+          var handleKeyDown = function(e) {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleSend();
+            }
+          };
+
+          return (
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed33" }}>
+                <CardContent>
+                  <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
+                    <Box sx={{ width: 5, height: 32, borderRadius: 3, bgcolor: "#7c3aed" }} />
+                    <Typography variant="h6" fontWeight={800} sx={{ color: "#7c3aed" }}>Configure Providers</Typography>
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Run the interactive OpenClaw configure wizard directly from your browser. Register Ollama, OpenAI, Anthropic, or other providers.
+                  </Typography>
+                  <Button variant="contained" disabled={running} onClick={handleStart}
+                    sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, fontWeight: 700, mb: 2 }}>
+                    {running ? "Running..." : (done ? "Restart Configure" : "Start Configure")}
+                  </Button>
+                  {(output || running) && (
+                    <Box>
+                      <Paper ref={outputRef} elevation={0} sx={{
+                        bgcolor: "#0f172a", color: "#e2e8f0", fontFamily: "'Fira Code', monospace", fontSize: 12,
+                        p: 2, borderRadius: 2, minHeight: 180, maxHeight: 400, overflowY: "auto",
+                        whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: 1.7, mb: 1.5
+                      }}>
+                        {output}{running && !done && <span style={{ opacity: 0.5 }}>_</span>}
+                      </Paper>
+                      {running && !done && (
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <TextField size="small" fullWidth value={inputVal}
+                            onChange={function(e) { setInputVal(e.target.value); }}
+                            onKeyDown={handleKeyDown}
+                            placeholder="Type your response and press Enter..."
+                            sx={{ "& .MuiInputBase-root": { fontFamily: "monospace", fontSize: 13 } }} />
+                          <Button variant="contained" onClick={handleSend}
+                            sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, fontWeight: 700, minWidth: 80 }}>
+                            Send
+                          </Button>
+                        </Stack>
+                      )}
+                      {done && (
+                        <Alert severity="success" sx={{ borderRadius: 2 }}>
+                          <Typography variant="body2">Configure wizard has finished.</Typography>
+                        </Alert>
+                      )}
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
+
         {/* Services */}
         <Grid item xs={12} md={6}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
