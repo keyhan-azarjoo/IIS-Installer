@@ -8012,7 +8012,8 @@ http {{
         "  echo 'Ollama ready.'",
         "fi",
         "",
-        "# Configure gateway",
+        "# Configure gateway — set a known token so user can access without guessing",
+        "openclaw config set gateway.auth.token serverinstaller 2>/dev/null || true",
         "openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true",
         'openclaw config set gateway.controlUi.allowedOrigins \'["*"]\' 2>/dev/null || true',
         'openclaw config set gateway.trustedProxies \'["127.0.0.1","::1"]\' 2>/dev/null || true',
@@ -8124,8 +8125,8 @@ CMD ["/entrypoint.sh"]
         "installed": True, "service_name": container_name,
         "deploy_mode": "docker", "host": host,
         "http_port": http_port, "https_port": http_port,
-        "http_url": f"https://{display_host}:{http_port}",
-        "https_url": f"https://{display_host}:{http_port}",
+        "http_url": f"https://{display_host}:{http_port}/#token=serverinstaller",
+        "https_url": f"https://{display_host}:{http_port}/#token=serverinstaller",
         "auth_enabled": bool(username), "auth_username": username,
         "running": code2 == 0,
     })
@@ -8175,8 +8176,11 @@ CMD ["/entrypoint.sh"]
         log(f"")
         log(f" Gateway Token:  {gateway_token}")
     else:
-        log(f" Get token: docker exec {container_name} openclaw config get gateway.auth.token")
-        log(f" Then open: https://{display_host}:{http_port}/#token=YOUR_TOKEN")
+        # Use the known token we set
+        log(f" Dashboard URL:")
+        log(f"   https://{display_host}:{http_port}/#token=serverinstaller")
+        log(f"")
+        log(f" Gateway Token:  serverinstaller")
     if username:
         log(f" Auth:           {username} / ****")
     log(f" Container:      {container_name}")
