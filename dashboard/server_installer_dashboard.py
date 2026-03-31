@@ -8263,6 +8263,7 @@ http {{
         'openssl req -x509 -nodes -newkey rsa:2048 -keyout /root/.openclaw/certs/key.pem -out /root/.openclaw/certs/cert.pem -days 3650 -subj "/CN=openclaw/O=ServerInstaller" 2>/dev/null',
         "",
         f"# Start gateway on loopback port {gw_internal_port} with Ollama enabled",
+        f"echo '{gw_internal_port}' > /tmp/gw_port",
         f"OLLAMA_API_KEY=ollama-local openclaw gateway --allow-unconfigured --bind loopback --port {gw_internal_port} --verbose &",
         "GW_PID=$!",
         "sleep 5",
@@ -15992,6 +15993,81 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_lmstudio_delete()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/openclaw_set_tokens":
+            title = "OpenClaw: Set API Tokens"
+            def _set_tokens(cb):
+                output = []
+                def log(m):
+                    output.append(m)
+                    if cb: cb(m + "\n")
+                ollama_key = (form.get("OLLAMA_API_KEY", [""])[0] or "").strip()
+                openai_key = (form.get("OPENAI_API_KEY", [""])[0] or "").strip()
+                anthropic_key = (form.get("ANTHROPIC_API_KEY", [""])[0] or "").strip()
+                container = "serverinstaller-openclaw"
+                log("=== Setting API tokens in OpenClaw container ===")
+                # Build env lines and .env content
+                env_lines = []
+                if ollama_key:
+                    env_lines.append(f"OLLAMA_API_KEY={ollama_key}")
+                    log(f"Ollama API Key: {'*' * len(ollama_key)}")
+                if openai_key:
+                    env_lines.append(f"OPENAI_API_KEY={openai_key}")
+                    log(f"OpenAI API Key: sk-...{'*' * 8}")
+                if anthropic_key:
+                    env_lines.append(f"ANTHROPIC_API_KEY={anthropic_key}")
+                    log(f"Anthropic API Key: sk-ant-...{'*' * 8}")
+                if not env_lines:
+                    log("No tokens provided.")
+                    return 1, "\n".join(output)
+                env_content = "\\n".join(env_lines)
+                # Write .env files inside the container
+                cmds = [
+                    f"printf '{env_content}\\n' > /root/.openclaw/.env",
+                    f"printf '{env_content}\\n' > /root/.env",
+                    f"printf '{env_content}\\n' >> /etc/environment",
+                ]
+                # Write auth-profiles.json with versioned format
+                profiles = {}
+                if ollama_key:
+                    profiles['"ollama:local"'] = f'{{"type":"token","provider":"ollama","token":"{ollama_key}"}}'
+                if openai_key:
+                    profiles['"openai:default"'] = f'{{"type":"api_key","provider":"openai","key":"{openai_key}"}}'
+                if anthropic_key:
+                    profiles['"anthropic:default"'] = f'{{"type":"api_key","provider":"anthropic","key":"{anthropic_key}"}}'
+                profiles_json = ",".join(f"{k}:{v}" for k, v in profiles.items())
+                last_good_parts = []
+                if ollama_key:
+                    last_good_parts.append('"ollama":"ollama:local"')
+                if openai_key:
+                    last_good_parts.append('"openai":"openai:default"')
+                if anthropic_key:
+                    last_good_parts.append('"anthropic":"anthropic:default"')
+                last_good_json = ",".join(last_good_parts)
+                auth_json = f'{{"version":1,"profiles":{{{profiles_json}}},"lastGood":{{{last_good_json}}}}}'
+                cmds.append(f"mkdir -p /root/.openclaw/agents/main/agent")
+                cmds.append(f"echo '{auth_json}' > /root/.openclaw/agents/main/agent/auth-profiles.json")
+                # Restart gateway to pick up new tokens
+                cmds.append("kill -TERM $(pgrep -f 'openclaw gateway' | head -1) 2>/dev/null || true")
+                cmds.append("sleep 2")
+                # Start gateway with new env vars
+                env_prefix = " ".join(env_lines)
+                cmds.append(f"nohup sh -c '{env_prefix} openclaw gateway --allow-unconfigured --bind loopback --port $(cat /tmp/gw_port 2>/dev/null || echo 18803) --verbose' > /tmp/gw-restart.log 2>&1 &")
+                full_cmd = " && ".join(cmds)
+                log("Executing in container...")
+                code = _run_install_cmd(["docker", "exec", container, "bash", "-c", full_cmd], log, timeout=30)
+                if code == 0:
+                    log("\nTokens saved! Gateway restarting with new API keys.")
+                    log("Wait a few seconds, then refresh the OpenClaw dashboard.")
+                else:
+                    log("\nFailed to set tokens. Is the OpenClaw container running?")
+                return code, "\n".join(output)
+            if self.is_fetch():
+                job_id = start_live_job(title, _set_tokens)
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = _set_tokens(None)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/openclaw_delete":

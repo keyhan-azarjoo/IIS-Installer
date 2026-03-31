@@ -7,6 +7,7 @@
     var Typography = p.Typography, Stack = p.Stack, Button = p.Button;
     var Box = p.Box, Paper = p.Paper, Chip = p.Chip, Alert = p.Alert, Tooltip = p.Tooltip;
     var ActionCard = p.ActionCard;
+    var TextField = p.TextField;
     var cfg = p.cfg, run = p.run, selectableIps = p.selectableIps, serviceBusy = p.serviceBusy;
     var isScopeLoading = p.isScopeLoading, scopeErrors = p.scopeErrors;
     var isServiceRunningStatus = p.isServiceRunningStatus, onServiceAction = p.onServiceAction;
@@ -236,6 +237,82 @@
             </Alert>
           </Grid>
         )}
+
+        {/* API Tokens — configure LLM providers */}
+        {installed && React.createElement(function ApiTokensPanel() {
+          var _ollamaKey = React.useState("ollama-local");
+          var ollamaKey = _ollamaKey[0], setOllamaKey = _ollamaKey[1];
+          var _openaiKey = React.useState("");
+          var openaiKey = _openaiKey[0], setOpenaiKey = _openaiKey[1];
+          var _anthropicKey = React.useState("");
+          var anthropicKey = _anthropicKey[0], setAnthropicKey = _anthropicKey[1];
+          var _saving = React.useState(false);
+          var saving = _saving[0], setSaving = _saving[1];
+          var _saveMsg = React.useState("");
+          var saveMsg = _saveMsg[0], setSaveMsg = _saveMsg[1];
+
+          var handleSave = function() {
+            setSaving(true);
+            setSaveMsg("");
+            var fd = new FormData();
+            fd.append("OLLAMA_API_KEY", ollamaKey);
+            fd.append("OPENAI_API_KEY", openaiKey);
+            fd.append("ANTHROPIC_API_KEY", anthropicKey);
+            fetch("/run/openclaw_set_tokens", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd })
+              .then(function(r) { return r.json(); })
+              .then(function(j) {
+                if (j.job_id) {
+                  setSaveMsg("Saving tokens... check Web Terminal for progress.");
+                  run(null, null, "OpenClaw: Set API Tokens", null, j.job_id);
+                } else {
+                  setSaveMsg(j.output ? "Done! Restart the gateway for changes to take effect." : "Error: " + (j.error || "Unknown"));
+                }
+              })
+              .catch(function(e) { setSaveMsg("Error: " + e); })
+              .finally(function() { setSaving(false); });
+          };
+
+          return (
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed44" }}>
+                <CardContent>
+                  <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5, color: "#7c3aed" }}>API Tokens</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Enter API keys to enable LLM providers. OpenClaw uses these to connect to AI models.
+                    For Ollama, any value works (e.g. "ollama-local"). For OpenAI/Anthropic, use your real API key.
+                  </Typography>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} md={4}>
+                      <TextField size="small" fullWidth label="Ollama API Key" value={ollamaKey}
+                        onChange={function(e) { setOllamaKey(e.target.value); }}
+                        placeholder="ollama-local (any value)"
+                        helperText="Enables Ollama provider. Any non-empty value works." />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField size="small" fullWidth label="OpenAI API Key" value={openaiKey}
+                        onChange={function(e) { setOpenaiKey(e.target.value); }}
+                        placeholder="sk-..." type="password"
+                        helperText="Enables GPT-4o, GPT-4, etc." />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField size="small" fullWidth label="Anthropic API Key" value={anthropicKey}
+                        onChange={function(e) { setAnthropicKey(e.target.value); }}
+                        placeholder="sk-ant-..." type="password"
+                        helperText="Enables Claude models." />
+                    </Grid>
+                  </Grid>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 2 }}>
+                    <Button variant="contained" disabled={saving} onClick={handleSave}
+                      sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, fontWeight: 700 }}>
+                      {saving ? "Saving..." : "Save & Apply Tokens"}
+                    </Button>
+                    {saveMsg && <Typography variant="caption" color="text.secondary">{saveMsg}</Typography>}
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
 
         {/* Services */}
         <Grid item xs={12} md={6}>
