@@ -38,6 +38,7 @@
       { name: "OPENCLAW_PASSWORD", label: "Dashboard Password (optional)", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
       { name: "OPENCLAW_LLM_PROVIDER", label: "LLM Provider", type: "select", options: ["ollama (local)", "openai", "anthropic"], defaultValue: "ollama (local)", placeholder: "Select LLM" },
       { name: "OPENCLAW_LLM_MODEL", label: "Model Name", defaultValue: "llama3.2:3b", placeholder: "e.g. llama3.2:3b, gpt-4o, claude-sonnet-4-20250514" },
+      { name: "OPENCLAW_OLLAMA_URL", label: "Ollama Server URL (optional)", defaultValue: "", placeholder: "Leave empty for local. Or: http://other-server:11434" },
       { name: "OPENCLAW_OPENAI_KEY", label: "OpenAI API Key (if using OpenAI)", type: "password", defaultValue: "", placeholder: "sk-..." },
       { name: "OPENCLAW_ANTHROPIC_KEY", label: "Anthropic API Key (if using Claude)", type: "password", defaultValue: "", placeholder: "sk-ant-..." },
       { name: "OPENCLAW_TELEGRAM_TOKEN", label: "Telegram Bot Token (optional)", defaultValue: "", placeholder: "123456:ABC-DEF... (from @BotFather)" },
