@@ -121,37 +121,63 @@ if (-not $ollamaExists) {
     Log "Ollama not installed. Install it from the AI/ML page for local LLM support."
 }
 
-# Configure OpenClaw to use Ollama as default AI provider
+# Configure OpenClaw providers (Ollama/Claude)
 $agentDir = Join-Path $env:USERPROFILE ".openclaw\agents\main\agent"
 if (-not (Test-Path $agentDir)) { New-Item -ItemType Directory -Path $agentDir -Force | Out-Null }
 
-# Write auth-profiles.json
-$authProfiles = @{
-    ollama = @{
+# Write auth-profiles.json (OpenClaw v1 format)
+$profiles = @{}
+$lastGood = @{}
+
+if ($ollamaExists) {
+    $profiles["ollama:local"] = @{
+        type     = "api_key"
         provider = "ollama"
-        baseUrl  = "http://127.0.0.1:11434"
-        apiKey   = "ollama"
+        key      = "ollama-local"
     }
-} | ConvertTo-Json -Depth 5
+    $lastGood["ollama"] = "ollama:local"
+    Log "Ollama detected; enabling Ollama provider."
+} else {
+    Log "Ollama not detected; skipping Ollama provider config."
+}
+
+if ($env:ANTHROPIC_API_KEY) {
+    $profiles["anthropic:default"] = @{
+        type     = "api_key"
+        provider = "anthropic"
+        key      = $env:ANTHROPIC_API_KEY
+    }
+    $lastGood["anthropic"] = "anthropic:default"
+    Log "ANTHROPIC_API_KEY detected; enabling Claude (Anthropic) provider."
+}
+
+$authProfiles = @{
+    version  = 1
+    profiles = $profiles
+    lastGood = $lastGood
+} | ConvertTo-Json -Depth 10
 Set-Content -Path (Join-Path $agentDir "auth-profiles.json") -Value $authProfiles -Encoding UTF8
-Log "Auth profiles written."
+Log "Auth profiles written (v1 format)."
 
 # Write agent settings — default to Ollama
-$ollamaModel = "llama3.2:3b"
 if ($ollamaExists) {
+    $ollamaModel = "llama3.2:3b"
     try {
         $modelList = & ollama list 2>$null
         $firstModel = ($modelList -split "`n" | Where-Object { $_ -notmatch "^NAME" } | Select-Object -First 1) -split '\s+' | Select-Object -First 1
         if ($firstModel) { $ollamaModel = $firstModel }
     } catch {}
+
+    $agentSettings = @{
+        model              = "ollama/$ollamaModel"
+        provider           = "ollama"
+        customInstructions = ""
+    } | ConvertTo-Json -Depth 10
+    Set-Content -Path (Join-Path $agentDir "settings.json") -Value $agentSettings -Encoding UTF8
+    Log "Agent settings written (model: ollama/$ollamaModel)."
+} else {
+    Log "Skipping agent settings write (Ollama not installed)."
 }
-$agentSettings = @{
-    model              = "ollama/$ollamaModel"
-    provider           = "ollama"
-    customInstructions = ""
-} | ConvertTo-Json -Depth 5
-Set-Content -Path (Join-Path $agentDir "settings.json") -Value $agentSettings -Encoding UTF8
-Log "Agent settings written (model: ollama/$ollamaModel)."
 
 # ── Step 5: Firewall ────────────────────────────────────────────────────────
 foreach ($port in @($httpPort, $httpsPort)) {
