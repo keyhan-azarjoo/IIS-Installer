@@ -271,6 +271,16 @@
                   Open Ollama
                 </Button>
               )}
+              {installed && (
+                <Button variant="outlined" size="small" color="error" disabled={serviceBusy}
+                  sx={{ mt: 1, ml: bestUrl ? 1 : 0, textTransform: "none", fontWeight: 700 }}
+                  onClick={function() {
+                    if (!window.confirm("Are you sure you want to completely uninstall Ollama?\n\nThis will remove:\n- All Docker containers and images\n- All downloaded models and data\n- All configuration and certificates\n- Firewall rules\n\nThis action cannot be undone.")) return;
+                    run(null, "/run/ollama_delete", "Uninstall Ollama");
+                  }}>
+                  Uninstall Ollama
+                </Button>
+              )}
             </CardContent>
           </Card>
         </Grid>

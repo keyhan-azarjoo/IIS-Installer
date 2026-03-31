@@ -7749,9 +7749,37 @@ def run_ollama_stop(live_cb=None):
 
 
 def run_ollama_delete(live_cb=None):
-    """Delete the Ollama service and clean up."""
-    log = lambda m: live_cb(m + "\n") if live_cb else None
+    """Completely delete Ollama — Docker containers, images, volumes, OS service, data, certs."""
+    output = []
+    def log(m):
+        output.append(m)
+        if live_cb: live_cb(m + "\n")
+    log("=== Deleting Ollama ===")
+
+    # Read state to get ports for firewall cleanup
+    state = _read_json_file(OLLAMA_STATE_FILE)
+    deploy_mode = state.get("deploy_mode", "")
+    http_port = str(state.get("http_port") or "").strip()
+    https_port = str(state.get("https_port") or "").strip()
+
+    # Stop first
     run_ollama_stop(live_cb=live_cb)
+
+    # Docker cleanup
+    if command_exists("docker"):
+        for cname in ["serverinstaller-ollama-webui", "serverinstaller-ollama"]:
+            run_capture(["docker", "stop", cname], timeout=30)
+            rc, _ = run_capture(["docker", "rm", "-f", cname], timeout=30)
+            if rc == 0: log(f"Removed Docker container: {cname}")
+        # Remove images
+        for img in ["serverinstaller/ollama-webui:latest", "ollama/ollama:latest"]:
+            rc, _ = run_capture(["docker", "rmi", img], timeout=30)
+            if rc == 0: log(f"Removed Docker image: {img}")
+        # Remove volume
+        rc, _ = run_capture(["docker", "volume", "rm", "ollama-data"], timeout=30)
+        if rc == 0: log("Removed Docker volume: ollama-data")
+
+    # Systemd cleanup (Linux/macOS)
     if os.name != "nt" and command_exists("systemctl"):
         for svc in [f"{OLLAMA_SYSTEMD_SERVICE}-webui", OLLAMA_SYSTEMD_SERVICE]:
             run_capture(["systemctl", "disable", svc], timeout=15)
@@ -7759,19 +7787,38 @@ def run_ollama_delete(live_cb=None):
             svc_file = Path(f"/etc/systemd/system/{svc}.service")
             if svc_file.exists():
                 svc_file.unlink()
+                log(f"Removed systemd unit: {svc}")
         run_capture(["systemctl", "daemon-reload"], timeout=15)
+        # Remove nginx config
+        nginx_conf = Path(f"/etc/nginx/conf.d/ollama.conf")
+        if nginx_conf.exists():
+            nginx_conf.unlink()
+            run_capture(["nginx", "-s", "reload"], timeout=15)
+            log("Removed nginx config")
     elif os.name == "nt":
         try:
             run_capture(["schtasks", "/Delete", "/TN", "ServerInstaller-Ollama", "/F"], timeout=15)
+            log("Removed scheduled task")
         except Exception:
             pass
-    # Clean up install dir
-    install_dir = OLLAMA_STATE_DIR / "app"
-    if install_dir.exists():
-        shutil.rmtree(install_dir, ignore_errors=True)
+
+    # Clean up all data directories
+    for subdir in ["app", "docker-webui", "certs", "venv"]:
+        d = OLLAMA_STATE_DIR / subdir
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            log(f"Removed directory: {subdir}")
     if OLLAMA_STATE_FILE.exists():
         OLLAMA_STATE_FILE.unlink()
-    return 0, "Ollama service deleted."
+        log("Removed state file")
+
+    # Firewall cleanup
+    for port in [http_port, https_port]:
+        if port:
+            manage_firewall_port("close", port, "tcp")
+
+    log("=== Ollama completely removed ===")
+    return 0, "\n".join(output)
 
 
 # ── LM Studio install/start/stop/delete ──────────────────────────────────────
@@ -7830,20 +7877,64 @@ def run_lmstudio_stop(live_cb=None):
 
 
 def run_lmstudio_delete(live_cb=None):
+    """Completely delete LM Studio — Docker containers, images, OS service, data, certs."""
+    output = []
+    def log(m):
+        output.append(m)
+        if live_cb: live_cb(m + "\n")
+    log("=== Deleting LM Studio ===")
+
+    state = _read_json_file(LMSTUDIO_STATE_FILE)
+    http_port = str(state.get("http_port") or "").strip()
+    https_port = str(state.get("https_port") or "").strip()
+
     run_lmstudio_stop(live_cb=live_cb)
+
+    # Docker cleanup
+    if command_exists("docker"):
+        for cname in ["serverinstaller-lmstudio-webui"]:
+            run_capture(["docker", "stop", cname], timeout=30)
+            rc, _ = run_capture(["docker", "rm", "-f", cname], timeout=30)
+            if rc == 0: log(f"Removed Docker container: {cname}")
+        rc, _ = run_capture(["docker", "rmi", "serverinstaller/lmstudio-webui:latest"], timeout=30)
+        if rc == 0: log("Removed Docker image: serverinstaller/lmstudio-webui")
+
+    # Systemd cleanup
     if os.name != "nt" and command_exists("systemctl"):
-        for svc in [f"{LMSTUDIO_SYSTEMD_SERVICE}-webui"]:
+        for svc in [f"{LMSTUDIO_SYSTEMD_SERVICE}-webui", LMSTUDIO_SYSTEMD_SERVICE]:
             run_capture(["systemctl", "disable", svc], timeout=15)
+            run_capture(["systemctl", "stop", svc], timeout=15)
             svc_file = Path(f"/etc/systemd/system/{svc}.service")
-            if svc_file.exists(): svc_file.unlink()
+            if svc_file.exists():
+                svc_file.unlink()
+                log(f"Removed systemd unit: {svc}")
         run_capture(["systemctl", "daemon-reload"], timeout=15)
+        nginx_conf = Path(f"/etc/nginx/conf.d/lmstudio.conf")
+        if nginx_conf.exists():
+            nginx_conf.unlink()
+            run_capture(["nginx", "-s", "reload"], timeout=15)
+            log("Removed nginx config")
     elif os.name == "nt":
-        try: run_capture(["schtasks", "/Delete", "/TN", "ServerInstaller-LMStudio", "/F"], timeout=15)
+        try:
+            run_capture(["schtasks", "/Delete", "/TN", "ServerInstaller-LMStudio", "/F"], timeout=15)
+            log("Removed scheduled task")
         except Exception: pass
-    install_dir = LMSTUDIO_STATE_DIR / "app"
-    if install_dir.exists(): shutil.rmtree(install_dir, ignore_errors=True)
-    if LMSTUDIO_STATE_FILE.exists(): LMSTUDIO_STATE_FILE.unlink()
-    return 0, "LM Studio service deleted."
+
+    # Clean up data
+    for subdir in ["app", "docker-webui", "certs", "venv"]:
+        d = LMSTUDIO_STATE_DIR / subdir
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            log(f"Removed directory: {subdir}")
+    if LMSTUDIO_STATE_FILE.exists():
+        LMSTUDIO_STATE_FILE.unlink()
+        log("Removed state file")
+
+    for port in [http_port, https_port]:
+        if port: manage_firewall_port("close", port, "tcp")
+
+    log("=== LM Studio completely removed ===")
+    return 0, "\n".join(output)
 
 
 # ── OpenClaw install/start/stop/delete ────────────────────────────────────────
@@ -7907,18 +7998,56 @@ def run_openclaw_stop(live_cb=None):
 
 
 def run_openclaw_delete(live_cb=None):
+    """Completely delete OpenClaw — Docker containers, images, OS service, data."""
+    output = []
+    def log(m):
+        output.append(m)
+        if live_cb: live_cb(m + "\n")
+    log("=== Deleting OpenClaw ===")
+
+    state = _read_json_file(OPENCLAW_STATE_FILE)
+    http_port = str(state.get("http_port") or "").strip()
+    https_port = str(state.get("https_port") or "").strip()
+
     run_openclaw_stop(live_cb=live_cb)
+
+    # Docker cleanup
+    if command_exists("docker"):
+        for cname in ["serverinstaller-openclaw"]:
+            run_capture(["docker", "stop", cname], timeout=30)
+            rc, _ = run_capture(["docker", "rm", "-f", cname], timeout=30)
+            if rc == 0: log(f"Removed Docker container: {cname}")
+
+    # Systemd cleanup
     if os.name != "nt" and command_exists("systemctl"):
-        run_capture(["systemctl", "disable", OPENCLAW_SYSTEMD_SERVICE], timeout=15)
-        svc_file = Path(f"/etc/systemd/system/{OPENCLAW_SYSTEMD_SERVICE}.service")
-        if svc_file.exists(): svc_file.unlink()
+        for svc in [OPENCLAW_SYSTEMD_SERVICE, "clawdbot-gateway"]:
+            run_capture(["systemctl", "disable", svc], timeout=15)
+            run_capture(["systemctl", "stop", svc], timeout=15)
+            svc_file = Path(f"/etc/systemd/system/{svc}.service")
+            if svc_file.exists():
+                svc_file.unlink()
+                log(f"Removed systemd unit: {svc}")
         run_capture(["systemctl", "daemon-reload"], timeout=15)
     elif os.name == "nt":
-        try: run_capture(["schtasks", "/Delete", "/TN", "ServerInstaller-OpenClaw", "/F"], timeout=15)
+        try:
+            run_capture(["schtasks", "/Delete", "/TN", "ServerInstaller-OpenClaw", "/F"], timeout=15)
+            log("Removed scheduled task")
         except Exception: pass
-    if (OPENCLAW_STATE_DIR / "app").exists(): shutil.rmtree(OPENCLAW_STATE_DIR / "app", ignore_errors=True)
-    if OPENCLAW_STATE_FILE.exists(): OPENCLAW_STATE_FILE.unlink()
-    return 0, "OpenClaw deleted."
+
+    for subdir in ["app", "certs"]:
+        d = OPENCLAW_STATE_DIR / subdir
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            log(f"Removed directory: {subdir}")
+    if OPENCLAW_STATE_FILE.exists():
+        OPENCLAW_STATE_FILE.unlink()
+        log("Removed state file")
+
+    for port in [http_port, https_port]:
+        if port: manage_firewall_port("close", port, "tcp")
+
+    log("=== OpenClaw completely removed ===")
+    return 0, "\n".join(output)
 
 
 def run_openclaw_docker(form=None, live_cb=None):
@@ -8767,6 +8896,70 @@ def _is_piper_name(name):
     return bool(re.search(r'piper', str(name or ""), re.IGNORECASE))
 
 
+def _run_ai_service_delete(service_id, display_name, state_file, state_dir, systemd_service, container_name=None, live_cb=None):
+    """Generic complete delete for AI services (Docker + OS + data + firewall)."""
+    output = []
+    def log(m):
+        output.append(m)
+        if live_cb: live_cb(m + "\n")
+    log(f"=== Deleting {display_name} ===")
+
+    state = _read_json_file(state_file)
+    http_port = str(state.get("http_port") or "").strip()
+    https_port = str(state.get("https_port") or "").strip()
+    cname = container_name or f"serverinstaller-{service_id}"
+
+    # Docker cleanup
+    if command_exists("docker"):
+        run_capture(["docker", "stop", cname], timeout=30)
+        rc, _ = run_capture(["docker", "rm", "-f", cname], timeout=30)
+        if rc == 0: log(f"Removed Docker container: {cname}")
+
+    # Systemd cleanup
+    if os.name != "nt" and command_exists("systemctl"):
+        run_capture(["systemctl", "disable", systemd_service], timeout=15)
+        run_capture(["systemctl", "stop", systemd_service], timeout=15)
+        svc_file = Path(f"/etc/systemd/system/{systemd_service}.service")
+        if svc_file.exists():
+            svc_file.unlink()
+            log(f"Removed systemd unit: {systemd_service}")
+        run_capture(["systemctl", "daemon-reload"], timeout=15)
+    elif os.name == "nt":
+        task_name = f"ServerInstaller-{display_name.replace(' ', '')}"
+        try:
+            run_capture(["schtasks", "/Delete", "/TN", task_name, "/F"], timeout=15)
+        except Exception: pass
+
+    # Clean up data
+    for subdir in ["app", "certs", "venv"]:
+        d = state_dir / subdir
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            log(f"Removed directory: {subdir}")
+    if state_file.exists():
+        state_file.unlink()
+        log("Removed state file")
+
+    for port in [http_port, https_port]:
+        if port: manage_firewall_port("close", port, "tcp")
+
+    log(f"=== {display_name} completely removed ===")
+    return 0, "\n".join(output)
+
+
+def run_tgwui_delete(live_cb=None):
+    return _run_ai_service_delete("tgwui", "Text Generation WebUI", TGWUI_STATE_FILE, TGWUI_STATE_DIR, TGWUI_SYSTEMD_SERVICE, live_cb=live_cb)
+
+def run_comfyui_delete(live_cb=None):
+    return _run_ai_service_delete("comfyui", "ComfyUI", COMFYUI_STATE_FILE, COMFYUI_STATE_DIR, COMFYUI_SYSTEMD_SERVICE, live_cb=live_cb)
+
+def run_whisper_delete(live_cb=None):
+    return _run_ai_service_delete("whisper", "Whisper STT", WHISPER_STATE_FILE, WHISPER_STATE_DIR, WHISPER_SYSTEMD_SERVICE, live_cb=live_cb)
+
+def run_piper_delete(live_cb=None):
+    return _run_ai_service_delete("piper", "Piper TTS", PIPER_STATE_FILE, PIPER_STATE_DIR, PIPER_SYSTEMD_SERVICE, live_cb=live_cb)
+
+
 def filter_service_items(scope):
     scope = str(scope or "all").strip().lower()
     items = get_service_items()
@@ -9306,6 +9499,16 @@ def manage_service(action, name, kind, detail=""):
         if action == "stop": return (run_lmstudio_stop()[0] == 0, run_lmstudio_stop()[1])
         if action == "restart": run_lmstudio_stop(); code, out = run_lmstudio_start(); return code == 0, out
         if action == "delete": code, out = run_lmstudio_delete(); return code == 0, out
+
+    # Generic AI services — route delete to dedicated cleanup functions
+    if _is_tgwui_name(svc_name) and action == "delete":
+        code, out = run_tgwui_delete(); return code == 0, out
+    if _is_comfyui_name(svc_name) and action == "delete":
+        code, out = run_comfyui_delete(); return code == 0, out
+    if _is_whisper_name(svc_name) and action == "delete":
+        code, out = run_whisper_delete(); return code == 0, out
+    if _is_piper_name(svc_name) and action == "delete":
+        code, out = run_piper_delete(); return code == 0, out
 
     if kind == "website_launchd":
         if os.name == "nt":
@@ -15600,6 +15803,70 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_run_result(title, code, output)
             return
         # ── OpenClaw routes ───────────────────────────────────────────────────
+        # ── Delete / Uninstall routes ────────────────────────────────────────
+        if self.path == "/run/ollama_delete":
+            title = "Uninstall Ollama"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_ollama_delete(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_ollama_delete()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/lmstudio_delete":
+            title = "Uninstall LM Studio"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_lmstudio_delete(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_lmstudio_delete()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/openclaw_delete":
+            title = "Uninstall OpenClaw"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_openclaw_delete(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_openclaw_delete()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/tgwui_delete":
+            title = "Uninstall Text Generation WebUI"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_tgwui_delete(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_tgwui_delete()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/comfyui_delete":
+            title = "Uninstall ComfyUI"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_comfyui_delete(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_comfyui_delete()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/whisper_delete":
+            title = "Uninstall Whisper STT"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_whisper_delete(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_whisper_delete()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/piper_delete":
+            title = "Uninstall Piper TTS"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_piper_delete(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_piper_delete()
+                self.respond_run_result(title, code, output)
+            return
         if self.path == "/run/openclaw_docker":
             title = "OpenClaw Docker"
             if self.is_fetch():

@@ -177,6 +177,16 @@
                 <Button variant="contained" size="small" sx={{ mt: 1.5, textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}
                   onClick={function() { window.open(bestUrl, "_blank"); }}>Open LM Studio</Button>
               )}
+              {installed && (
+                <Button variant="outlined" size="small" color="error" disabled={serviceBusy}
+                  sx={{ mt: 1, ml: bestUrl ? 1 : 0, textTransform: "none", fontWeight: 700 }}
+                  onClick={function() {
+                    if (!window.confirm("Are you sure you want to completely uninstall LM Studio Web UI?\n\nThis will remove:\n- All Docker containers and images\n- All configuration and certificates\n- Firewall rules\n\nThis action cannot be undone.")) return;
+                    run(null, "/run/lmstudio_delete", "Uninstall LM Studio");
+                  }}>
+                  Uninstall LM Studio
+                </Button>
+              )}
               <Box sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #e8edf6" }}>
                 <Typography variant="caption" color="text.secondary">
                   Download LM Studio: <a href="https://lmstudio.ai/download" target="_blank" rel="noopener">lmstudio.ai/download</a>

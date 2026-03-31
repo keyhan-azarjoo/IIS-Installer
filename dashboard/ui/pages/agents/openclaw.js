@@ -115,7 +115,10 @@
                   {installed && httpPort && <Typography variant="body2">Port: <b>{httpPort}</b></Typography>}
                   <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
                     {bestUrl && <Button variant="contained" size="small" onClick={function() { window.open(bestUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, fontSize: 12 }}>Open Dashboard</Button>}
-                    {installed && <Button variant="outlined" size="small" color="error" disabled={serviceBusy} onClick={function() { if (confirm("Delete OpenClaw?")) onServiceAction("delete", services[0] || { name: "serverinstaller-openclaw", kind: "systemd" }); }} sx={{ textTransform: "none", fontSize: 12 }}>Delete</Button>}
+                    {installed && <Button variant="outlined" size="small" color="error" disabled={serviceBusy} onClick={function() {
+                      if (!window.confirm("Are you sure you want to completely uninstall OpenClaw?\n\nThis will remove:\n- All Docker containers\n- All configuration and data\n- Firewall rules\n\nThis action cannot be undone.")) return;
+                      run(null, "/run/openclaw_delete", "Uninstall OpenClaw");
+                    }} sx={{ textTransform: "none", fontSize: 12 }}>Uninstall</Button>}
                   </Stack>
                 </Grid>
 

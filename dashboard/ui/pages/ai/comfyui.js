@@ -110,6 +110,16 @@
                   Open ComfyUI
                 </Button>
               )}
+              {installed && (
+                <Button variant="outlined" size="small" color="error" disabled={serviceBusy}
+                  sx={{ mt: 1, ml: (running && bestUrl) ? 1 : 0, textTransform: "none", fontWeight: 700 }}
+                  onClick={() => {
+                    if (!window.confirm("Are you sure you want to completely uninstall ComfyUI?\n\nThis will remove all containers, data, and configuration.\nThis action cannot be undone.")) return;
+                    run(null, "/run/comfyui_delete", "Uninstall ComfyUI");
+                  }}>
+                  Uninstall
+                </Button>
+              )}
             </CardContent>
           </Card>
         </Grid>
