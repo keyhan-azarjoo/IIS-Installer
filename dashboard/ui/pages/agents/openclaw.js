@@ -310,6 +310,19 @@
                     </Button>
                     {saveMsg && <Typography variant="caption" color="text.secondary">{saveMsg}</Typography>}
                   </Stack>
+                  <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
+                    <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>If models don't appear, run this in your server terminal (SSH):</Typography>
+                    <Paper elevation={0} sx={{ p: 1, bgcolor: "#0f172a", borderRadius: 1, mt: 0.5, position: "relative" }}>
+                      <Button size="small" onClick={function() { if (copyText) copyText("docker exec -it serverinstaller-openclaw openclaw configure", "Command"); }}
+                        sx={{ position: "absolute", top: 4, right: 4, minWidth: 0, px: 1, py: 0.2, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 10 }}>Copy</Button>
+                      <Typography variant="body2" sx={{ color: "#e2e8f0", fontFamily: "monospace", fontSize: 12 }}>
+                        docker exec -it serverinstaller-openclaw openclaw configure
+                      </Typography>
+                    </Paper>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                      This opens an interactive wizard where you can register Ollama, OpenAI, or Anthropic as providers.
+                    </Typography>
+                  </Alert>
                 </CardContent>
               </Card>
             </Grid>
