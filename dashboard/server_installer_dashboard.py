@@ -8336,9 +8336,9 @@ http {{
         '  "version": 1,',
         '  "profiles": {',
         '    "ollama:local": {',
-        '      "type": "token",',
+        '      "type": "api_key",',
         '      "provider": "ollama",',
-        '      "token": "ollama-local"',
+        '      "key": "ollama-local"',
         '    }',
         '  },',
         '  "lastGood": {',
@@ -16075,7 +16075,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Write auth-profiles.json with versioned format
                 profiles = {}
                 if ollama_key:
-                    profiles['"ollama:local"'] = f'{{"type":"token","provider":"ollama","token":"{ollama_key}"}}'
+                    profiles['"ollama:local"'] = f'{{"type":"api_key","provider":"ollama","key":"{ollama_key}"}}'
                 if lmstudio_key:
                     profiles['"lmstudio:local"'] = f'{{"type":"token","provider":"lmstudio","token":"{lmstudio_key}"}}'
                 if openai_key:
