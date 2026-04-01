@@ -54,7 +54,7 @@ from utils import (
     _sudo_prefix,
     upload_root_dir,
 )
-from system_info import choose_service_host
+from system_info import choose_s3_host, choose_service_host, get_ip_addresses, get_public_ipv4, get_windows_s3_docker_support
 from system_admin import is_windows_admin
 from cert_manager import _save_installed_commit, _fetch_remote_commit_sha
 
