@@ -32,17 +32,18 @@
     var bestUrl = computedHttpsUrl || computedHttpUrl;
     var gatewayToken = String(ocInfo.gateway_token || "").trim();
     var gatewayWsUrl = "";
-    if (displayHost && httpsPort) gatewayWsUrl = "wss://" + displayHost + ":" + httpsPort;
-    else if (displayHost && httpPort) gatewayWsUrl = "ws://" + displayHost + ":" + httpPort;
-    var tokenizedBestUrl = bestUrl;
-    if (bestUrl && gatewayToken) {
+    if (displayHost && httpsPort) gatewayWsUrl = "wss://" + displayHost + ":" + httpsPort + "/gateway";
+    else if (displayHost && httpPort) gatewayWsUrl = "ws://" + displayHost + ":" + httpPort + "/gateway";
+    var appUrl = bestUrl ? bestUrl.replace(/\/?$/, "/app/") : bestUrl;
+    var tokenizedBestUrl = appUrl;
+    if (appUrl && gatewayToken) {
       try {
-        var tokenUrl = new URL(bestUrl.replace(/\/?$/, "/"));
+        var tokenUrl = new URL(appUrl);
         tokenUrl.searchParams.set("token", gatewayToken);
         if (gatewayWsUrl) tokenUrl.searchParams.set("gatewayUrl", gatewayWsUrl);
         tokenizedBestUrl = tokenUrl.toString();
       } catch (e) {
-        tokenizedBestUrl = bestUrl.replace(/\/?$/, "/") + "?token=" + encodeURIComponent(gatewayToken) + (gatewayWsUrl ? ("&gatewayUrl=" + encodeURIComponent(gatewayWsUrl)) : "");
+        tokenizedBestUrl = appUrl + "?token=" + encodeURIComponent(gatewayToken) + (gatewayWsUrl ? ("&gatewayUrl=" + encodeURIComponent(gatewayWsUrl)) : "");
       }
     }
 
