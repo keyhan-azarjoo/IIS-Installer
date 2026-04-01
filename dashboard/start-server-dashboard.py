@@ -236,6 +236,80 @@ def _read_json_file(path: Path) -> dict:
         return {}
 
 
+def _repo_api_url() -> str:
+    raw = REPO.rstrip("/")
+    parts = raw.split("/")
+    if len(parts) >= 5 and parts[-3] and parts[-2] and parts[-1]:
+        owner, repo, branch = parts[-3], parts[-2], parts[-1]
+        return f"https://api.github.com/repos/{owner}/{repo}/commits/{branch}"
+    return ""
+
+
+def _save_installed_commit(root: Path, sha: str) -> None:
+    try:
+        target = root / "dashboard" / "installed-commit.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((sha or "").strip(), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _record_installed_commit(root: Path) -> None:
+    api_url = _repo_api_url()
+    if not api_url:
+        return
+    try:
+        req = urllib.request.Request(
+            api_url,
+            headers={"User-Agent": DOWNLOAD_USER_AGENT, "Accept": "application/vnd.github.v3+json"},
+        )
+        with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        sha = str(data.get("sha", "")).strip()
+        if sha:
+            _save_installed_commit(root, sha)
+    except Exception:
+        pass
+
+
+def _backup_dashboard_tree(root: Path):
+    dashboard_dir = root / "dashboard"
+    if not dashboard_dir.exists():
+        return None
+    backup_root = Path(tempfile.mkdtemp(prefix="server-installer-bootstrap-backup-"))
+    shutil.copytree(dashboard_dir, backup_root / "dashboard", dirs_exist_ok=True)
+    return backup_root
+
+
+def _restore_dashboard_tree(root: Path, backup_root):
+    if not backup_root:
+        return
+    src = backup_root / "dashboard"
+    dst = root / "dashboard"
+    if not src.exists():
+        return
+    shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
+def _validate_dashboard_install(root: Path) -> None:
+    dashboard_dir = root / "dashboard"
+    probe = (
+        "import importlib, sys; "
+        f"sys.path.insert(0, {dashboard_dir.as_posix()!r}); "
+        "importlib.import_module('server_installer_dashboard')"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(dashboard_dir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stdout or "").strip() or "Dashboard import validation failed.")
+
+
 def sync_files_for_current_os():
     files = list(SYNC_DASHBOARD_FILES)
     if os.name == "nt":
@@ -317,6 +391,7 @@ def _sync_files_from_repo_archive(root: Path, files: list[str]) -> None:
 
 def ensure_files(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
+    backup_root = _backup_dashboard_tree(root)
     local_root_str = os.environ.get("SERVER_INSTALLER_LOCAL_ROOT", "").strip()
     local_root = Path(local_root_str) if local_root_str else None
     files = sync_files_for_current_os()
@@ -332,8 +407,12 @@ def ensure_files(root: Path) -> None:
 
     try:
         _sync_files_from_repo_archive(root, files)
+        _validate_dashboard_install(root)
+        _record_installed_commit(root)
         return
     except Exception as ex:
+        if backup_root:
+            _restore_dashboard_tree(root, backup_root)
         print(f"Warning: archive sync failed; falling back to per-file downloads ({ex})")
 
     for rel in files:
@@ -351,6 +430,13 @@ def ensure_files(root: Path) -> None:
             if not target.exists():
                 raise RuntimeError(f"Failed to download required file '{rel}': {ex}") from ex
             print(f"Warning: using cached file for {rel} ({ex})")
+    try:
+        _validate_dashboard_install(root)
+    except Exception:
+        if backup_root:
+            _restore_dashboard_tree(root, backup_root)
+        raise
+    _record_installed_commit(root)
 
 
 def preferred_host(arg_host: str) -> str:

@@ -13,7 +13,20 @@ from constants import (
 )
 from utils import command_exists, run_capture, run_process, _read_json_file, _sudo_prefix
 from system_info import get_listening_ports
-from website_manager import _website_state_payload
+
+
+def _website_state_payload(site_name):
+    state = _read_json_file(WEBSITE_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        return {}
+    target = str(site_name or "").strip().lower()
+    for payload in deployments.values():
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("name") or "").strip().lower() == target:
+            return payload
+    return {}
 
 def _setup_nginx_http_redirect(service_name, http_port, https_port, live_cb=None):
     """Add/update an nginx config that redirects HTTP→HTTPS for the given service."""
@@ -632,5 +645,4 @@ def _get_linux_minio_direct_ports():
     except Exception:
         pass
     return ports
-
 

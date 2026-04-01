@@ -9,7 +9,10 @@ import subprocess
 import sys
 import threading
 import time
+import tempfile
+import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
 from constants import (
@@ -58,6 +61,121 @@ from system_info import choose_s3_host, choose_service_host, get_ip_addresses, g
 from port_manager import is_local_tcp_port_listening
 from system_admin import is_windows_admin
 from cert_manager import _save_installed_commit, _fetch_remote_commit_sha
+
+
+DOWNLOAD_USER_AGENT = "ServerInstallerDashboard/1.0"
+DOWNLOAD_TIMEOUT = 60
+DOWNLOAD_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _repo_archive_url():
+    raw = REPO_RAW_BASE.rstrip("/")
+    parts = raw.split("/")
+    if len(parts) >= 5 and parts[-3] and parts[-2] and parts[-1]:
+        owner, repo, branch = parts[-3], parts[-2], parts[-1]
+        return f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
+    return ""
+
+
+def _retry_delay(attempt: int, ex: Exception) -> float:
+    if isinstance(ex, urllib.error.HTTPError):
+        retry_after = (ex.headers.get("Retry-After", "") or "").strip()
+        if retry_after.isdigit():
+            return max(1.0, min(float(retry_after), 30.0))
+    return min(2 ** (attempt - 1), 8)
+
+
+def _download_to_path(url: str, destination: Path, *, attempts: int = 4) -> None:
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": DOWNLOAD_USER_AGENT})
+            with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as response, open(destination, "wb") as dst:
+                shutil.copyfileobj(response, dst)
+            return
+        except urllib.error.HTTPError as ex:
+            last_error = ex
+            if ex.code not in DOWNLOAD_RETRY_STATUS_CODES or attempt >= attempts:
+                break
+            time.sleep(_retry_delay(attempt, ex))
+        except Exception as ex:
+            last_error = ex
+            if attempt >= attempts:
+                break
+            time.sleep(_retry_delay(attempt, ex))
+    raise last_error if last_error else RuntimeError(f"Failed to download {url}")
+
+
+def _sync_files_from_repo_archive(files, live_cb=None):
+    archive_url = _repo_archive_url()
+    if not archive_url:
+        raise RuntimeError("Unable to derive repository archive URL.")
+    if live_cb:
+        live_cb("[INFO] Downloading Server Installer archive...\n")
+    with tempfile.TemporaryDirectory(prefix="server-installer-dashboard-update-") as tmp_dir:
+        archive_path = Path(tmp_dir) / "server-installer.zip"
+        _download_to_path(archive_url, archive_path)
+        with zipfile.ZipFile(archive_path) as archive:
+            names = set(archive.namelist())
+            prefix = ""
+            for name in names:
+                if "/" in name:
+                    prefix = name.split("/", 1)[0]
+                    break
+            if not prefix:
+                raise RuntimeError("Downloaded archive has an unexpected layout.")
+            total = len(files)
+            for i, rel in enumerate(files, 1):
+                member = f"{prefix}/{rel}"
+                if member not in names:
+                    raise RuntimeError(f"Archive is missing required file '{rel}'.")
+                target = ROOT / rel.replace("/", os.sep)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                tmp_target = Path(str(target) + ".download")
+                if live_cb:
+                    live_cb(f"[{i}/{total}] {rel}\n")
+                with archive.open(member) as src, open(tmp_target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                os.replace(str(tmp_target), str(target))
+
+
+def _backup_dashboard_tree(base_root: Path):
+    dashboard_dir = base_root / "dashboard"
+    if not dashboard_dir.exists():
+        return None
+    backup_root = Path(tempfile.mkdtemp(prefix="server-installer-dashboard-backup-"))
+    shutil.copytree(dashboard_dir, backup_root / "dashboard", dirs_exist_ok=True)
+    return backup_root
+
+
+def _restore_dashboard_tree(base_root: Path, backup_root: Path | None):
+    if not backup_root:
+        return
+    src = backup_root / "dashboard"
+    dst = base_root / "dashboard"
+    if not src.exists():
+        return
+    shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
+def _validate_dashboard_install(base_root: Path):
+    dashboard_dir = base_root / "dashboard"
+    if not dashboard_dir.exists():
+        return False, "Dashboard directory is missing after sync."
+    probe = (
+        "import importlib, sys; "
+        f"sys.path.insert(0, {dashboard_dir.as_posix()!r}); "
+        "importlib.import_module('server_installer_dashboard')"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(dashboard_dir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    return proc.returncode == 0, (proc.stdout or "").strip()
 
 def run_windows_installer(form, live_cb=None):
     if os.name != "nt":
@@ -2659,6 +2777,7 @@ echo "[INFO] LocalS3 API/Console services stopped."
 
 def run_dashboard_update(live_cb=None):
     repo_base = REPO_RAW_BASE
+    backup_root = _backup_dashboard_tree(ROOT)
 
     manifest_path = ROOT / "dashboard" / "download-manifest.txt"
     try:
@@ -2718,28 +2837,35 @@ def run_dashboard_update(live_cb=None):
         ]
 
     total = len(files)
-    if live_cb:
-        live_cb(f"[INFO] Downloading {total} files from repository...\n")
-
     failed = []
-    for i, rel in enumerate(files, 1):
-        url = f"{repo_base}/{rel}"
-        target = ROOT / rel.replace("/", os.sep)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = Path(str(target) + ".download")
+    archive_sync_error = None
+    try:
+        _sync_files_from_repo_archive(files, live_cb=live_cb)
+    except Exception as ex:
+        archive_sync_error = ex
         if live_cb:
-            live_cb(f"[{i}/{total}] {rel}\n")
-        try:
-            urllib.request.urlretrieve(url, str(tmp))
-            os.replace(str(tmp), str(target))
-        except Exception as ex:
-            try:
-                tmp.unlink()
-            except Exception:
-                pass
+            live_cb(f"[WARN] Archive sync failed; falling back to individual downloads: {ex}\n")
+            live_cb(f"[INFO] Downloading {total} files from repository...\n")
+
+    if archive_sync_error is not None:
+        for i, rel in enumerate(files, 1):
+            url = f"{repo_base}/{rel}"
+            target = ROOT / rel.replace("/", os.sep)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = Path(str(target) + ".download")
             if live_cb:
-                live_cb(f"  WARNING: failed to download {rel}: {ex}\n")
-            failed.append(rel)
+                live_cb(f"[{i}/{total}] {rel}\n")
+            try:
+                _download_to_path(url, tmp)
+                os.replace(str(tmp), str(target))
+            except Exception as ex:
+                try:
+                    tmp.unlink()
+                except Exception:
+                    pass
+                if live_cb:
+                    live_cb(f"  WARNING: failed to download {rel}: {ex}\n")
+                failed.append(rel)
 
     if failed:
         if live_cb:
@@ -2752,12 +2878,29 @@ def run_dashboard_update(live_cb=None):
         except Exception:
             pass
 
+    ok, validation_output = _validate_dashboard_install(ROOT)
+    if not ok:
+        _restore_dashboard_tree(ROOT, backup_root)
+        for cache_dir in (ROOT / "dashboard").rglob("__pycache__"):
+            try:
+                shutil.rmtree(cache_dir, ignore_errors=True)
+            except Exception:
+                pass
+        message = "[ERROR] Dashboard validation failed after sync. Restored previous dashboard files."
+        if live_cb:
+            live_cb(message + "\n")
+            if validation_output:
+                live_cb(validation_output + "\n")
+        return 1, message + (f"\n{validation_output}\n" if validation_output else "\n")
+
     # Record the remote commit SHA so the next version-check knows what was installed.
     remote_sha = _fetch_remote_commit_sha(timeout=8)
-    if remote_sha:
+    if remote_sha and not failed:
         _save_installed_commit(remote_sha)
         if live_cb:
             live_cb(f"[INFO] Recorded installed commit: {remote_sha[:12]}\n")
+    elif remote_sha and failed and live_cb:
+        live_cb("[WARN] Installed commit was not updated because some files are still cached.\n")
 
     if live_cb:
         live_cb("[INFO] All files synced. Restarting dashboard service...\n")
@@ -3079,4 +3222,3 @@ echo "Nginx configured: HTTPS={https_port} -> container port {docker_host_port}"
                 extra += f"HTTP URL:  http://{resolved_ip}:{http_port}\n"
 
     return 0, (output or "") + extra
-
