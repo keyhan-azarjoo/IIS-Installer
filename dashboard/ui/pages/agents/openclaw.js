@@ -31,7 +31,20 @@
     var computedHttpsUrl = installed && displayHost && httpsPort ? "https://" + displayHost + ":" + httpsPort : (installed ? httpsUrl : "");
     var bestUrl = computedHttpsUrl || computedHttpUrl;
     var gatewayToken = String(ocInfo.gateway_token || "").trim();
-    var tokenizedBestUrl = gatewayToken && bestUrl ? (bestUrl.replace(/\/?$/, "/") + "?token=" + encodeURIComponent(gatewayToken)) : bestUrl;
+    var gatewayWsUrl = "";
+    if (displayHost && httpsPort) gatewayWsUrl = "wss://" + displayHost + ":" + httpsPort;
+    else if (displayHost && httpPort) gatewayWsUrl = "ws://" + displayHost + ":" + httpPort;
+    var tokenizedBestUrl = bestUrl;
+    if (bestUrl && gatewayToken) {
+      try {
+        var tokenUrl = new URL(bestUrl.replace(/\/?$/, "/"));
+        tokenUrl.searchParams.set("token", gatewayToken);
+        if (gatewayWsUrl) tokenUrl.searchParams.set("gatewayUrl", gatewayWsUrl);
+        tokenizedBestUrl = tokenUrl.toString();
+      } catch (e) {
+        tokenizedBestUrl = bestUrl.replace(/\/?$/, "/") + "?token=" + encodeURIComponent(gatewayToken) + (gatewayWsUrl ? ("&gatewayUrl=" + encodeURIComponent(gatewayWsUrl)) : "");
+      }
+    }
 
     var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
     var commonFields = [
