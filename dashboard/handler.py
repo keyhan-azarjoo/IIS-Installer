@@ -1195,7 +1195,7 @@ class Handler(BaseHTTPRequestHandler):
                 traceback.print_exc()
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
-        if self.path == "/":
+        if self.path in ("/", "/login"):
             if self.is_local_client() or self.is_auth():
                 self.write_html(page_dashboard())
             else:
