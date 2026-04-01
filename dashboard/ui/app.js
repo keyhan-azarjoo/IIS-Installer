@@ -39,6 +39,9 @@ const {
 } = actions;
 
 function App() {
+  const GENERIC_AI_SCOPES = React.useMemo(() => ([
+    "vllm", "llamacpp", "deepseek", "localai", "sdwebui", "fooocus", "coqui", "bark", "rvc", "openwebui", "chromadb", "custom"
+  ]), []);
   const isMobile = MaterialUI.useMediaQuery("(max-width:1100px)");
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
@@ -76,6 +79,7 @@ function App() {
   const [comfyuiPageServices, setComfyuiPageServices] = React.useState([]);
   const [whisperPageServices, setWhisperPageServices] = React.useState([]);
   const [piperPageServices, setPiperPageServices] = React.useState([]);
+  const [genericAiPageServices, setGenericAiPageServices] = React.useState({});
   const [mongoInfoState, setMongoInfoState] = React.useState(null);
   const [s3InfoState, setS3InfoState] = React.useState(null);
   const [dotnetInfoState, setDotnetInfoState] = React.useState(null);
@@ -91,6 +95,7 @@ function App() {
   const [comfyuiInfoState, setComfyuiInfoState] = React.useState(null);
   const [whisperInfoState, setWhisperInfoState] = React.useState(null);
   const [piperInfoState, setPiperInfoState] = React.useState(null);
+  const [genericAiInfoState, setGenericAiInfoState] = React.useState({});
   const [pythonApiEditor, setPythonApiEditor] = React.useState(null);
   const [pythonApiEditorSeed, setPythonApiEditorSeed] = React.useState(0);
   const [serviceEditDlg, setServiceEditDlg] = React.useState(null);
@@ -243,6 +248,8 @@ function App() {
   const loadComfyuiInfo = React.useRef(async () => {});
   const loadWhisperInfo = React.useRef(async () => {});
   const loadPiperInfo = React.useRef(async () => {});
+  const loadGenericAiServices = React.useRef(async () => {});
+  const loadGenericAiInfo = React.useRef(async () => {});
 
   const loadServiceScope = React.useCallback(async (scope, setter) => {
     setScopeLoadingFlag(scope, true);
@@ -306,6 +313,13 @@ function App() {
   loadComfyuiInfo.current = async () => loadScopedStatus("comfyui", setComfyuiInfoState);
   loadWhisperInfo.current = async () => loadScopedStatus("whisper", setWhisperInfoState);
   loadPiperInfo.current = async () => loadScopedStatus("piper", setPiperInfoState);
+  loadGenericAiServices.current = async (scope) => loadServiceScope(scope, (items) => {
+    setGenericAiPageServices((prev) => ({ ...prev, [scope]: Array.isArray(items) ? items : [] }));
+  });
+  loadGenericAiInfo.current = async (scope) => loadScopedStatus(scope, (status) => {
+    const nextInfo = status && status.software ? status.software[scope + "_service"] || null : null;
+    setGenericAiInfoState((prev) => ({ ...prev, [scope]: nextInfo }));
+  });
 
   const refreshPageServices = React.useCallback((targetPage) => {
     if (targetPage === "services") return loadServices.current();
@@ -323,6 +337,10 @@ function App() {
     if (targetPage === "ai-comfyui") return loadComfyuiServices.current();
     if (targetPage === "ai-whisper") return loadWhisperServices.current();
     if (targetPage === "ai-piper") return loadPiperServices.current();
+    if (String(targetPage || "").startsWith("ai-")) {
+      const genericScope = String(targetPage).replace(/^ai-/, "").replace(/-api$/, "");
+      if (GENERIC_AI_SCOPES.includes(genericScope)) return loadGenericAiServices.current(genericScope);
+    }
     if (targetPage === "dotnet" || targetPage === "dotnet-docker" || targetPage === "dotnet-linux") return Promise.all([loadDotnetServices.current(), loadDockerServices.current()]);
     if (targetPage === "dotnet-iis") return Promise.all([loadDotnetServices.current(), loadServices.current()]);
     if (String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
@@ -345,6 +363,10 @@ function App() {
     if (targetPage === "ai-comfyui") return loadComfyuiInfo.current();
     if (targetPage === "ai-whisper") return loadWhisperInfo.current();
     if (targetPage === "ai-piper") return loadPiperInfo.current();
+    if (String(targetPage || "").startsWith("ai-")) {
+      const genericScope = String(targetPage).replace(/^ai-/, "").replace(/-api$/, "");
+      if (GENERIC_AI_SCOPES.includes(genericScope)) return loadGenericAiInfo.current(genericScope);
+    }
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetInfo.current();
     if (targetPage === "home" || targetPage === "api" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
     return Promise.resolve();
@@ -1824,6 +1846,15 @@ function App() {
     }
   }, [cfg.os, mongo.web_version, mongoWebsiteUrl]);
 
+  const genericAiProps = React.useMemo(() => {
+    const entries = {};
+    GENERIC_AI_SCOPES.forEach((scope) => {
+      entries[scope + "Service"] = genericAiInfoState[scope] || null;
+      entries[scope + "PageServices"] = genericAiPageServices[scope] || [];
+    });
+    return entries;
+  }, [GENERIC_AI_SCOPES, genericAiInfoState, genericAiPageServices]);
+
   const commonProps = {
     // MUI components
     Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Dialog, DialogActions,
@@ -1912,6 +1943,7 @@ function App() {
     createFolderInCurrentPath, createFileInCurrentPath,
     renameFileManagerPath, deleteFileManagerPath, uploadIntoCurrentPath,
     setFileEditorContent, setFileEditorDirty,
+    ...genericAiProps,
   };
 
   const currentPageScope = (() => {

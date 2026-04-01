@@ -32,6 +32,13 @@
     const [transcribing, setTranscribing] = React.useState(false);
     const [transcription, setTranscription] = React.useState("");
     const [transcriptionError, setTranscriptionError] = React.useState("");
+    const [subtitleFormat, setSubtitleFormat] = React.useState("srt");
+    const [subtitleDownloadUrl, setSubtitleDownloadUrl] = React.useState("");
+    const [burnedVideoUrl, setBurnedVideoUrl] = React.useState("");
+    const [recording, setRecording] = React.useState(false);
+    const [recordedBlob, setRecordedBlob] = React.useState(null);
+    const mediaRecorderRef = React.useRef(null);
+    const mediaChunksRef = React.useRef([]);
     const fileInputRef = React.useRef(null);
 
     // Handle file selection
@@ -41,20 +48,29 @@
         setAudioFile(file);
         setTranscription("");
         setTranscriptionError("");
+        setSubtitleDownloadUrl("");
+        setBurnedVideoUrl("");
+        setRecordedBlob(null);
       }
     }, []);
 
     // Handle transcription
     const handleTranscribe = React.useCallback(async () => {
-      if (!audioFile) return;
+      if (!audioFile && !recordedBlob) return;
       setTranscribing(true);
       setTranscription("");
       setTranscriptionError("");
+      setSubtitleDownloadUrl("");
+      setBurnedVideoUrl("");
       try {
         const formData = new FormData();
-        formData.append("file", audioFile);
-        formData.append("model", "whisper-1");
-        const url = bestUrl.replace(/\/$/, "") + "/v1/audio/transcriptions";
+        const media = recordedBlob || audioFile;
+        const mediaName = recordedBlob ? "live-recording.webm" : (audioFile && audioFile.name) || "media.bin";
+        formData.append("media", media, mediaName);
+        formData.append("subtitle_format", subtitleFormat);
+        formData.append("task", "transcribe");
+        formData.append("burn_subtitles", audioFile && audioFile.type && audioFile.type.startsWith("video/") ? "1" : "0");
+        const url = "/api/ai/whisper/subtitles";
         const r = await fetch(url, {
           method: "POST",
           body: formData,
@@ -65,12 +81,48 @@
         } else {
           const j = await r.json();
           setTranscription(j.text || JSON.stringify(j, null, 2));
+          setSubtitleDownloadUrl(j.subtitle_download_url || "");
+          setBurnedVideoUrl(j.burned_video_download_url || "");
         }
       } catch (e) {
         setTranscriptionError(`Error: ${e}`);
       }
       setTranscribing(false);
-    }, [audioFile, bestUrl]);
+    }, [audioFile, recordedBlob, subtitleFormat]);
+
+    const startRecording = React.useCallback(async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        mediaChunksRef.current = [];
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) mediaChunksRef.current.push(event.data);
+        };
+        recorder.onstop = () => {
+          const blob = new Blob(mediaChunksRef.current, { type: "audio/webm" });
+          setRecordedBlob(blob);
+          setAudioFile(null);
+          stream.getTracks().forEach((track) => track.stop());
+        };
+        recorder.start();
+        mediaRecorderRef.current = recorder;
+        setRecording(true);
+        setTranscription("");
+        setTranscriptionError("");
+      } catch (e) {
+        setTranscriptionError(`Microphone error: ${e}`);
+      }
+    }, []);
+
+    const stopRecording = React.useCallback(() => {
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+      } finally {
+        setRecording(false);
+      }
+    }, []);
 
     const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
 
@@ -181,16 +233,16 @@
           <Grid item xs={12} md={8}>
             <Card sx={{ borderRadius: 3, border: "1px solid #0d948833" }}>
               <CardContent>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 1.5, color: "#0d9488" }}>Test Transcription</Typography>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1.5, color: "#0d9488" }}>Transcription & Subtitles</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Upload an audio file to test speech-to-text transcription. Supports mp3, wav, m4a, webm, mp4, flac, ogg, and more.
+                  Upload audio, upload a video to generate subtitle files, or record a short live clip from your microphone.
                 </Typography>
 
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems="center" sx={{ mb: 2 }}>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="audio/*,.mp3,.wav,.m4a,.webm,.mp4,.flac,.ogg"
+                    accept="audio/*,video/*,.mp3,.wav,.m4a,.webm,.mp4,.flac,.ogg,.mov,.mkv,.avi"
                     style={{ display: "none" }}
                     onChange={handleFileSelect}
                   />
@@ -199,18 +251,38 @@
                     onClick={() => fileInputRef.current && fileInputRef.current.click()}
                     sx={{ textTransform: "none", borderColor: "#0d9488", color: "#0d9488" }}
                   >
-                    {audioFile ? "Change File" : "Select Audio File"}
+                    {audioFile ? "Change File" : "Select Audio / Video"}
                   </Button>
                   {audioFile && (
-                    <Chip label={audioFile.name} size="small" onDelete={() => { setAudioFile(null); setTranscription(""); setTranscriptionError(""); if (fileInputRef.current) fileInputRef.current.value = ""; }} />
+                    <Chip label={audioFile.name} size="small" onDelete={() => { setAudioFile(null); setTranscription(""); setTranscriptionError(""); setSubtitleDownloadUrl(""); setBurnedVideoUrl(""); if (fileInputRef.current) fileInputRef.current.value = ""; }} />
+                  )}
+                  {recordedBlob && !audioFile && (
+                    <Chip label="Live recording ready" size="small" onDelete={() => setRecordedBlob(null)} />
+                  )}
+                  <FormControl size="small" sx={{ minWidth: 130 }}>
+                    <InputLabel>Subtitle Format</InputLabel>
+                    <Select value={subtitleFormat} label="Subtitle Format" onChange={(e) => setSubtitleFormat(e.target.value)}>
+                      <MenuItem value="srt">SRT</MenuItem>
+                      <MenuItem value="vtt">VTT</MenuItem>
+                      <MenuItem value="txt">TXT</MenuItem>
+                    </Select>
+                  </FormControl>
+                  {!recording ? (
+                    <Button variant="outlined" onClick={startRecording} sx={{ textTransform: "none" }}>
+                      Record Live Audio
+                    </Button>
+                  ) : (
+                    <Button variant="outlined" color="error" onClick={stopRecording} sx={{ textTransform: "none" }}>
+                      Stop Recording
+                    </Button>
                   )}
                   <Button
                     variant="contained"
-                    disabled={!audioFile || transcribing}
+                    disabled={(!audioFile && !recordedBlob) || transcribing}
                     onClick={handleTranscribe}
                     sx={{ textTransform: "none", bgcolor: "#0d9488", minWidth: 120 }}
                   >
-                    {transcribing ? "Transcribing..." : "Transcribe"}
+                    {transcribing ? "Processing..." : "Run Whisper"}
                   </Button>
                 </Stack>
 
@@ -222,6 +294,20 @@
                   <Paper elevation={0} sx={{ bgcolor: "#f0fdfa", border: "1px solid #99f6e4", borderRadius: 2, p: 2 }}>
                     <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Transcription Result:</Typography>
                     <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{transcription}</Typography>
+                    {(subtitleDownloadUrl || burnedVideoUrl) && (
+                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mt: 1.5 }}>
+                        {subtitleDownloadUrl && (
+                          <Button component="a" href={subtitleDownloadUrl} variant="outlined" sx={{ textTransform: "none" }}>
+                            Download {subtitleFormat.toUpperCase()}
+                          </Button>
+                        )}
+                        {burnedVideoUrl && (
+                          <Button component="a" href={burnedVideoUrl} variant="outlined" sx={{ textTransform: "none" }}>
+                            Download Subtitled Video
+                          </Button>
+                        )}
+                      </Stack>
+                    )}
                   </Paper>
                 )}
 

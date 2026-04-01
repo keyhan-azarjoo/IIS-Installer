@@ -6,8 +6,10 @@ import shutil
 import subprocess
 import sys
 import time
+from copy import deepcopy
 from pathlib import Path
 
+from ai_catalog import get_generic_ai_service, is_generic_ai_service, list_generic_ai_service_ids
 from constants import (
     COMFYUI_STATE_DIR,
     COMFYUI_STATE_FILE,
@@ -90,6 +92,30 @@ def _ensure_docker_ready(log):
         return 1, "Docker is installed but the daemon is not running. Start Docker and retry."
 
     return 1, "Docker is installed but the daemon is not running."
+
+
+def _generic_ai_state_paths(service_id):
+    sid = str(service_id or "").strip().lower()
+    state_dir = SERVER_INSTALLER_DATA / sid
+    return state_dir / f"{sid}-state.json", state_dir
+
+
+def _managed_ai_state_paths(service_id):
+    sid = str(service_id or "").strip().lower()
+    builtins = {
+        "ollama": (OLLAMA_STATE_FILE, OLLAMA_STATE_DIR),
+        "lmstudio": (LMSTUDIO_STATE_FILE, LMSTUDIO_STATE_DIR),
+        "openclaw": (OPENCLAW_STATE_FILE, OPENCLAW_STATE_DIR),
+        "tgwui": (TGWUI_STATE_FILE, TGWUI_STATE_DIR),
+        "comfyui": (COMFYUI_STATE_FILE, COMFYUI_STATE_DIR),
+        "whisper": (WHISPER_STATE_FILE, WHISPER_STATE_DIR),
+        "piper": (PIPER_STATE_FILE, PIPER_STATE_DIR),
+    }
+    if sid in builtins:
+        return builtins[sid]
+    if is_generic_ai_service(sid):
+        return _generic_ai_state_paths(sid)
+    raise KeyError(f"Unknown AI service id: {service_id}")
 
 def _get_ai_service_info(state_file, state_dir, systemd_service, display_name, default_port="11434"):
     """Generic info builder for AI services (Ollama, TGWUI, ComfyUI, Whisper, Piper)."""
@@ -283,6 +309,99 @@ def get_whisper_info():
 def get_piper_info():
     return _get_ai_service_info(PIPER_STATE_FILE, PIPER_STATE_DIR, PIPER_SYSTEMD_SERVICE, "Piper TTS Service", "5500")
 
+
+def _docker_password_hash(password):
+    password = str(password or "")
+    if not password:
+        return ""
+    cmd = ["docker", "run", "--rm", "caddy:2-alpine", "caddy", "hash-password", "--plaintext", password]
+    rc, out = run_capture(cmd, timeout=120)
+    if rc != 0:
+        raise RuntimeError(out or "Failed to generate password hash with Caddy.")
+    return str(out or "").strip().splitlines()[-1].strip()
+
+
+def _write_ai_proxy_caddyfile(proxy_dir, upstream_name, upstream_port, http_enabled, https_enabled, username="", password_hash=""):
+    proxy_dir.mkdir(parents=True, exist_ok=True)
+    auth_block = ""
+    if username and password_hash:
+        auth_block = (
+            "    basicauth {\n"
+            f"        {username} {password_hash}\n"
+            "    }\n"
+        )
+    blocks = []
+    if http_enabled:
+        blocks.append(
+            ":80 {\n"
+            f"{auth_block}"
+            f"    reverse_proxy {upstream_name}:{upstream_port}\n"
+            "}\n"
+        )
+    if https_enabled:
+        blocks.append(
+            ":443 {\n"
+            "    tls internal\n"
+            f"{auth_block}"
+            f"    reverse_proxy {upstream_name}:{upstream_port}\n"
+            "}\n"
+        )
+    if not blocks:
+        raise RuntimeError("At least one of HTTP or HTTPS must be enabled.")
+    caddyfile = proxy_dir / "Caddyfile"
+    caddyfile.write_text("\n".join(blocks), encoding="utf-8")
+    return caddyfile
+
+
+def _remove_ai_docker_artifacts(service_id):
+    sid = str(service_id or "").strip().lower()
+    container_name = f"serverinstaller-{sid}"
+    proxy_name = f"{container_name}-proxy"
+    network_name = f"{container_name}-net"
+    if command_exists("docker"):
+        run_capture(["docker", "rm", "-f", proxy_name], timeout=30)
+        run_capture(["docker", "rm", "-f", container_name], timeout=30)
+        run_capture(["docker", "network", "rm", network_name], timeout=30)
+
+
+def _run_managed_ai_docker_action(service_id, action, live_cb=None):
+    sid = str(service_id or "").strip().lower()
+    state_file, _state_dir = _managed_ai_state_paths(sid)
+    state = _read_json_file(state_file)
+    if not state:
+        return 1, f"No saved state for {sid}."
+    container_name = str(state.get("service_name") or f"serverinstaller-{sid}").strip()
+    proxy_name = str(state.get("proxy_service_name") or f"{container_name}-proxy").strip()
+    targets = [container_name]
+    if state.get("proxy_enabled"):
+        targets.append(proxy_name)
+    output = []
+    def log(message):
+        output.append(message)
+        if live_cb:
+            live_cb(message + "\n")
+    if not command_exists("docker"):
+        return 1, "Docker is not available."
+    if action == "delete":
+        _remove_ai_docker_artifacts(sid)
+        state.update({"running": False, "installed": False})
+        _write_json_file(state_file, state)
+        return 0, f"{sid} Docker deployment removed."
+    cmd_name = {"start": "start", "stop": "stop", "restart": "restart"}.get(action)
+    if not cmd_name:
+        return 1, f"Unsupported action: {action}"
+    for target in targets:
+        rc, out = run_capture(["docker", cmd_name, target], timeout=120)
+        if rc != 0 and cmd_name != "stop":
+            log(out or f"Failed to {cmd_name} {target}.")
+            return rc, "\n".join(output)
+        if out:
+            log(out.strip())
+    state["running"] = action != "stop"
+    _write_json_file(state_file, state)
+    return 0, "\n".join(output) or f"{action} completed."
+
+
 # ── Generic AI service installer ────────────────────────────────────────────
 def _run_ai_service_install(service_id, form, state_file, state_dir, systemd_service, display_name, default_port, install_cmd_map, live_cb=None):
     """Generic installer for AI services. install_cmd_map = {os_name: [commands]}."""
@@ -440,7 +559,7 @@ def _install_whisper_os(log, install_dir, form, extra):
     server_py = install_dir / "whisper_server.py"
     server_py.write_text(f'''#!/usr/bin/env python3
 """Whisper speech-to-text API server."""
-import os, sys, json, tempfile
+import os, tempfile
 from flask import Flask, request, jsonify
 app = Flask(__name__)
 model = None
@@ -451,11 +570,47 @@ def get_model():
     if model is None:
         try:
             from faster_whisper import WhisperModel
-            model = WhisperModel(MODEL_SIZE, device="auto", compute_type="auto")
+            model = ("faster_whisper", WhisperModel(MODEL_SIZE, device="auto", compute_type="auto"))
         except Exception:
             import whisper
-            model = whisper.load_model(MODEL_SIZE)
+            model = ("openai_whisper", whisper.load_model(MODEL_SIZE))
     return model
+
+def _transcribe_file(tmp_path, task="transcribe"):
+    backend, m = get_model()
+    if backend == "faster_whisper":
+        segments, info = m.transcribe(tmp_path, task=task)
+        seg_list = []
+        texts = []
+        for seg in segments:
+            seg_list.append({{"start": float(seg.start), "end": float(seg.end), "text": str(seg.text).strip()}})
+            texts.append(str(seg.text).strip())
+        return {{"text": " ".join([t for t in texts if t]).strip(), "language": getattr(info, "language", ""), "segments": seg_list}}
+    result = m.transcribe(tmp_path, task=task)
+    seg_list = []
+    for seg in result.get("segments") or []:
+        seg_list.append({{"start": float(seg.get("start", 0.0)), "end": float(seg.get("end", 0.0)), "text": str(seg.get("text", "")).strip()}})
+    return {{"text": str(result.get("text", "")).strip(), "language": result.get("language", ""), "segments": seg_list}}
+
+def _handle_transcription():
+    audio = request.files.get("audio") or request.files.get("file")
+    if not audio:
+        return jsonify({{"error": "No audio file provided"}}), 400
+    response_format = (request.form.get("response_format") or "json").strip().lower()
+    task = (request.form.get("task") or "transcribe").strip().lower()
+    suffix = os.path.splitext(audio.filename or "audio.bin")[1] or ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        audio.save(tmp.name)
+        tmp_path = tmp.name
+    try:
+        payload = _transcribe_file(tmp_path, task=task)
+        if response_format == "verbose_json":
+            return jsonify(payload)
+        return jsonify({{"ok": True, "text": payload.get("text", ""), "language": payload.get("language", "")}})
+    except Exception as e:
+        return jsonify({{"ok": False, "error": str(e)}}), 500
+    finally:
+        os.unlink(tmp_path)
 
 @app.route("/", methods=["GET"])
 def index():
@@ -463,26 +618,11 @@ def index():
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
-    if "audio" not in request.files:
-        return jsonify({{"error": "No audio file provided"}}), 400
-    audio = request.files["audio"]
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        audio.save(tmp.name)
-        tmp_path = tmp.name
-    try:
-        m = get_model()
-        if hasattr(m, "transcribe") and hasattr(m.transcribe, "__code__"):
-            # faster-whisper
-            segments, info = m.transcribe(tmp_path)
-            text = " ".join([s.text for s in segments])
-            return jsonify({{"ok": True, "text": text.strip(), "language": info.language}})
-        else:
-            result = m.transcribe(tmp_path)
-            return jsonify({{"ok": True, "text": result["text"].strip(), "language": result.get("language", "")}})
-    except Exception as e:
-        return jsonify({{"ok": False, "error": str(e)}}), 500
-    finally:
-        os.unlink(tmp_path)
+    return _handle_transcription()
+
+@app.route("/v1/audio/transcriptions", methods=["POST"])
+def openai_transcriptions():
+    return _handle_transcription()
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -2244,48 +2384,185 @@ CMD ["python", "lmstudio_web.py"]
     return code2, "\n".join(output)
 
 
-def _run_ai_docker_generic(service_id, image, form, default_port, container_port, display_name, state_file, state_dir, live_cb=None, extra_args=None):
-    """Generic Docker install for AI services."""
+def _run_ai_docker_generic(
+    service_id,
+    image,
+    form,
+    default_port,
+    container_port,
+    display_name,
+    state_file,
+    state_dir,
+    live_cb=None,
+    extra_args=None,
+    extra_env=None,
+    extra_volumes=None,
+    extra_command=None,
+    gpu_mode="auto",
+    gpu_image="",
+    post_start_exec=None,
+):
+    """Deploy an AI service behind a managed Caddy proxy with optional auth and HTTPS."""
     form = form or {}
-    port = (form.get(f"{service_id.upper()}_HTTP_PORT", [default_port])[0] or default_port).strip()
-    host = (form.get(f"{service_id.upper()}_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
+    sid = str(service_id or "").strip().lower()
+    http_port = (form.get(f"{sid.upper()}_HTTP_PORT", [default_port])[0] or "").strip()
+    https_port = (form.get(f"{sid.upper()}_HTTPS_PORT", [""])[0] or "").strip()
+    if not http_port and not https_port:
+        http_port = str(default_port or "").strip()
+    if not http_port and not https_port:
+        return 1, "At least one of HTTP Port or HTTPS Port must be specified."
+    host = (form.get(f"{sid.upper()}_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
+    domain = (form.get(f"{sid.upper()}_DOMAIN", [""])[0] or "").strip()
+    username = (form.get(f"{sid.upper()}_USERNAME", [""])[0] or "").strip()
+    password = (form.get(f"{sid.upper()}_PASSWORD", [""])[0] or "").strip()
     output = []
-    def log(m):
-        output.append(m)
-        if live_cb: live_cb(m + "\n")
+
+    def log(message):
+        output.append(message)
+        if live_cb:
+            live_cb(message + "\n")
+
     log(f"=== Installing {display_name} via Docker ===")
     docker_code, docker_message = _ensure_docker_ready(log)
     if docker_code != 0:
         log(docker_message)
         return docker_code, "\n".join(output)
-    container_name = f"serverinstaller-{service_id}"
-    # Remove existing
-    run_capture(["docker", "rm", "-f", container_name], timeout=15)
-    cmd = ["docker", "run", "-d", "--name", container_name,
-           "-p", f"{port}:{container_port}", "--restart", "unless-stopped"]
-    # GPU support
+
+    state_dir.mkdir(parents=True, exist_ok=True)
+    proxy_dir = state_dir / "proxy"
+    container_name = f"serverinstaller-{sid}"
+    proxy_name = f"{container_name}-proxy"
+    network_name = f"{container_name}-net"
+    _remove_ai_docker_artifacts(sid)
+    run_capture(["docker", "network", "create", network_name], timeout=30)
+
+    runtime_cmd = ["docker", "run", "-d", "--name", container_name, "--network", network_name, "--restart", "unless-stopped"]
+    runtime_cmd += ["--label", f"serverinstaller.scope={sid}"]
+
+    runtime_supports_nvidia = False
     try:
         rc, out = run_capture(["docker", "info", "--format", "{{.Runtimes}}"], timeout=10)
-        if "nvidia" in str(out).lower():
-            cmd.extend(["--gpus", "all"])
-            log("NVIDIA GPU detected.")
+        runtime_supports_nvidia = "nvidia" in str(out).lower()
     except Exception:
-        pass
-    if extra_args:
-        cmd.extend(extra_args)
-    cmd.append(image)
-    log(f"Running: {' '.join(cmd)}")
-    code = _run_install_cmd(cmd, log, timeout=600)
-    if code == 0:
-        state_dir.mkdir(parents=True, exist_ok=True)
-        display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
-        state = _read_json_file(state_file)
-        state.update({"installed": True, "service_name": container_name, "deploy_mode": "docker",
-                       "host": host, "http_port": port, "http_url": f"http://{display_host}:{port}"})
-        _write_json_file(state_file, state)
-        manage_firewall_port("open", port, "tcp")
-        log(f"\n{display_name} running on port {port}")
-    return code, "\n".join(output)
+        runtime_supports_nvidia = False
+    if gpu_mode in ("auto", "nvidia", "optional-nvidia") and runtime_supports_nvidia:
+        runtime_cmd += ["--gpus", "all"]
+        log("NVIDIA GPU runtime detected.")
+    elif gpu_mode in ("nvidia",) and not runtime_supports_nvidia:
+        log("NVIDIA GPU runtime not detected. Continuing without GPU passthrough.")
+    effective_image = image
+    if gpu_mode == "optional-nvidia" and runtime_supports_nvidia and gpu_image:
+        effective_image = gpu_image
+
+    for arg in extra_args or []:
+        runtime_cmd.append(arg)
+    for env_item in extra_env or []:
+        runtime_cmd += ["-e", env_item]
+    for volume in extra_volumes or []:
+        runtime_cmd += ["-v", volume]
+    runtime_cmd.append(effective_image)
+    if extra_command:
+        runtime_cmd += [str(x) for x in extra_command]
+    log(f"Running service container: {' '.join(runtime_cmd)}")
+    code = _run_install_cmd(runtime_cmd, log, timeout=1800)
+    if code != 0:
+        _remove_ai_docker_artifacts(sid)
+        return code, "\n".join(output)
+
+    for exec_cmd in post_start_exec or []:
+        resolved = [str(x) for x in exec_cmd]
+        log(f"Post-start: docker exec {container_name} {' '.join(resolved)}")
+        rc, out = run_capture(["docker", "exec", container_name] + resolved, timeout=1800)
+        if rc != 0:
+            log(out or "Post-start command failed.")
+            _remove_ai_docker_artifacts(sid)
+            return rc or 1, "\n".join(output)
+        if out:
+            log(out.strip())
+
+    password_hash = ""
+    if username and password:
+        try:
+            password_hash = _docker_password_hash(password)
+        except Exception as ex:
+            _remove_ai_docker_artifacts(sid)
+            return 1, f"Failed to configure HTTP auth: {ex}"
+    elif username or password:
+        _remove_ai_docker_artifacts(sid)
+        return 1, "Both username and password are required when enabling auth."
+
+    _write_ai_proxy_caddyfile(
+        proxy_dir=proxy_dir,
+        upstream_name=container_name,
+        upstream_port=str(container_port),
+        http_enabled=bool(http_port),
+        https_enabled=bool(https_port),
+        username=username,
+        password_hash=password_hash,
+    )
+
+    proxy_cmd = [
+        "docker", "run", "-d",
+        "--name", proxy_name,
+        "--network", network_name,
+        "--restart", "unless-stopped",
+        "-v", f"{str((proxy_dir / 'Caddyfile').resolve())}:/etc/caddy/Caddyfile:ro",
+        "-v", f"{str((proxy_dir / 'data').resolve())}:/data",
+        "-v", f"{str((proxy_dir / 'config').resolve())}:/config",
+        "--label", f"serverinstaller.scope={sid}",
+    ]
+    if http_port:
+        proxy_cmd += ["-p", f"{http_port}:80"]
+    if https_port:
+        proxy_cmd += ["-p", f"{https_port}:443"]
+    proxy_cmd.append("caddy:2-alpine")
+    log(f"Running proxy container: {' '.join(proxy_cmd)}")
+    code2 = _run_install_cmd(proxy_cmd, log, timeout=300)
+    if code2 != 0:
+        _remove_ai_docker_artifacts(sid)
+        return code2, "\n".join(output)
+
+    display_host = domain or (host if host not in ("0.0.0.0", "*", "") else choose_service_host())
+    http_url = f"http://{display_host}:{http_port}" if http_port else ""
+    https_url = f"https://{display_host}:{https_port}" if https_port else ""
+    state = _read_json_file(state_file)
+    state.update({
+        "installed": True,
+        "service_name": container_name,
+        "proxy_service_name": proxy_name,
+        "proxy_enabled": True,
+        "deploy_mode": "docker",
+        "host": host,
+        "domain": domain,
+        "http_port": http_port,
+        "https_port": https_port,
+        "http_url": http_url,
+        "https_url": https_url,
+        "auth_enabled": bool(username),
+        "auth_username": username,
+        "running": True,
+        "container_port": str(container_port),
+    })
+    _write_json_file(state_file, state)
+    if http_port:
+        manage_firewall_port("open", http_port, "tcp", host=display_host)
+    if https_port and https_port != http_port:
+        manage_firewall_port("open", https_port, "tcp", host=display_host)
+
+    log("\n" + "=" * 60)
+    log(f" {display_name} Docker Deployment Complete!")
+    log("=" * 60)
+    if http_url:
+        log(f" HTTP URL:   {http_url}")
+    if https_url:
+        log(f" HTTPS URL:  {https_url}")
+        log(" HTTPS is provided by an internal Caddy certificate.")
+    if username:
+        log(f" Auth user:  {username}")
+    log(f" Service:    {container_name}")
+    log(f" Proxy:      {proxy_name}")
+    log("=" * 60)
+    return 0, "\n".join(output)
 
 
 def run_tgwui_docker(form=None, live_cb=None):
@@ -2298,11 +2575,82 @@ def run_whisper_docker(form=None, live_cb=None):
     model = (form or {}).get("WHISPER_MODEL_SIZE", ["base"])
     model_size = model[0] if isinstance(model, list) else model
     return _run_ai_docker_generic("whisper", "onerahmet/openai-whisper-asr-webservice:latest", form, "9000", "9000", "Whisper STT",
-        WHISPER_STATE_FILE, WHISPER_STATE_DIR, live_cb, extra_args=["-e", f"ASR_MODEL={model_size}"])
+        WHISPER_STATE_FILE, WHISPER_STATE_DIR, live_cb, extra_env=[f"ASR_MODEL={model_size}"])
 
 def run_piper_docker(form=None, live_cb=None):
     return _run_ai_docker_generic("piper", "rhasspy/wyoming-piper:latest", form, "5500", "10200", "Piper TTS", PIPER_STATE_FILE, PIPER_STATE_DIR, live_cb,
-        extra_args=["-v", "piper-data:/data", "-e", "PIPER_VOICE=en_US-lessac-medium"])
+        extra_volumes=["piper-data:/data"], extra_env=["PIPER_VOICE=en_US-lessac-medium"])
+
+
+def get_generic_ai_info(service_id):
+    cfg = get_generic_ai_service(service_id)
+    state_file, state_dir = _generic_ai_state_paths(cfg["service_id"])
+    info = _get_ai_service_info(
+        state_file,
+        state_dir,
+        f"serverinstaller-{cfg['service_id']}",
+        cfg["display_name"],
+        cfg["default_port"],
+    )
+    model_field = cfg.get("model_field")
+    state = _read_json_file(state_file)
+    if model_field:
+        info["model_name"] = str(state.get(model_field.lower()) or state.get("model_name") or cfg.get("default_model") or "").strip()
+    return info
+
+
+def run_generic_ai_docker(service_id, form=None, live_cb=None):
+    cfg = get_generic_ai_service(service_id)
+    if not cfg.get("image"):
+        return 1, f"No supported Docker image is configured for {cfg['display_name']}."
+    form = form or {}
+    model_value = ""
+    if cfg.get("model_field"):
+        model_value = (form.get(cfg["model_field"], [cfg.get("default_model", "")])[0] or cfg.get("default_model", "")).strip()
+    command = deepcopy(cfg.get("docker_command") or [])
+    command = [str(item).replace("{model}", model_value) for item in command]
+    post_start_exec = deepcopy(cfg.get("post_start_exec") or [])
+    resolved_post_start = []
+    for entry in post_start_exec:
+        resolved_post_start.append([str(item).replace("{model}", model_value) for item in entry])
+    state_file, state_dir = _generic_ai_state_paths(cfg["service_id"])
+    code, output = _run_ai_docker_generic(
+        service_id=cfg["service_id"],
+        image=cfg["image"],
+        form=form,
+        default_port=cfg["default_port"],
+        container_port=cfg["container_port"],
+        display_name=cfg["display_name"],
+        state_file=state_file,
+        state_dir=state_dir,
+        live_cb=live_cb,
+        extra_args=cfg.get("docker_args"),
+        extra_env=cfg.get("docker_env"),
+        extra_volumes=cfg.get("docker_volumes"),
+        extra_command=command,
+        gpu_mode=cfg.get("gpu_runtime", "auto"),
+        gpu_image=cfg.get("gpu_image", ""),
+        post_start_exec=resolved_post_start,
+    )
+    if code == 0 and model_value:
+        state = _read_json_file(state_file)
+        state[cfg["model_field"].lower()] = model_value
+        state["model_name"] = model_value
+        _write_json_file(state_file, state)
+    return code, output
+
+
+def run_generic_ai_delete(service_id, live_cb=None):
+    cfg = get_generic_ai_service(service_id)
+    state_file, state_dir = _generic_ai_state_paths(cfg["service_id"])
+    return _run_ai_service_delete(
+        cfg["service_id"],
+        cfg["display_name"],
+        state_file,
+        state_dir,
+        f"serverinstaller-{cfg['service_id']}",
+        live_cb=live_cb,
+    )
 
 
 # ── AI service name detection helpers ────────────────────────────────────────
@@ -2334,12 +2682,19 @@ def _run_ai_service_delete(service_id, display_name, state_file, state_dir, syst
     http_port = str(state.get("http_port") or "").strip()
     https_port = str(state.get("https_port") or "").strip()
     cname = container_name or f"serverinstaller-{service_id}"
+    proxy_name = str(state.get("proxy_service_name") or f"{cname}-proxy").strip()
+    network_name = f"{cname}-net"
 
     # Docker cleanup
     if command_exists("docker"):
+        run_capture(["docker", "stop", proxy_name], timeout=30)
+        rc_proxy, _ = run_capture(["docker", "rm", "-f", proxy_name], timeout=30)
+        if rc_proxy == 0:
+            log(f"Removed Docker proxy container: {proxy_name}")
         run_capture(["docker", "stop", cname], timeout=30)
         rc, _ = run_capture(["docker", "rm", "-f", cname], timeout=30)
         if rc == 0: log(f"Removed Docker container: {cname}")
+        run_capture(["docker", "network", "rm", network_name], timeout=30)
 
     # Systemd cleanup
     if os.name != "nt" and command_exists("systemctl"):
@@ -2357,7 +2712,7 @@ def _run_ai_service_delete(service_id, display_name, state_file, state_dir, syst
         except Exception: pass
 
     # Clean up data
-    for subdir in ["app", "certs", "venv"]:
+    for subdir in ["app", "certs", "venv", "proxy"]:
         d = state_dir / subdir
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)
@@ -2384,3 +2739,7 @@ def run_whisper_delete(live_cb=None):
 
 def run_piper_delete(live_cb=None):
     return _run_ai_service_delete("piper", "Piper TTS", PIPER_STATE_FILE, PIPER_STATE_DIR, PIPER_SYSTEMD_SERVICE, live_cb=live_cb)
+
+
+def run_managed_ai_action(service_id, action, live_cb=None):
+    return _run_managed_ai_docker_action(service_id, action, live_cb=live_cb)

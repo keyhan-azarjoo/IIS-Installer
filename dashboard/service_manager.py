@@ -9,6 +9,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from ai_catalog import list_generic_ai_service_ids
 from constants import (
     PROXY_NATIVE_STATE,
     PROXY_ROOT,
@@ -63,6 +64,7 @@ from ai_services import (
     get_comfyui_info,
     get_whisper_info,
     get_piper_info,
+    get_generic_ai_info,
     run_ollama_start,
     run_ollama_stop,
     run_ollama_delete,
@@ -76,6 +78,8 @@ from ai_services import (
     run_comfyui_delete,
     run_whisper_delete,
     run_piper_delete,
+    run_generic_ai_delete,
+    run_managed_ai_action,
 )
 
 def get_service_items():
@@ -960,10 +964,9 @@ def filter_service_items(scope):
             return svc_items
         return [x for x in items if is_name_fn(x.get("name", "")) or is_name_fn(x.get("display_name", ""))]
     # Generic AI services — use state file if exists
-    _generic_ai_scopes = ["vllm", "llamacpp", "deepseek", "localai", "sdwebui", "fooocus", "coqui", "bark", "rvc", "openwebui", "chromadb", "custom"]
+    _generic_ai_scopes = list_generic_ai_service_ids()
     if scope in _generic_ai_scopes:
-        state_file = SERVER_INSTALLER_DATA / scope / f"{scope}-state.json"
-        info = _get_ai_service_info(state_file, SERVER_INSTALLER_DATA / scope, f"serverinstaller-{scope}", scope, "8080")
+        info = get_generic_ai_info(scope)
         svc_items = info.get("services") or []
         if svc_items:
             return svc_items
@@ -1459,6 +1462,13 @@ def manage_service(action, name, kind, detail=""):
     if _is_piper_name(svc_name) and action == "delete":
         code, out = run_piper_delete(); return code == 0, out
 
+    for generic_scope in list_generic_ai_service_ids():
+        if re.search(rf"(?:^|[-_]){re.escape(generic_scope)}(?:$|[-_])", str(svc_name or ""), re.IGNORECASE):
+            code, out = run_managed_ai_action(generic_scope, action)
+            if action == "delete" and code != 0:
+                code, out = run_generic_ai_delete(generic_scope)
+            return code == 0, out
+
     if kind == "website_launchd":
         if os.name == "nt":
             return False, "launchd website actions are not available on Windows."
@@ -1652,6 +1662,9 @@ def get_system_status(scope="all"):
         software["whisper_service"] = get_whisper_info()
     if scope in ("all", "piper"):
         software["piper_service"] = get_piper_info()
+    for generic_scope in list_generic_ai_service_ids():
+        if scope in ("all", generic_scope):
+            software[f"{generic_scope}_service"] = get_generic_ai_info(generic_scope)
 
     status = {
         "hostname": socket.gethostname(),
@@ -1676,4 +1689,3 @@ def get_system_status(scope="all"):
         "software": software,
     }
     return status
-

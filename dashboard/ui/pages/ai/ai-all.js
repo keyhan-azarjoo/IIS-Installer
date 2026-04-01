@@ -17,6 +17,8 @@
       website: "https://docs.vllm.ai/",
       dockerImage: "vllm/vllm-openai:latest",
       dockerPort: "8000",
+      modelField: "VLLM_MODEL",
+      defaultModel: "Qwen/Qwen2.5-0.5B-Instruct",
       installCmds: {
         pip: "pip install vllm",
         docker: "docker run -d --gpus all -p 8000:8000 vllm/vllm-openai:latest --model meta-llama/Llama-3-8b",
@@ -49,6 +51,8 @@
       website: "https://github.com/ggerganov/llama.cpp",
       dockerImage: "ghcr.io/ggerganov/llama.cpp:server",
       dockerPort: "8080",
+      modelField: "LLAMACPP_MODEL",
+      defaultModel: "bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M",
       installCmds: {
         git: "git clone https://github.com/ggerganov/llama.cpp && cd llama.cpp && make -j",
         docker: "docker run -d -p 8080:8080 -v models:/models ghcr.io/ggerganov/llama.cpp:server -m /models/model.gguf --host 0.0.0.0 --port 8080",
@@ -81,6 +85,8 @@
       website: "https://www.deepseek.com/",
       dockerImage: "ollama/ollama:latest",
       dockerPort: "11434",
+      modelField: "DEEPSEEK_MODEL",
+      defaultModel: "deepseek-r1:7b",
       installCmds: {
         ollama: "ollama pull deepseek-coder-v2:lite",
         docker: "docker run -d -p 11434:11434 ollama/ollama && docker exec -it $(docker ps -q -f ancestor=ollama/ollama) ollama pull deepseek-coder-v2:lite",
@@ -203,6 +209,8 @@
       website: "https://github.com/idiap/coqui-ai-TTS",
       dockerImage: "ghcr.io/coqui-ai/tts:latest",
       dockerPort: "5002",
+      modelField: "COQUI_MODEL",
+      defaultModel: "tts_models/en/ljspeech/tacotron2-DDC",
       installCmds: {
         pip: "pip install coqui-tts && tts-server --port 5002",
         docker: "docker run -d -p 5002:5002 ghcr.io/coqui-ai/tts:latest",
@@ -352,6 +360,7 @@
       const installed = !!info.installed;
       const running = !!info.running;
       const bestUrl = String(info.https_url || info.http_url || "").trim() || (installed || running ? "http://" + (host || "127.0.0.1") + ":" + httpPort : "");
+      const modelName = String(info.model_name || svc.defaultModel || "").trim();
 
       const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
 
@@ -363,6 +372,14 @@
         { name: svc.prefix + "_USERNAME", label: "Username (optional)", defaultValue: "", placeholder: "Leave empty for no auth" },
         { name: svc.prefix + "_PASSWORD", label: "Password (optional)", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
       ];
+      if (svc.modelField) {
+        commonFields.push({
+          name: svc.modelField,
+          label: svc.modelLabel || "Model",
+          defaultValue: modelName || "",
+          placeholder: svc.modelPlaceholder || "Enter model name",
+        });
+      }
 
       return (
         <Grid container spacing={2}>
@@ -413,11 +430,21 @@
                 <Typography variant="body2">Installed: <Chip size="small" label={installed ? "Yes" : "No"} color={installed ? "success" : "default"} sx={{ ml: 0.5 }} /></Typography>
                 <Typography variant="body2">Running: <Chip size="small" label={running ? "Running" : "Stopped"} color={running ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>
                 <Typography variant="body2">Port: <b>{httpPort}</b></Typography>
+                {modelName && <Typography variant="body2">Model: <b>{modelName}</b></Typography>}
                 {bestUrl && <Typography variant="body2" sx={{ mt: 0.5, wordBreak: "break-all" }}>URL: <a href={bestUrl} target="_blank" rel="noopener">{bestUrl}</a></Typography>}
                 {bestUrl && (
                   <Button variant="contained" size="small" sx={{ mt: 1.5, textTransform: "none", bgcolor: svc.color, "&:hover": { bgcolor: svc.color, filter: "brightness(0.9)" } }}
                     onClick={() => window.open(bestUrl, "_blank", "noopener,noreferrer")}>
                     Open {svc.title}
+                  </Button>
+                )}
+                {installed && (
+                  <Button variant="outlined" size="small" color="error" sx={{ mt: 1.5, ml: bestUrl ? 1 : 0, textTransform: "none" }}
+                    onClick={() => {
+                      if (!window.confirm("Remove this deployment and its managed proxy?")) return;
+                      run(null, "/run/" + scope + "_delete", "Uninstall " + svc.title);
+                    }}>
+                    Uninstall
                   </Button>
                 )}
               </CardContent>
@@ -493,7 +520,9 @@
                       Open {svc.title}
                     </Button>
                   )}
-                  <Button variant="outlined" size="small" sx={{ textTransform: "none" }}>Refresh</Button>
+                  <Button variant="outlined" size="small" sx={{ textTransform: "none" }} onClick={() => {
+                    if (p.refreshPageContext) p.refreshPageContext(pageId);
+                  }}>Refresh</Button>
                 </Stack>
                 {services.length === 0 && (
                   <Typography variant="body2" color="text.secondary">No {svc.title} services deployed yet. Use an Install card above.</Typography>

@@ -29,6 +29,7 @@ from file_manager import (
     file_manager_write_file,
     normalize_file_manager_path as _normalize_file_manager_path,
 )
+from ai_catalog import get_generic_ai_service, list_generic_ai_service_ids
 try:
     from ssl_manager import (
         ssl_list_certs,
@@ -163,7 +164,10 @@ from ai_services import (
     run_piper_os_install,
     run_piper_docker,
     run_piper_delete,
+    run_generic_ai_docker,
+    run_generic_ai_delete,
 )
+from ai_media import transcribe_media_with_whisper
 from system_admin import (
     is_windows_admin,
     run_system_power,
@@ -454,6 +458,56 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/lmstudio/chat":
             body = _json_body()
             return lmstudio_chat(body.get("model", ""), body.get("messages", []))
+
+        if path == "/api/ai/whisper/subtitles":
+            try:
+                parts = self._parse_multipart()
+            except Exception as ex:
+                return {"ok": False, "error": str(ex)}
+            media_part = None
+            subtitle_format = "srt"
+            language = ""
+            task = "transcribe"
+            burn_subtitles = False
+            for part in parts:
+                if part.get("name") in ("media", "file", "audio", "video") and not media_part:
+                    media_part = part
+                elif part.get("name") == "subtitle_format":
+                    subtitle_format = part.get("content", b"srt").decode("utf-8", errors="replace").strip().lower() or "srt"
+                elif part.get("name") == "language":
+                    language = part.get("content", b"").decode("utf-8", errors="replace").strip()
+                elif part.get("name") == "task":
+                    task = part.get("content", b"transcribe").decode("utf-8", errors="replace").strip() or "transcribe"
+                elif part.get("name") == "burn_subtitles":
+                    burn_subtitles = part.get("content", b"").decode("utf-8", errors="replace").strip().lower() in ("1", "true", "yes", "on")
+            if not media_part:
+                return {"ok": False, "error": "No media file provided."}
+            whisper_info = get_system_status("whisper").get("software", {}).get("whisper_service", {})
+            base_url = str(whisper_info.get("https_url") or whisper_info.get("http_url") or "").strip()
+            ok, err, payload = transcribe_media_with_whisper(
+                whisper_base_url=base_url,
+                upload_part=media_part,
+                subtitle_format=subtitle_format,
+                language=language,
+                task=task,
+                burn_subtitles=burn_subtitles,
+            )
+            if not ok:
+                return {"ok": False, "error": err}
+            return {
+                "ok": True,
+                "text": payload.get("text", ""),
+                "subtitle_format": payload.get("subtitle_format", "srt"),
+                "subtitle_text": payload.get("subtitle_text", ""),
+                "subtitle_path": payload.get("subtitle_path", ""),
+                "subtitle_download_url": f"/api/files/download?path={quote(payload.get('subtitle_path', ''))}" if payload.get("subtitle_path") else "",
+                "source_path": payload.get("source_path", ""),
+                "source_download_url": f"/api/files/download?path={quote(payload.get('source_path', ''))}" if payload.get("source_path") else "",
+                "is_video": bool(payload.get("is_video")),
+                "burned_video_path": payload.get("burned_video_path", ""),
+                "burned_video_download_url": f"/api/files/download?path={quote(payload.get('burned_video_path', ''))}" if payload.get("burned_video_path") else "",
+                "burn_error": payload.get("burn_error", ""),
+            }
 
         return None  # Not handled
 
@@ -1180,7 +1234,7 @@ class Handler(BaseHTTPRequestHandler):
             self.write_json(payload, status)
             return
         # ── API Gateway GET routes ────────────────────────────────────────────
-        if self.path.startswith("/api/s3/") or self.path.startswith("/api/mongo/") or self.path.startswith("/api/proxy/") or self.path.startswith("/api/sam3/") or self.path.startswith("/api/ollama/") or self.path.startswith("/api/lmstudio/"):
+        if self.path.startswith("/api/s3/") or self.path.startswith("/api/mongo/") or self.path.startswith("/api/proxy/") or self.path.startswith("/api/sam3/") or self.path.startswith("/api/ollama/") or self.path.startswith("/api/lmstudio/") or self.path.startswith("/api/ai/"):
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
@@ -2196,157 +2250,34 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_run_result(title, code, output)
             return
         # ── Generic AI service install routes ─────────────────────────────────
-        _ai_generic_map = {
-            "vllm": ("vLLM", "vllm/vllm-openai:latest", "8000", "pip install vllm"),
-            "llamacpp": ("llama.cpp", "ghcr.io/ggerganov/llama.cpp:server", "8080", "git clone https://github.com/ggerganov/llama.cpp && cd llama.cpp && make -j"),
-            "deepseek": ("DeepSeek", "ollama/ollama:latest", "11434", "ollama pull deepseek-coder-v2:lite"),
-            "localai": ("LocalAI", "localai/localai:latest-aio-cpu", "8080", ""),
-            "sdwebui": ("SD WebUI", "universonic/stable-diffusion-webui:latest", "7860", "git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui"),
-            "fooocus": ("Fooocus", "ashleykza/fooocus:latest", "7865", "git clone https://github.com/lllyasviel/Fooocus"),
-            "coqui": ("Coqui TTS", "ghcr.io/coqui-ai/tts:latest", "5002", "pip install coqui-tts"),
-            "bark": ("Bark", "", "5005", "pip install git+https://github.com/suno-ai/bark.git"),
-            "rvc": ("RVC", "alexta69/rvc-webui:latest", "7897", "git clone https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI"),
-            "openwebui": ("Open WebUI", "ghcr.io/open-webui/open-webui:main", "3000", "pip install open-webui"),
-            "chromadb": ("ChromaDB", "chromadb/chroma:latest", "8000", "pip install chromadb"),
-            "custom": ("Custom Model", "", "8080", ""),
-            # OS Agents
-            "openclaw": ("OpenClaw", "openclaw/openclaw:latest", "8080", "pip install openclaw"),
-            "openinterpreter": ("Open Interpreter", "openinterpreter/open-interpreter:latest", "8080", "pip install open-interpreter"),
-            "openhands": ("OpenHands", "ghcr.io/all-hands-ai/openhands:latest", "3000", ""),
-            "autogpt": ("AutoGPT", "", "8000", "pip install autogpt-forge"),
-            "crewai": ("CrewAI", "", "8080", "pip install crewai crewai-tools"),
-            "metagpt": ("MetaGPT", "", "8080", "pip install metagpt"),
-            "langchain": ("LangChain", "", "8000", "pip install langchain langchain-community langserve uvicorn"),
-            "langgraph": ("LangGraph", "", "8123", "pip install langgraph langgraph-cli"),
-            "llamaindex": ("LlamaIndex", "", "8000", "pip install llama-index"),
-            "haystack": ("Haystack", "", "8000", "pip install haystack-ai"),
-            "dify": ("Dify", "langgenius/dify-api:latest", "3000", ""),
-            "flowise": ("Flowise", "flowiseai/flowise:latest", "3000", "npx flowise start"),
-            "n8n": ("n8n", "n8nio/n8n:latest", "5678", "npx n8n start"),
-            "activepieces": ("Activepieces", "activepieces/activepieces:latest", "8080", ""),
-        }
-        for _ai_key, (_ai_name, _ai_image, _ai_port, _ai_pip) in _ai_generic_map.items():
+        for _ai_key in list_generic_ai_service_ids():
+            _svc = get_generic_ai_service(_ai_key)
             if self.path in (f"/run/{_ai_key}_windows_os", f"/run/{_ai_key}_unix_os"):
-                title = f"{_ai_name} Install"
-                def _make_installer(_name, _pip, _port, _key, _form):
-                    def _fn(cb):
-                        output = []
-                        def log(m):
-                            output.append(m)
-                            if cb: cb(m + "\n")
-                        log(f"=== Installing {_name} ===")
-                        host_ip = (_form.get(f"{_key.upper()}_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
-                        port = (_form.get(f"{_key.upper()}_HTTP_PORT", [_port])[0] or _port).strip()
-                        if _pip:
-                            code = _run_install_cmd(_pip, log, timeout=600)
-                        else:
-                            log(f"No automated OS installer for {_name}. Use Docker instead.")
-                            code = 1
-                        if code == 0:
-                            sdir = SERVER_INSTALLER_DATA / _key
-                            sdir.mkdir(parents=True, exist_ok=True)
-                            app_dir = sdir / "app"
-                            app_dir.mkdir(parents=True, exist_ok=True)
-                            display_host = host_ip if host_ip not in ("0.0.0.0", "*", "") else choose_service_host()
-                            # Create a web wrapper so the service has an accessible URL
-                            wrapper = app_dir / "server.py"
-                            wrapper.write_text(
-                                f'#!/usr/bin/env python3\n'
-                                f'"""Auto-generated web wrapper for {_name}."""\n'
-                                f'import os, sys, subprocess, json\n'
-                                f'from http.server import HTTPServer, SimpleHTTPRequestHandler\n'
-                                f'PORT = int(os.environ.get("PORT", "{port}"))\n'
-                                f'HOST = os.environ.get("HOST", "0.0.0.0")\n'
-                                f'SERVICE = "{_name}"\n'
-                                f'KEY = "{_key}"\n\n'
-                                f'class Handler(SimpleHTTPRequestHandler):\n'
-                                f'    def do_GET(self):\n'
-                                f'        if self.path == "/api/health":\n'
-                                f'            self.send_response(200)\n'
-                                f'            self.send_header("Content-Type", "application/json")\n'
-                                f'            self.end_headers()\n'
-                                f'            self.wfile.write(json.dumps({{"ok": True, "service": SERVICE, "status": "running"}}).encode())\n'
-                                f'            return\n'
-                                f'        self.send_response(200)\n'
-                                f'        self.send_header("Content-Type", "text/html")\n'
-                                f'        self.end_headers()\n'
-                                f'        html = f"""<!DOCTYPE html><html><head><meta charset=utf-8><title>{{SERVICE}}</title>\n'
-                                f'        <style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:system-ui;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}}\n'
-                                f'        .card{{background:#1e293b;border-radius:16px;padding:48px;max-width:600px;text-align:center;border:1px solid #334155}}\n'
-                                f'        h1{{font-size:32px;margin-bottom:16px;color:#60a5fa}}p{{color:#94a3b8;line-height:1.8;margin-bottom:24px}}\n'
-                                f'        code{{background:#334155;padding:4px 12px;border-radius:6px;font-size:14px}}\n'
-                                f'        a{{color:#60a5fa;text-decoration:none}}</style></head>\n'
-                                f'        <body><div class=card><h1>{{SERVICE}}</h1>\n'
-                                f'        <p>{{SERVICE}} is installed and running on this server.</p>\n'
-                                f'        <p>Use the CLI: <code>{{KEY}}</code></p>\n'
-                                f'        <p>API health: <a href=/api/health>/api/health</a></p>\n'
-                                f'        </div></body></html>"""\n'
-                                f'        self.wfile.write(html.encode())\n\n'
-                                f'print(f"{{SERVICE}} web server on http://{{HOST}}:{{PORT}}")\n'
-                                f'HTTPServer((HOST, PORT), Handler).serve_forever()\n',
-                                encoding="utf-8",
-                            )
-                            log(f"Created web server wrapper at {wrapper}")
-                            # Start the server as a background process
-                            log(f"Starting {_name} web server on port {port}...")
-                            python_cmd = sys.executable or "python"
-                            try:
-                                if os.name == "nt":
-                                    subprocess.Popen(
-                                        [python_cmd, str(wrapper)],
-                                        cwd=str(app_dir),
-                                        creationflags=0x00000008,  # DETACHED_PROCESS
-                                        env={**os.environ, "PORT": port, "HOST": host_ip},
-                                    )
-                                else:
-                                    subprocess.Popen(
-                                        [python_cmd, str(wrapper)],
-                                        cwd=str(app_dir),
-                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                        env={**os.environ, "PORT": port, "HOST": host_ip},
-                                    )
-                                log(f"{_name} server started.")
-                            except Exception as ex:
-                                log(f"WARNING: Could not auto-start server: {ex}")
-                            # Save state
-                            sfile = sdir / f"{_key}-state.json"
-                            _write_json_file(sfile, {
-                                "installed": True, "service_name": f"serverinstaller-{_key}",
-                                "install_dir": str(app_dir), "host": host_ip,
-                                "http_port": port, "http_url": f"http://{display_host}:{port}",
-                                "deploy_mode": "os", "running": True,
-                            })
-                            manage_firewall_port("open", port, "tcp")
-                            log(f"\n{_name} installed and running!")
-                            log(f"URL: http://{display_host}:{port}")
-                        return code, "\n".join(output)
-                    return _fn
-                installer = _make_installer(_ai_name, _ai_pip, _ai_port, _ai_key, form)
+                title = f"{_svc['display_name']} Install"
+                msg = f"{_svc['display_name']} OS install is not implemented yet. Use Docker for a managed deployment."
                 if self.is_fetch():
-                    job_id = start_live_job(title, installer)
+                    job_id = start_live_job(title, lambda cb, _msg=msg: (cb(_msg + "\n") if cb else None) or (1, _msg))
                     self.write_json({"job_id": job_id, "title": title})
                 else:
-                    code, output = installer(None)
+                    self.respond_run_result(title, 1, msg)
+                return
+            if self.path == f"/run/{_ai_key}_docker":
+                title = f"{_svc['display_name']} Docker"
+                runner = lambda cb, _key=_ai_key, _form=form: run_generic_ai_docker(_key, _form, live_cb=cb)
+                if self.is_fetch():
+                    job_id = start_live_job(title, runner)
+                    self.write_json({"job_id": job_id, "title": title})
+                else:
+                    code, output = run_generic_ai_docker(_ai_key, form)
                     self.respond_run_result(title, code, output)
                 return
-            if self.path == f"/run/{_ai_key}_docker" and _ai_image:
-                title = f"{_ai_name} Docker"
-                def _make_docker(_name, _image, _port, _key, _form):
-                    def _fn(cb):
-                        return _run_ai_docker_generic(
-                            _key, _image, _form, _port,
-                            _port, _name,
-                            SERVER_INSTALLER_DATA / _key / f"{_key}-state.json",
-                            SERVER_INSTALLER_DATA / _key,
-                            live_cb=cb,
-                        )
-                    return _fn
-                docker_fn = _make_docker(_ai_name, _ai_image, _ai_port, _ai_key, form)
+            if self.path == f"/run/{_ai_key}_delete":
+                title = f"Uninstall {_svc['display_name']}"
                 if self.is_fetch():
-                    job_id = start_live_job(title, docker_fn)
+                    job_id = start_live_job(title, lambda cb, _key=_ai_key: run_generic_ai_delete(_key, live_cb=cb))
                     self.write_json({"job_id": job_id, "title": title})
                 else:
-                    code, output = docker_fn(None)
+                    code, output = run_generic_ai_delete(_ai_key)
                     self.respond_run_result(title, code, output)
                 return
         if self.path == "/run/dashboard_update":
@@ -2539,4 +2470,3 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self.write_html("Not found", HTTPStatus.NOT_FOUND)
-
