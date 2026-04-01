@@ -1,8 +1,14 @@
+import html
+import os
+import platform
 import secrets
 import threading
 import time
+from pathlib import Path
 
 from constants import BUILD_ID, JOBS, JOBS_LOCK
+from system_info import get_windows_s3_docker_support, choose_service_host
+from mongo_manager import get_windows_native_mongo_info, get_windows_native_mongo_uri
 from ui_assets import (
     DASHBOARD_UI_SCRIPTS,
     render_dashboard_page,
@@ -10,6 +16,8 @@ from ui_assets import (
     render_mongo_native_ui,
     render_output_page,
 )
+
+ROOT = Path(__file__).resolve().parent.parent
 
 def start_live_job(title, runner):
     job_id = secrets.token_hex(12)
