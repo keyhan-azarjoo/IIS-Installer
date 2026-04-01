@@ -13,6 +13,7 @@ from constants import (
 )
 from utils import command_exists, run_capture, run_process, _read_json_file, _sudo_prefix
 from system_info import get_listening_ports
+from website_manager import _website_state_payload
 
 def _setup_nginx_http_redirect(service_name, http_port, https_port, live_cb=None):
     """Add/update an nginx config that redirects HTTP→HTTPS for the given service."""

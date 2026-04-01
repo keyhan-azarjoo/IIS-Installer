@@ -14,6 +14,7 @@ from constants import (
 from utils import _read_json_file, command_exists, run_capture
 from system_info import choose_service_host, get_listening_ports
 from python_manager import _python_process_running, _windows_process_matches_managed_jupyter
+from website_manager import _website_state_payload
 
 def _windows_managed_python_owns_port(port, listeners=None):
     if os.name != "nt":
