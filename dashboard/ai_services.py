@@ -1371,6 +1371,43 @@ http {{
         "openclaw config set gateway.auth.token \"$OPENCLAW_GATEWAY_TOKEN\" 2>/dev/null || true",
         "openclaw config set gateway.remote.token \"$OPENCLAW_GATEWAY_TOKEN\" 2>/dev/null || true",
         "openclaw config set gateway.trustedProxies '[\"127.0.0.1\",\"::1\"]' 2>/dev/null || true",
+        "# Build the gateway.controlUi.allowedOrigins list so the browser can connect.",
+        "# We collect every IPv4 address the user might browse to:",
+        "#  1. $OPENCLAW_HOST_IP env var (set from the install form — the most reliable source)",
+        "#  2. All IPv4 addresses on the container's network interfaces",
+        "#  3. The docker host gateway (host.docker.internal, IPv4 only)",
+        f'OC_ORIGINS=\'["http://localhost:{http_port}","http://127.0.0.1:{http_port}"\'',
+        *(
+            [f'OC_ORIGINS="$OC_ORIGINS,\\"https://localhost:{https_port}\\",\\"https://127.0.0.1:{https_port}\\""']
+            if https_port else []
+        ),
+        "# Add OPENCLAW_HOST_IP if it is a real (non-wildcard) address",
+        'if [ -n "$OPENCLAW_HOST_IP" ] && [ "$OPENCLAW_HOST_IP" != "0.0.0.0" ] && [ "$OPENCLAW_HOST_IP" != "*" ]; then',
+        f'  OC_ORIGINS="$OC_ORIGINS,\\"http://$OPENCLAW_HOST_IP:{http_port}\\""',
+        *(
+            [f'  OC_ORIGINS="$OC_ORIGINS,\\"https://$OPENCLAW_HOST_IP:{https_port}\\""']
+            if https_port else []
+        ),
+        "fi",
+        "# Add every IPv4 address found on the host's network interfaces (IPv4 only)",
+        "for IP4 in $(hostname -I 2>/dev/null | tr ' ' '\\n' | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$' || true); do",
+        f'  OC_ORIGINS="$OC_ORIGINS,\\"http://$IP4:{http_port}\\""',
+        *(
+            [f'  OC_ORIGINS="$OC_ORIGINS,\\"https://$IP4:{https_port}\\""']
+            if https_port else []
+        ),
+        "done",
+        "# Add the docker host gateway IPv4 (resolves to the host machine on Docker Desktop)",
+        "DOCKER_HOST_IP4=$(getent ahosts host.docker.internal 2>/dev/null | awk '$2==\"STREAM\" && $1 !~ /:/{print $1}' | head -1 || echo '')",
+        'if [ -n "$DOCKER_HOST_IP4" ]; then',
+        f'  OC_ORIGINS="$OC_ORIGINS,\\"http://$DOCKER_HOST_IP4:{http_port}\\""',
+        *(
+            [f'  OC_ORIGINS="$OC_ORIGINS,\\"https://$DOCKER_HOST_IP4:{https_port}\\""']
+            if https_port else []
+        ),
+        "fi",
+        'OC_ORIGINS="$OC_ORIGINS]"',
+        "openclaw config set gateway.controlUi.allowedOrigins \"$OC_ORIGINS\" 2>/dev/null || true",
         "",
         "# Set Ollama API key — enables Ollama provider in OpenClaw",
         "# Only OLLAMA_API_KEY is set by default. OpenAI/Anthropic keys",
