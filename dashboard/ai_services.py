@@ -1346,7 +1346,7 @@ http {{
         "const bin = execFileSync('which', ['openclaw']).toString().trim();",
         "console.log('OpenClaw binary:', bin);",
         "// Spawn gateway as child with env inherited",
-        f"const child = spawn(bin, ['gateway', '--port', '{gw_internal_port}', '--verbose'], {{",
+        f"const child = spawn(bin, ['gateway', '--allow-unconfigured', '--port', '{gw_internal_port}', '--verbose'], {{",
         "  stdio: 'inherit',",
         "  env: { ...process.env, OLLAMA_API_KEY: 'ollama-local' }",
         "});",
