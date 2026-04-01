@@ -12,7 +12,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from constants import SERVER_INSTALLER_DATA
+from constants import ROOT, SERVER_INSTALLER_DATA
 
 def is_windows_admin():
     if os.name != "nt":

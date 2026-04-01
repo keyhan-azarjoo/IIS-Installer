@@ -20,6 +20,7 @@ from constants import (
     PYTHON_STATE_FILE,
     PYTHON_WINDOWS_INSTALLER,
     PYTHON_UNIX_INSTALLER,
+    ROOT,
     SERVER_INSTALLER_DATA,
 )
 from utils import (

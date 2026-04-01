@@ -56,6 +56,7 @@ from constants import (
     BUILD_ID,
     JOBS,
     JOBS_LOCK,
+    ROOT,
     SESSIONS,
     SERVER_INSTALLER_DATA,
     _interactive_sessions,

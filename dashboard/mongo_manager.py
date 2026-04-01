@@ -7,6 +7,7 @@ from pathlib import Path
 
 from constants import (
     PYTHON_JUPYTER_STATE_FILE,
+    ROOT,
     WEBSITE_STATE_FILE,
 )
 from utils import _read_json_file, command_exists, run_capture
