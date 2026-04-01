@@ -62,6 +62,8 @@ SYNC_DASHBOARD_FILES = [
     "dashboard/mongo_manager.py",
     "dashboard/python_manager.py",
     "dashboard/ai_services.py",
+    "dashboard/ai_catalog.py",
+    "dashboard/ai_media.py",
     "dashboard/service_manager.py",
     "dashboard/system_admin.py",
     "dashboard/website_manager.py",
