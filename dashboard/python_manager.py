@@ -33,6 +33,7 @@ from utils import (
     run_process,
     upload_root_dir,
 )
+from system_info import choose_service_host, get_listening_ports
 
 def resolve_windows_python():
     env_override = os.environ.get("SERVER_INSTALLER_PYTHON", "").strip()

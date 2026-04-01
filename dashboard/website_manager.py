@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 from constants import (
     PYTHON_API_HOST_TEMPLATE,
@@ -36,6 +37,8 @@ from utils import (
     _sudo_prefix,
     find_app_dll_dir,
 )
+from system_info import choose_service_host, get_listening_ports
+from python_manager import _linux_systemd_unit_status, _python_process_running, _windows_process_matches_managed_jupyter
 
 def _safe_website_name(value, default_name="ServerInstallerWebsite"):
     text = re.sub(r"[^A-Za-z0-9 _.-]+", "", str(value or "").strip())

@@ -4,6 +4,7 @@ import re
 import secrets
 import subprocess
 from pathlib import Path
+from urllib.parse import quote
 
 from constants import (
     PYTHON_JUPYTER_STATE_FILE,
@@ -11,6 +12,8 @@ from constants import (
     WEBSITE_STATE_FILE,
 )
 from utils import _read_json_file, command_exists, run_capture
+from system_info import choose_service_host, get_listening_ports
+from python_manager import _python_process_running, _windows_process_matches_managed_jupyter
 
 def _windows_managed_python_owns_port(port, listeners=None):
     if os.name != "nt":
