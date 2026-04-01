@@ -51,7 +51,45 @@ from utils import _read_json_file, _write_json_file, command_exists, ensure_repo
 from system_info import choose_service_host
 from python_manager import _linux_systemd_unit_status
 from port_manager import is_local_tcp_port_listening, manage_firewall_port
-from website_manager import _docker_add_macos_path, _install_engine_docker, _run_install_cmd
+from website_manager import _docker_add_macos_path, _docker_wait_macos, _install_engine_docker, _run_install_cmd
+
+
+def _ensure_docker_ready(log):
+    if sys.platform == "darwin":
+        _docker_add_macos_path()
+    if not command_exists("docker"):
+        log("Docker not found. Installing Docker first...")
+        _install_engine_docker(log)
+        if sys.platform == "darwin":
+            _docker_add_macos_path()
+    if not command_exists("docker"):
+        return 1, "Docker is not available. Install Docker Desktop manually."
+
+    rc, out = run_capture(["docker", "info"], timeout=15)
+    if rc == 0:
+        return 0, ""
+
+    if sys.platform == "darwin":
+        docker_app = Path("/Applications/Docker.app")
+        if docker_app.exists():
+            log("Docker Desktop is installed but not running. Opening Docker Desktop...")
+            _run_install_cmd(["open", str(docker_app)], log, timeout=10)
+            return _docker_wait_macos(log)
+        return 1, "Docker Desktop is installed but the daemon is not running."
+
+    if os.name != "nt":
+        daemon_output = str(out or "")
+        if "Cannot connect to the Docker daemon" in daemon_output and command_exists("systemctl"):
+            log("Docker is installed but the daemon is not running. Starting docker.service...")
+            start_cmd = _sudo_prefix() + ["systemctl", "start", "docker"]
+            start_code = _run_install_cmd(start_cmd, log, timeout=60)
+            if start_code == 0:
+                rc, out = run_capture(["docker", "info"], timeout=15)
+                if rc == 0:
+                    return 0, ""
+        return 1, "Docker is installed but the daemon is not running. Start Docker and retry."
+
+    return 1, "Docker is installed but the daemon is not running."
 
 def _get_ai_service_info(state_file, state_dir, systemd_service, display_name, default_port="11434"):
     """Generic info builder for AI services (Ollama, TGWUI, ComfyUI, Whisper, Piper)."""
@@ -975,15 +1013,10 @@ def run_openclaw_docker(form=None, live_cb=None):
     if adjusted_https_port:
         log(f"HTTPS port matched HTTP port; adjusted HTTPS to {https_port} to keep protocols separate.")
 
-    if sys.platform == "darwin":
-        _docker_add_macos_path()
-    if not command_exists("docker"):
-        log("Docker not found. Installing Docker first...")
-        _install_engine_docker(log)
-        if sys.platform == "darwin":
-            _docker_add_macos_path()
-    if not command_exists("docker"):
-        return 1, "Docker is not available. Install Docker Desktop manually."
+    docker_code, docker_message = _ensure_docker_ready(log)
+    if docker_code != 0:
+        log(docker_message)
+        return docker_code, "\n".join(output)
 
     container_name = "serverinstaller-openclaw"
     run_capture(["docker", "stop", container_name], timeout=15)
@@ -1656,15 +1689,10 @@ def run_ollama_docker(form=None, live_cb=None):
         output.append(m)
         if live_cb: live_cb(m + "\n")
     log("=== Installing Ollama via Docker ===")
-    if sys.platform == "darwin":
-        _docker_add_macos_path()
-    if not command_exists("docker"):
-        log("Docker not found. Installing Docker first...")
-        _install_engine_docker(log)
-        if sys.platform == "darwin":
-            _docker_add_macos_path()
-    if not command_exists("docker"):
-        return 1, "Docker is not available. Install Docker Desktop manually."
+    docker_code, docker_message = _ensure_docker_ready(log)
+    if docker_code != 0:
+        log(docker_message)
+        return docker_code, "\n".join(output)
 
     # Stop existing containers
     run_capture(["docker", "stop", "serverinstaller-ollama"], timeout=15)
@@ -1953,15 +1981,10 @@ def run_lmstudio_docker(form=None, live_cb=None):
             log("=" * 50)
             log("")
 
-    if sys.platform == "darwin":
-        _docker_add_macos_path()
-    if not command_exists("docker"):
-        log("Docker not found. Installing Docker first...")
-        _install_engine_docker(log)
-        if sys.platform == "darwin":
-            _docker_add_macos_path()
-    if not command_exists("docker"):
-        return 1, "Docker is not available. Install Docker Desktop manually."
+    docker_code, docker_message = _ensure_docker_ready(log)
+    if docker_code != 0:
+        log(docker_message)
+        return docker_code, "\n".join(output)
 
     # Stop existing container
     run_capture(["docker", "stop", "serverinstaller-lmstudio-webui"], timeout=15)
@@ -2073,15 +2096,10 @@ def _run_ai_docker_generic(service_id, image, form, default_port, container_port
         output.append(m)
         if live_cb: live_cb(m + "\n")
     log(f"=== Installing {display_name} via Docker ===")
-    if sys.platform == "darwin":
-        _docker_add_macos_path()
-    if not command_exists("docker"):
-        _install_engine_docker(log)
-        if sys.platform == "darwin":
-            _docker_add_macos_path()
-    if not command_exists("docker"):
-        log("Docker is not available. Install Docker Desktop manually from https://www.docker.com/products/docker-desktop/")
-        return 1, "\n".join(output)
+    docker_code, docker_message = _ensure_docker_ready(log)
+    if docker_code != 0:
+        log(docker_message)
+        return docker_code, "\n".join(output)
     container_name = f"serverinstaller-{service_id}"
     # Remove existing
     run_capture(["docker", "rm", "-f", container_name], timeout=15)
