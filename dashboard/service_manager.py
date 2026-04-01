@@ -31,6 +31,7 @@ from system_info import (
     get_iis_info,
     get_listening_ports,
     get_mongo_info,
+    get_uptime_seconds,
     get_windows_locals3_host,
     _get_docker_container_details,
 )
