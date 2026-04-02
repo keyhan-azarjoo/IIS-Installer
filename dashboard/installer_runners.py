@@ -2788,6 +2788,15 @@ def run_dashboard_update(live_cb=None):
     backup_root = _backup_dashboard_tree(ROOT)
 
     manifest_path = ROOT / "dashboard" / "download-manifest.txt"
+    # Always fetch a fresh manifest first so the file list stays current
+    # even if the on-disk manifest is missing or outdated.
+    try:
+        manifest_tmp = manifest_path.with_suffix(".txt.download")
+        manifest_tmp.parent.mkdir(parents=True, exist_ok=True)
+        _download_to_path(f"{repo_base}/dashboard/download-manifest.txt", manifest_tmp)
+        os.replace(str(manifest_tmp), str(manifest_path))
+    except Exception:
+        pass
     try:
         lines = manifest_path.read_text(encoding="utf-8").splitlines()
         files = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
