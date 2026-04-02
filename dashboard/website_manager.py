@@ -1616,6 +1616,42 @@ def run_windows_website_iis(form=None, live_cb=None):
     if usage.get("busy") and not usage.get("managed_owner"):
         return 1, f"Requested website port {deploy['site_port']} is already in use. Choose another port."
     _cleanup_existing_website_runtime(deploy.get("existing_payload"))
+
+    # Ensure a web.config exists for static/Flutter sites so IIS serves all
+    # file types correctly (e.g. .wasm, .json, extensionless Flutter files)
+    # and falls back to index.html for client-side routing (Flutter, SPA).
+    deploy_root_path = Path(deploy["deploy_root"])
+    web_config_path = deploy_root_path / "web.config"
+    if deploy["runtime"] == "static" and not web_config_path.exists():
+        web_config_path.write_text(
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            "<configuration>\n"
+            "  <system.webServer>\n"
+            "    <staticContent>\n"
+            '      <remove fileExtension=".json" />\n'
+            '      <mimeMap fileExtension=".json" mimeType="application/json" />\n'
+            '      <remove fileExtension=".wasm" />\n'
+            '      <mimeMap fileExtension=".wasm" mimeType="application/wasm" />\n'
+            '      <remove fileExtension=".js" />\n'
+            '      <mimeMap fileExtension=".js" mimeType="application/javascript" />\n'
+            "    </staticContent>\n"
+            "    <rewrite>\n"
+            "      <rules>\n"
+            '        <rule name="SPA Fallback" stopProcessing="true">\n'
+            '          <match url=".*" />\n'
+            "          <conditions logicalGrouping=\"MatchAll\">\n"
+            '            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />\n'
+            '            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />\n'
+            "          </conditions>\n"
+            '          <action type="Rewrite" url="/index.html" />\n'
+            "        </rule>\n"
+            "      </rules>\n"
+            "    </rewrite>\n"
+            "  </system.webServer>\n"
+            "</configuration>\n",
+            encoding="utf-8",
+        )
+
     https_port = deploy.get("https_port", 0)
     if live_cb:
         live_cb(f"Deploying IIS website '{deploy['site_name']}' from {deploy['publish_root']}\n")
@@ -1667,6 +1703,10 @@ def run_windows_website_iis(form=None, live_cb=None):
         f"New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip {initial_protocol_args} -ApplicationPool $appPool | Out-Null".replace("  ", " "),
         *(https_ps_lines if http_port else []),
     ]
+    # Grant IIS_IUSRS read access so the app pool identity can serve the files
+    ps_lines.append("& icacls $physicalPath /grant 'IIS_IUSRS:(OI)(CI)RX' /T /Q 2>&1 | Out-Null")
+    ps_lines.append("& icacls $physicalPath /grant 'IUSR:(OI)(CI)RX' /T /Q 2>&1 | Out-Null")
+    ps_lines.append("Start-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null")
     ps_lines.append("Start-Website -Name $siteName | Out-Null")
 
     # Add domain to hosts file so it resolves on this machine
@@ -2476,6 +2516,7 @@ def run_windows_python_api_iis(form=None, live_cb=None):
         "$bindingPath = ($ip -eq '*' ? '0.0.0.0' : $ip) + '!' + $port",
         "if (Test-Path ('IIS:\\SslBindings\\' + $bindingPath)) { Remove-Item ('IIS:\\SslBindings\\' + $bindingPath) -Force -ErrorAction SilentlyContinue }",
         "New-Item ('IIS:\\SslBindings\\' + $bindingPath) -Thumbprint $cert.Thumbprint -SSLFlags 0 | Out-Null",
+        "Start-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null",
         "Start-Website -Name $siteName | Out-Null",
     ])
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
