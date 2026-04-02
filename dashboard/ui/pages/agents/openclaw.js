@@ -152,7 +152,7 @@
                         <Typography variant="caption" sx={{ display: "block", color: "#059669", mt: 0.5 }}>Click to copy. Open this exact URL once so the dashboard can initialize gateway auth.</Typography>
                       </Paper>
                       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
-                        After pulling a new Ollama model, click <b>Refresh Models</b> to restart OpenClaw and reload the model list.
+                        After pulling a new Ollama model, click <b>Refresh Models</b> to restart OpenClaw and reload the model list. Models that exceed currently available system memory are hidden from the OpenClaw picker.
                       </Typography>
                     </Box>
                   ) : (

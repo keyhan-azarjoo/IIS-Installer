@@ -50,7 +50,7 @@ from constants import (
     _interactive_sessions_lock,
 )
 from utils import _read_json_file, _write_json_file, command_exists, ensure_repo_files, run_capture, run_process, _sudo_prefix
-from system_info import choose_service_host
+from system_info import choose_service_host, get_memory_info
 from python_manager import _linux_systemd_unit_status
 from port_manager import is_local_tcp_port_listening, manage_firewall_port
 from website_manager import _docker_add_macos_path, _docker_wait_macos, _install_engine_docker, _run_install_cmd
@@ -1285,7 +1285,23 @@ def run_openclaw_docker(form=None, live_cb=None):
     def log(m):
         output.append(m)
         if live_cb: live_cb(m + "\n")
+    host_memory = {}
+    try:
+        host_memory = get_memory_info() or {}
+    except Exception:
+        host_memory = {}
+    host_available_bytes = int(host_memory.get("available_bytes") or 0)
+    host_total_bytes = int(host_memory.get("total_bytes") or 0)
     log("=== Installing OpenClaw via Docker ===")
+    if host_available_bytes:
+        log(
+            "Detected host memory: "
+            f"{host_available_bytes / (1024 ** 3):.1f} GiB available"
+            + (
+                f" of {host_total_bytes / (1024 ** 3):.1f} GiB total"
+                if host_total_bytes else ""
+            )
+        )
     if inherited_ollama_url:
         log(f"Using Ollama API URL from Ollama service: {inherited_ollama_url}")
     elif ollama_url:
@@ -1548,6 +1564,7 @@ http {{
         "except Exception as e:",
         "  print('WARN: could not query Ollama tags:', e, file=sys.stderr)",
         "  data = {}",
+        "available_bytes = int(os.environ.get('OPENCLAW_HOST_AVAILABLE_BYTES') or '0')",
         "records = []",
         "for m in (data.get('models') or []):",
         "  name = (m.get('model') or m.get('name') or '').strip()",
@@ -1564,8 +1581,9 @@ http {{
         "    'families': families,",
         "    'parameter_size': str(details.get('parameter_size') or '').strip(),",
         "    'tool_capable': False,",
+        "    'required_bytes': 0,",
+        "    'fits_memory': True,",
         "  })",
-        "models = [r['name'] for r in records]",
         "def norm(s: str) -> str:",
         "  s = (s or '').lower().strip()",
         "  s = re.sub(r'[^a-z0-9:]+', '', s)",
@@ -1580,6 +1598,12 @@ http {{
         "  val = float(m.group(1))",
         "  unit = m.group(2)",
         "  return val / 1000.0 if unit == 'M' else val",
+        "def estimate_required_bytes(rec):",
+        "  on_disk = int(rec.get('size') or 0)",
+        "  params_b = size_to_billions(rec.get('parameter_size') or '')",
+        "  disk_estimate = int(on_disk * 1.10) if on_disk else 0",
+        "  param_estimate = int(params_b * 1.7 * (1024 ** 3)) if params_b else 0",
+        "  return max(disk_estimate, param_estimate, on_disk)",
         "def show_model_info(name: str):",
         "  try:",
         "    payload = json.dumps({'model': name}).encode('utf-8')",
@@ -1605,6 +1629,10 @@ http {{
         "  if info.get('details', {}).get('parameter_size'):",
         "    rec['parameter_size'] = str(info.get('details', {}).get('parameter_size') or '').strip()",
         "  rec['tool_capable'] = ('tools' in caps) or ('tool' in caps)",
+        "  rec['required_bytes'] = estimate_required_bytes(rec)",
+        "  rec['fits_memory'] = (not available_bytes) or (rec['required_bytes'] <= available_bytes)",
+        "visible_records = [rec for rec in records if rec['fits_memory']]",
+        "models = [r['name'] for r in visible_records]",
         "def split_model(s: str):",
         "  s = (s or '').strip()",
         "  if ':' in s:",
@@ -1618,23 +1646,24 @@ http {{
         "desired_n = norm(desired)",
         "desired_fam, desired_tag = split_model(desired)",
         "chosen = None",
-        "if records:",
-        "  for rec in records:",
+        "candidate_records = visible_records",
+        "if candidate_records:",
+        "  for rec in candidate_records:",
         "    cand = rec['name']",
         "    if cand == desired:",
         "      chosen = cand; break",
         "  if not chosen:",
-        "    for rec in records:",
+        "    for rec in candidate_records:",
         "      cand = rec['name']",
         "      if cand.lower() == desired.lower():",
         "        chosen = cand; break",
         "  if not chosen and desired_n:",
-        "    for rec in records:",
+        "    for rec in candidate_records:",
         "      cand = rec['name']",
         "      if norm(cand) == desired_n:",
         "        chosen = cand; break",
         "  if not chosen and desired_fam:",
-        "    for rec in records:",
+        "    for rec in candidate_records:",
         "      cand = rec['name']",
         "      cfam, ctag = split_model(cand)",
         "      fam_match = (",
@@ -1663,17 +1692,22 @@ http {{
         "          preferred_rank = len(preferred_tokens) - idx",
         "          break",
         "      return (tool_rank, preferred_rank, 0 if weak_penalty else 1, param_rank, size_rank, name_n)",
-        "    records.sort(key=rank, reverse=True)",
-        "    chosen = records[0]['name']",
+        "    candidate_records.sort(key=rank, reverse=True)",
+        "    chosen = candidate_records[0]['name']",
         "with open('/tmp/ollama-default-model.txt', 'w', encoding='utf-8') as f:",
         "  f.write(chosen or '')",
         "with open('/tmp/ollama-models.json', 'w', encoding='utf-8') as f:",
         "  json.dump(models, f)",
-        "print('Ollama models discovered:', len(models))",
-        "if models:",
-        "  print('Ollama available models:', ', '.join(models))",
+        "print('Ollama models discovered:', len(records))",
+        "if records:",
+        "  print('Ollama available models:', ', '.join(r['name'] for r in records))",
+        "if available_bytes:",
+        "  print('Ollama models that fit available memory:', ', '.join(models) if models else '(none)')",
         "for rec in records:",
-        "  print('Ollama model probe:', rec['name'], 'tools=' + ('yes' if rec['tool_capable'] else 'no'), 'params=' + (rec['parameter_size'] or '?'), 'families=' + (','.join(rec['families']) or '-'))",
+        "  req_gib = (rec['required_bytes'] / (1024 ** 3)) if rec['required_bytes'] else 0",
+        "  print('Ollama model probe:', rec['name'], 'tools=' + ('yes' if rec['tool_capable'] else 'no'), 'params=' + (rec['parameter_size'] or '?'), 'families=' + (','.join(rec['families']) or '-'), 'required~=' + (f'{req_gib:.1f}GiB' if req_gib else '?'), 'fits=' + ('yes' if rec['fits_memory'] else 'no'))",
+        "if records and not visible_records and available_bytes:",
+        "  print('WARN: no Ollama models fit the currently available host memory', file=sys.stderr)",
         "print('Ollama desired model:', desired)",
         "print('Ollama chosen model:', chosen)",
         "PYEOF",
@@ -2132,6 +2166,7 @@ CMD ["/entrypoint.sh"]
     env_map = {
         "OLLAMA_API_KEY": "ollama-local",
         "OPENCLAW_HOST_IP": host,
+        "OPENCLAW_HOST_AVAILABLE_BYTES": str(host_available_bytes) if host_available_bytes else "",
         "OPENCLAW_LLM_PROVIDER": llm_provider,
         "OPENCLAW_OLLAMA_URL": ollama_url,
         "OPENCLAW_LMSTUDIO_URL": lmstudio_url,
