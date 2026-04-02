@@ -1828,11 +1828,11 @@ http {{
         f'echo "============================================="',
         "if [ -n \"$GATEWAY_TOKEN\" ]; then",
         (
-            f'  echo "DASHBOARD URL (https): https://YOUR_IP:{https_port}/?token=$GATEWAY_TOKEN"'
+            f'  echo "DASHBOARD URL (https): https://YOUR_IP:{https_port}/app/?token=$GATEWAY_TOKEN&gatewayUrl=wss://YOUR_IP:{https_port}/gateway"'
             if https_port else
             '  echo "DASHBOARD URL (https): (disabled)"'
         ),
-        f'  echo "DASHBOARD URL (http):  http://YOUR_IP:{http_port}/?token=$GATEWAY_TOKEN"',
+        f'  echo "DASHBOARD URL (http):  http://YOUR_IP:{http_port}/app/?token=$GATEWAY_TOKEN&gatewayUrl=ws://YOUR_IP:{http_port}/gateway"',
         "else",
         (
             f'  echo "DASHBOARD URL (https): https://YOUR_IP:{https_port}/"'
@@ -1880,57 +1880,11 @@ http {{
         f'echo "=== Direct gateway response headers ==="',
         f"curl -sI http://127.0.0.1:{gw_internal_port}/ 2>&1 | head -15 || echo 'Direct headers test failed'",
         "",
-        "# Public nginx wrapper: proxies all requests to the OpenClaw gateway.",
-        "# The gateway serves its own control UI at / and handles WebSocket at /.",
-        "# Use /?token=<token> to authenticate without pairing.",
+        "# Public nginx wrapper:",
+        "# - redirects / to a tokenized /app/ URL",
+        "# - proxies /app/ to the OpenClaw control UI",
+        "# - proxies /gateway to the actual WebSocket gateway",
         "nginx -s stop 2>/dev/null || true",
-        "cat > /tmp/openclaw-bootstrap.html << EOF",
-        "<!doctype html>",
-        "<html lang=\"en\">",
-        "<head>",
-        "  <meta charset=\"utf-8\">",
-        "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
-        "  <title>OpenClaw Bootstrap</title>",
-        "  <style>",
-        "    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0f172a; color: #e2e8f0; }",
-        "    .card { max-width: 32rem; padding: 1.5rem; border-radius: 16px; background: rgba(15,23,42,0.92); border: 1px solid rgba(148,163,184,0.25); box-shadow: 0 20px 50px rgba(15,23,42,0.35); }",
-        "    h1 { margin: 0 0 0.75rem; font-size: 1.1rem; }",
-        "    p { margin: 0.35rem 0; line-height: 1.5; color: #cbd5e1; }",
-        "    code { color: #86efac; }",
-        "  </style>",
-        "</head>",
-        "<body>",
-        "  <div class=\"card\">",
-        "    <h1>Opening OpenClaw</h1>",
-        "    <p>Initializing dashboard authentication and gateway connection.</p>",
-        "    <p>If you stay on this page for more than a few seconds, open <code>/ui/</code> directly.</p>",
-        "  </div>",
-        "  <script>",
-        "    (function () {",
-        "      var gatewayToken = \"$GATEWAY_TOKEN\";",
-        f"      var gatewayUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/gateway';",
-        "      var storageKey = 'openclaw.control.settings.v1';",
-        "      try {",
-        "        var existing = {};",
-        "        try { existing = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; } catch (e) {}",
-        "        existing.gatewayUrl = gatewayUrl;",
-        "        if (gatewayToken) existing.token = gatewayToken;",
-        "        if (!existing.sessionKey) existing.sessionKey = 'main';",
-        "        if (!existing.lastActiveSessionKey) existing.lastActiveSessionKey = existing.sessionKey;",
-        "        if (!existing.theme) existing.theme = 'system';",
-        "        if (typeof existing.chatFocusMode !== 'boolean') existing.chatFocusMode = false;",
-        "        if (typeof existing.chatShowThinking !== 'boolean') existing.chatShowThinking = true;",
-        "        if (typeof existing.splitRatio !== 'number') existing.splitRatio = 0.6;",
-        "        if (typeof existing.navCollapsed !== 'boolean') existing.navCollapsed = false;",
-        "        if (!existing.navGroupsCollapsed || typeof existing.navGroupsCollapsed !== 'object') existing.navGroupsCollapsed = {};",
-        "        localStorage.setItem(storageKey, JSON.stringify(existing));",
-        "      } catch (e) {}",
-        "      location.replace('/ui/');",
-        "    })();",
-        "  </script>",
-        "</body>",
-        "</html>",
-        "EOF",
         "cat > /tmp/openclaw-public-nginx.conf << 'NGINXEOF'",
         "worker_processes 1;",
         "events { worker_connections 1024; }",
@@ -1942,7 +1896,27 @@ http {{
         "  server {",
         f"    listen {http_port};",
         "    server_name _;",
-        "    location / {",
+        "    location = / {",
+        "      if ($request_method = GET) {",
+        f"        return 302 /app/?token=$GATEWAY_TOKEN&gatewayUrl=ws://$host:{http_port}/gateway;",
+        "      }",
+        "      proxy_http_version 1.1;",
+        "      proxy_set_header Host $host;",
+        "      proxy_set_header Upgrade $http_upgrade;",
+        "      proxy_set_header Connection $connection_upgrade;",
+        f"      proxy_pass http://127.0.0.1:{gw_internal_port};",
+        "    }",
+        "    location /gateway {",
+        "      proxy_http_version 1.1;",
+        "      proxy_set_header Host $host;",
+        "      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+        "      proxy_set_header X-Real-IP $remote_addr;",
+        "      proxy_set_header X-Forwarded-Proto $scheme;",
+        "      proxy_set_header Upgrade $http_upgrade;",
+        "      proxy_set_header Connection $connection_upgrade;",
+        f"      proxy_pass http://127.0.0.1:{gw_internal_port};",
+        "    }",
+        "    location /app/ {",
         "      proxy_http_version 1.1;",
         "      proxy_set_header Host $host;",
         "      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
@@ -1953,7 +1927,7 @@ http {{
         f"      proxy_pass http://127.0.0.1:{gw_internal_port}/;",
         "    }",
         "  }",
-        f'  {"server { listen " + https_port + " ssl; server_name _; ssl_certificate /root/.openclaw/certs/cert.pem; ssl_certificate_key /root/.openclaw/certs/key.pem; location / { proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "/; } }" if https_port else ""}',
+        f'  {"server { listen " + https_port + " ssl; server_name _; ssl_certificate /root/.openclaw/certs/cert.pem; ssl_certificate_key /root/.openclaw/certs/key.pem; location = / { if ($request_method = GET) { return 302 /app/?token=$GATEWAY_TOKEN&gatewayUrl=wss://$host:" + https_port + "/gateway; } proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "; } location /gateway { proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "; } location /app/ { proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "/; } }" if https_port else ""}',
         "}",
         "NGINXEOF",
         'echo "Starting nginx public wrapper..."',
@@ -2123,12 +2097,12 @@ CMD ["/entrypoint.sh"]
         _write_json_file(OPENCLAW_STATE_FILE, state)
         if https_port:
             log(f" Dashboard URL (open this in your browser):")
-            log(f"   https://{display_host}:{https_port}/?token={gateway_token}")
-            log(f"   http://{display_host}:{http_port}/?token={gateway_token}")
+            log(f"   https://{display_host}:{https_port}/app/?token={gateway_token}&gatewayUrl=wss://{display_host}:{https_port}/gateway")
+            log(f"   http://{display_host}:{http_port}/app/?token={gateway_token}&gatewayUrl=ws://{display_host}:{http_port}/gateway")
             log(" Use the HTTPS URL from another machine. HTTP will fail OpenClaw's secure-context check.")
         else:
             log(f" Dashboard URL (open this in your browser):")
-            log(f"   http://{display_host}:{http_port}/?token={gateway_token}")
+            log(f"   http://{display_host}:{http_port}/app/?token={gateway_token}&gatewayUrl=ws://{display_host}:{http_port}/gateway")
         log(f"")
         log(f" Gateway Token:  {gateway_token}")
     else:

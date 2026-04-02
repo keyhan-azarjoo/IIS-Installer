@@ -36,7 +36,9 @@
     else if (displayHost && httpPort) gatewayWsUrl = "ws://" + displayHost + ":" + httpPort;
     var tokenizedBestUrl = bestUrl;
     if (bestUrl && gatewayToken) {
-      tokenizedBestUrl = bestUrl + (bestUrl.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(gatewayToken);
+      var appBaseUrl = bestUrl.replace(/\/?$/, "/app/");
+      var gatewayUrlParam = gatewayWsUrl ? ("&gatewayUrl=" + encodeURIComponent(gatewayWsUrl + "/gateway")) : "";
+      tokenizedBestUrl = appBaseUrl + "?token=" + encodeURIComponent(gatewayToken) + gatewayUrlParam;
     }
 
     var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
