@@ -369,7 +369,7 @@ DNS.2 = openclaw
 IP.1 = 127.0.0.1
 IP.2 = ${CERT_HOST_IP}
 CERTCNF
-    if [ ! -f "$CERT_DIR/cert.pem" ] || [ ! -f "$CERT_DIR/key.pem" ]; then
+    if [ ! -f "$CERT_DIR/cert.pem" ] || [ ! -f "$CERT_DIR/key.pem" ] || true; then
         openssl req -x509 -nodes -newkey rsa:2048 \
             -keyout "$CERT_DIR/key.pem" -out "$CERT_DIR/cert.pem" \
             -days 3650 -config /tmp/openclaw-cert.cnf -extensions v3_req 2>/dev/null
@@ -382,7 +382,7 @@ CERTCNF
     # Start a TCP-level SSL proxy (supports WebSocket + all HTTP traffic transparently)
     HTTPS_PROXY_SCRIPT="${STATE_DIR}/https-proxy.py"
     cat > "$HTTPS_PROXY_SCRIPT" <<'PYPROXY'
-import socket, ssl, threading, os, sys, signal
+import socket, ssl, threading, os, sys, signal, traceback
 
 CERT = os.environ["OC_CERT"]
 KEY = os.environ["OC_KEY"]
@@ -404,30 +404,37 @@ def pipe(src, dst):
         try: dst.close()
         except: pass
 
-def handle(client):
+def handle(raw_client):
+    ssl_client = None
     try:
+        ssl_client = ctx.wrap_socket(raw_client, server_side=True)
         backend = socket.create_connection(("127.0.0.1", BACKEND_PORT), timeout=10)
-        t1 = threading.Thread(target=pipe, args=(client, backend), daemon=True)
-        t2 = threading.Thread(target=pipe, args=(backend, client), daemon=True)
+        t1 = threading.Thread(target=pipe, args=(ssl_client, backend), daemon=True)
+        t2 = threading.Thread(target=pipe, args=(backend, ssl_client), daemon=True)
         t1.start(); t2.start()
         t1.join(); t2.join()
     except Exception:
-        try: client.close()
+        pass
+    finally:
+        if ssl_client:
+            try: ssl_client.close()
+            except: pass
+        try: raw_client.close()
         except: pass
 
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.load_cert_chain(CERT, KEY)
+
 srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind(("0.0.0.0", LISTEN_PORT))
 srv.listen(128)
-ssl_srv = ctx.wrap_socket(srv, server_side=True)
 signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
 print(f"TLS proxy listening on :{LISTEN_PORT} -> 127.0.0.1:{BACKEND_PORT}", flush=True)
 
 while True:
     try:
-        client, addr = ssl_srv.accept()
+        client, addr = srv.accept()
         threading.Thread(target=handle, args=(client,), daemon=True).start()
     except Exception:
         pass
