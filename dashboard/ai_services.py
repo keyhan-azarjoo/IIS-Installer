@@ -1926,7 +1926,6 @@ http {{
         "  providers_cfg['ollama'] = {",
         "    'baseUrl': ollama_base,",
         "    'api': 'openai-completions',",
-        "    'injectNumCtxForOpenAICompat': True,",
         "    'apiKey': os.environ.get('OLLAMA_API_KEY') or 'ollama-local',",
         "    'models': [_make_model_entry(item) for item in ollama_models],",
         "  }",
