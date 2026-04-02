@@ -61,6 +61,7 @@ from system_info import choose_s3_host, choose_service_host, get_ip_addresses, g
 from port_manager import _is_windows_tcp_port_usable, get_port_usage, is_local_tcp_port_listening
 from website_manager import _docker_add_macos_path, _install_engine_docker
 from system_admin import is_windows_admin
+from mongo_manager import _safe_service_name
 from cert_manager import _save_installed_commit, _fetch_remote_commit_sha
 
 
@@ -705,9 +706,15 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
             if live_cb:
                 live_cb(f"Model already in build context ({dest_model.stat().st_size / (1024*1024):.0f} MB)\n")
     else:
+        searched = [
+            str(SAM3_STATE_DIR / "app" / "models" / "sam3.pt"),
+            str(SAM3_STATE_DIR / "models" / "sam3.pt"),
+            str(SAM3_STATE_DIR / "docker-app" / "models" / "sam3.pt"),
+        ]
         if live_cb:
-            live_cb(f"WARNING: sam3.pt not found on host. Detection won't work until you download the model.\n")
-            live_cb(f"Searched: {SAM3_STATE_DIR / 'app' / 'models' / 'sam3.pt'}\n")
+            live_cb("ERROR: sam3.pt model file not found. Please download the model first.\n")
+            live_cb(f"Searched:\n" + "\n".join(f"  - {p}" for p in searched) + "\n")
+        return 1, "SAM3 model file (sam3.pt) not found. Use the 'Download Model' button to download it before deploying."
 
     container_name = "serverinstaller-sam3"
     image_name = "serverinstaller/sam3:latest"
