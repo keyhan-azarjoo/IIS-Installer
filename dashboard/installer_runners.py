@@ -2837,6 +2837,25 @@ def run_dashboard_update(live_cb=None):
         ]
 
     total = len(files)
+
+    def _download_repo_file(rel: str, index: int, count: int) -> tuple[bool, Exception | None]:
+        url = f"{repo_base}/{rel}"
+        target = ROOT / rel.replace("/", os.sep)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(str(target) + ".download")
+        if live_cb:
+            live_cb(f"[{index}/{count}] {rel}\n")
+        try:
+            _download_to_path(url, tmp)
+            os.replace(str(tmp), str(target))
+            return True, None
+        except Exception as ex:
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+            return False, ex
+
     failed = []
     archive_sync_error = None
     try:
@@ -2849,23 +2868,23 @@ def run_dashboard_update(live_cb=None):
 
     if archive_sync_error is not None:
         for i, rel in enumerate(files, 1):
-            url = f"{repo_base}/{rel}"
-            target = ROOT / rel.replace("/", os.sep)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = Path(str(target) + ".download")
-            if live_cb:
-                live_cb(f"[{i}/{total}] {rel}\n")
-            try:
-                _download_to_path(url, tmp)
-                os.replace(str(tmp), str(target))
-            except Exception as ex:
-                try:
-                    tmp.unlink()
-                except Exception:
-                    pass
+            ok, ex = _download_repo_file(rel, i, total)
+            if not ok:
                 if live_cb:
                     live_cb(f"  WARNING: failed to download {rel}: {ex}\n")
                 failed.append(rel)
+
+    if failed:
+        retry_failed = []
+        if live_cb:
+            live_cb(f"[INFO] Retrying {len(failed)} failed file(s)...\n")
+        for i, rel in enumerate(failed, 1):
+            ok, ex = _download_repo_file(rel, i, len(failed))
+            if not ok:
+                if live_cb:
+                    live_cb(f"  WARNING: retry failed for {rel}: {ex}\n")
+                retry_failed.append(rel)
+        failed = retry_failed
 
     if failed:
         if live_cb:
