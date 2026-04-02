@@ -2070,7 +2070,7 @@ print("Updated auth profiles:", auth_path)
 print("Gateway reload requested.")
 """
                 cmd = [
-                    "docker", "exec",
+                    "docker", "exec", "-i",
                     "-e", f"SI_ENV_NAME={env_name}",
                     "-e", f"SI_PROVIDER={provider}",
                     "-e", f"SI_PROFILE_NAME={profile_name}",
@@ -2078,10 +2078,22 @@ print("Gateway reload requested.")
                     "-e", f"SI_ACTION={action}",
                     "-e", f"SI_KEY={key}",
                     container,
-                    "python3", "-c", script,
+                    "python3", "-",
                 ]
                 log("Executing in container...")
-                code = _run_install_cmd(cmd, log, timeout=30)
+                try:
+                    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    stdout, _ = proc.communicate(input=script, timeout=30)
+                    for line in stdout.splitlines():
+                        log(line)
+                    code = proc.returncode
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    log("Command timed out.")
+                    code = 1
+                except Exception as e:
+                    log(f"Error: {e}")
+                    code = 1
                 if code == 0:
                     log(f"\n{provider.title()} token {'deleted' if action == 'delete' else 'saved'}. Gateway reloading.")
                     log("Wait a few seconds, then refresh the OpenClaw dashboard.")
