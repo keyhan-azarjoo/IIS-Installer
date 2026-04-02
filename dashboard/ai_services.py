@@ -1101,7 +1101,154 @@ def run_openclaw_os_install(form=None, live_cb=None):
         cmd = ["bash", str(OPENCLAW_LINUX_INSTALLER)]
         if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
             cmd = ["sudo", "env"] + [f"{k}={env.get(k, '')}" for k in env_keys + ["SERVER_INSTALLER_DATA_DIR"] if env.get(k)] + ["bash", str(OPENCLAW_LINUX_INSTALLER)]
-        return run_process(cmd, env=env, live_cb=live_cb)
+        code, out = run_process(cmd, env=env, live_cb=live_cb)
+        # After OS install, ensure HTTPS proxy is running
+        if code == 0:
+            _ensure_openclaw_https_proxy(form, live_cb)
+        return code, out
+
+
+def _ensure_openclaw_https_proxy(form=None, live_cb=None):
+    """Start an HTTPS TLS proxy for OS-mode OpenClaw installs."""
+    form = form or {}
+    import subprocess as _sp
+    state = _read_json_file(OPENCLAW_STATE_FILE)
+    if str(state.get("deploy_mode") or "").strip().lower() == "docker":
+        return  # Docker handles its own HTTPS via nginx
+    http_port = str(state.get("http_port") or (form.get("OPENCLAW_HTTP_PORT", ["18800"])[0] or "").strip() or "18800").strip()
+    https_port = str(state.get("https_port") or (form.get("OPENCLAW_HTTPS_PORT", ["18801"])[0] or "").strip() or "18801").strip()
+    if not https_port:
+        return
+    install_dir = str(state.get("install_dir") or "").strip()
+    cert_dir = OPENCLAW_STATE_DIR / "certs"
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    cert_file = cert_dir / "cert.pem"
+    key_file = cert_dir / "key.pem"
+
+    def _log(m):
+        if live_cb:
+            live_cb(m + "\n")
+
+    # Generate self-signed cert if missing
+    if not cert_file.exists() or not key_file.exists():
+        host_ip = str(state.get("host") or "0.0.0.0").strip()
+        if host_ip in ("0.0.0.0", "", "*"):
+            try:
+                import socket as _sock
+                host_ip = _sock.gethostbyname(_sock.gethostname())
+            except Exception:
+                host_ip = "127.0.0.1"
+        cnf = cert_dir / "cert.cnf"
+        cnf.write_text(
+            "[req]\ndistinguished_name = req_dn\nx509_extensions = v3\nprompt = no\n"
+            "[req_dn]\nCN = openclaw\nO = ServerInstaller\n"
+            f"[v3]\nsubjectAltName = DNS:localhost,DNS:openclaw,IP:127.0.0.1,IP:{host_ip}\n",
+            encoding="utf-8",
+        )
+        rc, _ = run_capture([
+            "openssl", "req", "-x509", "-nodes", "-newkey", "rsa:2048",
+            "-keyout", str(key_file), "-out", str(cert_file),
+            "-days", "3650", "-config", str(cnf), "-extensions", "v3",
+        ], timeout=30)
+        cnf.unlink(missing_ok=True)
+        if rc == 0:
+            _log("[OpenClaw] SSL certificate generated.")
+        else:
+            _log("[OpenClaw] WARNING: Failed to generate SSL certificate.")
+            return
+
+    # Kill any existing HTTPS proxy
+    try:
+        run_capture(["pkill", "-f", "openclaw-tls-proxy"], timeout=5)
+    except Exception:
+        pass
+    time.sleep(1)
+
+    # Write the TLS proxy script
+    proxy_script = OPENCLAW_STATE_DIR / "openclaw-tls-proxy.py"
+    proxy_script.write_text("""\
+import socket, ssl, threading, os, sys, signal
+
+CERT = os.environ["OC_CERT"]
+KEY = os.environ["OC_KEY"]
+LISTEN_PORT = int(os.environ["OC_HTTPS_PORT"])
+BACKEND_PORT = int(os.environ["OC_HTTP_PORT"])
+
+def pipe(src, dst):
+    try:
+        while True:
+            data = src.recv(65536)
+            if not data:
+                break
+            dst.sendall(data)
+    except Exception:
+        pass
+    finally:
+        try: src.close()
+        except: pass
+        try: dst.close()
+        except: pass
+
+def handle(raw_client):
+    ssl_client = None
+    try:
+        ssl_client = ctx.wrap_socket(raw_client, server_side=True)
+        backend = socket.create_connection(("127.0.0.1", BACKEND_PORT), timeout=10)
+        t1 = threading.Thread(target=pipe, args=(ssl_client, backend), daemon=True)
+        t2 = threading.Thread(target=pipe, args=(backend, ssl_client), daemon=True)
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+    except Exception:
+        pass
+    finally:
+        if ssl_client:
+            try: ssl_client.close()
+            except: pass
+        try: raw_client.close()
+        except: pass
+
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain(CERT, KEY)
+
+srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("0.0.0.0", LISTEN_PORT))
+srv.listen(128)
+signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
+print(f"TLS proxy listening on :{LISTEN_PORT} -> 127.0.0.1:{BACKEND_PORT}", flush=True)
+
+while True:
+    try:
+        client, addr = srv.accept()
+        threading.Thread(target=handle, args=(client,), daemon=True).start()
+    except Exception:
+        pass
+""", encoding="utf-8")
+
+    log_file = OPENCLAW_STATE_DIR / "https-proxy.log"
+    proxy_env = dict(os.environ)
+    proxy_env.update({
+        "OC_CERT": str(cert_file),
+        "OC_KEY": str(key_file),
+        "OC_HTTPS_PORT": https_port,
+        "OC_HTTP_PORT": http_port,
+    })
+    try:
+        with open(log_file, "a") as lf:
+            proc = _sp.Popen(
+                ["python3", str(proxy_script)],
+                env=proxy_env, stdout=lf, stderr=lf,
+                start_new_session=True,
+            )
+        time.sleep(2)
+        if proc.poll() is None:
+            _log(f"[OpenClaw] HTTPS proxy running on port {https_port} (PID {proc.pid}).")
+            state["https_proxy_pid"] = proc.pid
+            _write_json_file(OPENCLAW_STATE_FILE, state)
+        else:
+            _log(f"[OpenClaw] WARNING: HTTPS proxy exited. Check {log_file}")
+    except Exception as e:
+        _log(f"[OpenClaw] WARNING: Could not start HTTPS proxy: {e}")
 
 
 def run_openclaw_start(live_cb=None):
