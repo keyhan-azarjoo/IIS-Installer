@@ -1157,98 +1157,86 @@ def _ensure_openclaw_https_proxy(form=None, live_cb=None):
             _log("[OpenClaw] WARNING: Failed to generate SSL certificate.")
             return
 
-    # Kill any existing HTTPS proxy
-    try:
-        run_capture(["pkill", "-f", "openclaw-tls-proxy"], timeout=5)
-    except Exception:
-        pass
-    time.sleep(1)
+    # Run TLS proxy as an in-process background thread
+    import socket as _socket
+    import ssl as _ssl
+    import threading as _threading
 
-    # Write the TLS proxy script
-    proxy_script = OPENCLAW_STATE_DIR / "openclaw-tls-proxy.py"
-    proxy_script.write_text("""\
-import socket, ssl, threading, os, sys, signal
+    _https_port = int(https_port)
+    _http_port = int(http_port)
 
-CERT = os.environ["OC_CERT"]
-KEY = os.environ["OC_KEY"]
-LISTEN_PORT = int(os.environ["OC_HTTPS_PORT"])
-BACKEND_PORT = int(os.environ["OC_HTTP_PORT"])
-
-def pipe(src, dst):
-    try:
-        while True:
-            data = src.recv(65536)
-            if not data:
-                break
-            dst.sendall(data)
-    except Exception:
-        pass
-    finally:
-        try: src.close()
-        except: pass
-        try: dst.close()
-        except: pass
-
-def handle(raw_client):
-    ssl_client = None
-    try:
-        ssl_client = ctx.wrap_socket(raw_client, server_side=True)
-        backend = socket.create_connection(("127.0.0.1", BACKEND_PORT), timeout=10)
-        t1 = threading.Thread(target=pipe, args=(ssl_client, backend), daemon=True)
-        t2 = threading.Thread(target=pipe, args=(backend, ssl_client), daemon=True)
-        t1.start(); t2.start()
-        t1.join(); t2.join()
-    except Exception:
-        pass
-    finally:
-        if ssl_client:
-            try: ssl_client.close()
+    def _tls_pipe(src, dst):
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except Exception:
+            pass
+        finally:
+            try: src.close()
             except: pass
-        try: raw_client.close()
-        except: pass
+            try: dst.close()
+            except: pass
 
-ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-ctx.load_cert_chain(CERT, KEY)
+    def _tls_handle(raw_client, ssl_ctx, backend_port):
+        ssl_client = None
+        try:
+            ssl_client = ssl_ctx.wrap_socket(raw_client, server_side=True)
+            backend = _socket.create_connection(("127.0.0.1", backend_port), timeout=10)
+            t1 = _threading.Thread(target=_tls_pipe, args=(ssl_client, backend), daemon=True)
+            t2 = _threading.Thread(target=_tls_pipe, args=(backend, ssl_client), daemon=True)
+            t1.start(); t2.start()
+            t1.join(); t2.join()
+        except Exception:
+            pass
+        finally:
+            if ssl_client:
+                try: ssl_client.close()
+                except: pass
+            try: raw_client.close()
+            except: pass
 
-srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(("0.0.0.0", LISTEN_PORT))
-srv.listen(128)
-signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
-print(f"TLS proxy listening on :{LISTEN_PORT} -> 127.0.0.1:{BACKEND_PORT}", flush=True)
+    def _run_tls_proxy(cert, key, listen_port, backend_port):
+        try:
+            ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(str(cert), str(key))
+            srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            srv.bind(("0.0.0.0", listen_port))
+            srv.listen(128)
+            while True:
+                try:
+                    client, addr = srv.accept()
+                    _threading.Thread(target=_tls_handle, args=(client, ctx, backend_port), daemon=True).start()
+                except Exception:
+                    pass
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
 
-while True:
+    # Check if the port is already in use
     try:
-        client, addr = srv.accept()
-        threading.Thread(target=handle, args=(client,), daemon=True).start()
-    except Exception:
-        pass
-""", encoding="utf-8")
+        test_sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        test_sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        test_sock.bind(("0.0.0.0", _https_port))
+        test_sock.close()
+    except OSError as e:
+        _log(f"[OpenClaw] HTTPS port {_https_port} already in use, proxy may already be running.")
+        return
 
-    log_file = OPENCLAW_STATE_DIR / "https-proxy.log"
-    proxy_env = dict(os.environ)
-    proxy_env.update({
-        "OC_CERT": str(cert_file),
-        "OC_KEY": str(key_file),
-        "OC_HTTPS_PORT": https_port,
-        "OC_HTTP_PORT": http_port,
-    })
-    try:
-        with open(log_file, "a") as lf:
-            proc = _sp.Popen(
-                ["python3", str(proxy_script)],
-                env=proxy_env, stdout=lf, stderr=lf,
-                start_new_session=True,
-            )
-        time.sleep(2)
-        if proc.poll() is None:
-            _log(f"[OpenClaw] HTTPS proxy running on port {https_port} (PID {proc.pid}).")
-            state["https_proxy_pid"] = proc.pid
-            _write_json_file(OPENCLAW_STATE_FILE, state)
-        else:
-            _log(f"[OpenClaw] WARNING: HTTPS proxy exited. Check {log_file}")
-    except Exception as e:
-        _log(f"[OpenClaw] WARNING: Could not start HTTPS proxy: {e}")
+    proxy_thread = _threading.Thread(
+        target=_run_tls_proxy,
+        args=(cert_file, key_file, _https_port, _http_port),
+        daemon=True,
+    )
+    proxy_thread.start()
+    time.sleep(1)
+    if proxy_thread.is_alive():
+        _log(f"[OpenClaw] HTTPS proxy running on port {https_port} (in-process thread).")
+    else:
+        _log(f"[OpenClaw] WARNING: HTTPS proxy thread exited unexpectedly.")
 
 
 def run_openclaw_start(live_cb=None):
