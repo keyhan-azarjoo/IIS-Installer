@@ -219,28 +219,34 @@ log "Step 3c: Configuring OpenClaw (non-interactive)..."
 # Write channel tokens and API keys to .env file for the gateway
 OC_ENV_FILE="${HOME}/.openclaw/.env"
 mkdir -p "$(dirname "$OC_ENV_FILE")"
-# Preserve existing env entries
-declare -A ENV_DATA
-if [ -f "$OC_ENV_FILE" ]; then
-    while IFS='=' read -r key val; do
-        [ -n "$key" ] && [[ ! "$key" =~ ^# ]] && ENV_DATA["$key"]="$val"
-    done < "$OC_ENV_FILE"
-fi
-# Add channel tokens from installer form
-[ -n "$OPENCLAW_TELEGRAM_TOKEN" ] && ENV_DATA["TELEGRAM_BOT_TOKEN"]="$OPENCLAW_TELEGRAM_TOKEN"
-[ -n "$OPENCLAW_DISCORD_TOKEN" ] && ENV_DATA["DISCORD_TOKEN"]="$OPENCLAW_DISCORD_TOKEN"
-[ -n "$OPENCLAW_SLACK_TOKEN" ] && ENV_DATA["SLACK_BOT_TOKEN"]="$OPENCLAW_SLACK_TOKEN"
-[ -n "$OPENCLAW_WHATSAPP_PHONE" ] && ENV_DATA["WHATSAPP_PHONE"]="$OPENCLAW_WHATSAPP_PHONE"
-[ -n "$OPENCLAW_OPENAI_KEY" ] && ENV_DATA["OPENAI_API_KEY"]="$OPENCLAW_OPENAI_KEY"
-[ -n "$OPENCLAW_ANTHROPIC_KEY" ] && ENV_DATA["ANTHROPIC_API_KEY"]="$OPENCLAW_ANTHROPIC_KEY"
-ENV_DATA["OLLAMA_API_KEY"]="ollama-local"
-# Write env file
-> "$OC_ENV_FILE"
-for key in $(echo "${!ENV_DATA[@]}" | tr ' ' '\n' | sort); do
-    echo "${key}=${ENV_DATA[$key]}" >> "$OC_ENV_FILE"
-done
+# Build env file using python3 (bash 3.x on macOS lacks associative arrays)
+python3 -c "
+import os, pathlib
+env_file = '$OC_ENV_FILE'
+data = {}
+p = pathlib.Path(env_file)
+if p.exists():
+    for line in p.read_text(errors='ignore').splitlines():
+        if '=' in line and not line.lstrip().startswith('#'):
+            k, v = line.split('=', 1)
+            data[k.strip()] = v.strip()
+mapping = {
+    'OPENCLAW_TELEGRAM_TOKEN': 'TELEGRAM_BOT_TOKEN',
+    'OPENCLAW_DISCORD_TOKEN': 'DISCORD_TOKEN',
+    'OPENCLAW_SLACK_TOKEN': 'SLACK_BOT_TOKEN',
+    'OPENCLAW_WHATSAPP_PHONE': 'WHATSAPP_PHONE',
+    'OPENCLAW_OPENAI_KEY': 'OPENAI_API_KEY',
+    'OPENCLAW_ANTHROPIC_KEY': 'ANTHROPIC_API_KEY',
+}
+for form_key, env_key in mapping.items():
+    val = os.environ.get(form_key, '').strip()
+    if val:
+        data[env_key] = val
+data.setdefault('OLLAMA_API_KEY', 'ollama-local')
+p.write_text('\n'.join(f'{k}={v}' for k, v in sorted(data.items())) + '\n')
+" 2>/dev/null || true
 # Source env so gateway picks them up
-set -a; . "$OC_ENV_FILE"; set +a
+if [ -f "$OC_ENV_FILE" ]; then set -a; . "$OC_ENV_FILE"; set +a; fi
 [ -n "$OPENCLAW_TELEGRAM_TOKEN" ] && log "Telegram bot token configured."
 [ -n "$OPENCLAW_DISCORD_TOKEN" ] && log "Discord bot token configured."
 [ -n "$OPENCLAW_SLACK_TOKEN" ] && log "Slack bot token configured."
