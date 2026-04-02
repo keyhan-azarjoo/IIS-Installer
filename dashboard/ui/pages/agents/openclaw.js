@@ -50,6 +50,8 @@
       { name: "OPENCLAW_PASSWORD", label: "Dashboard Password (optional)", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
       { name: "OPENCLAW_OLLAMA_URL", label: "Ollama API URL (auto-detected)", defaultValue: (ollamaInfo.api_url || ollamaInfo.https_url || ollamaInfo.http_url || "").trim() || "", placeholder: "Leave empty for local. Or: https://other-server:11436" },
       { name: "OPENCLAW_LMSTUDIO_URL", label: "LM Studio API URL", defaultValue: (lmsInfo.api_url || lmsInfo.https_url || lmsInfo.http_url || "").trim() || "", placeholder: "Leave empty for local. Or: http://other-server:1234/v1" },
+      { name: "OPENCLAW_OPENAI_KEY", label: "OpenAI API Key (optional)", type: "password", defaultValue: "", placeholder: "sk-... (from platform.openai.com)" },
+      { name: "OPENCLAW_ANTHROPIC_KEY", label: "Anthropic API Key (optional)", type: "password", defaultValue: "", placeholder: "sk-ant-... (from console.anthropic.com)" },
       { name: "OPENCLAW_TELEGRAM_TOKEN", label: "Telegram Bot Token (optional)", defaultValue: "", placeholder: "123456:ABC-DEF... (from @BotFather)" },
       { name: "OPENCLAW_DISCORD_TOKEN", label: "Discord Bot Token (optional)", type: "password", defaultValue: "", placeholder: "From Discord Developer Portal" },
       { name: "OPENCLAW_SLACK_TOKEN", label: "Slack Bot Token (optional)", type: "password", defaultValue: "", placeholder: "xoxb-... (from Slack API)" },
