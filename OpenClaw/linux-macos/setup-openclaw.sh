@@ -290,12 +290,8 @@ if command -v ollama &>/dev/null; then
     if [ -n "$OLLAMA_MODEL" ]; then
         log "Ollama model available: $OLLAMA_MODEL"
 
-        # Determine agent config dir
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            AGENT_DIR="${STATE_DIR}/.openclaw/agents/main/agent"
-        else
-            AGENT_DIR="${OPENCLAW_HOME}/.openclaw/agents/main/agent"
-        fi
+        # Determine agent config dir (must match where openclaw CLI reads from: $HOME/.openclaw/)
+        AGENT_DIR="${HOME}/.openclaw/agents/main/agent"
         mkdir -p "$AGENT_DIR"
 
         # Write auth-profiles.json so OpenClaw knows about Ollama provider

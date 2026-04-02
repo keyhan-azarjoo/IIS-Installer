@@ -1125,12 +1125,27 @@ def _ensure_openclaw_os_config(live_cb=None):
         [oc_bin, "config", "set", "commands.nativeSkills", "auto"],
         [oc_bin, "config", "set", "agents.defaults.maxConcurrent", "4"],
         [oc_bin, "config", "set", "agents.defaults.subagents.maxConcurrent", "8"],
+        [oc_bin, "config", "set", "gateway.controlUi.dangerouslyDisableDeviceAuth", "true"],
+        [oc_bin, "config", "set", "gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback", "true"],
     ]
     for cmd in config_cmds:
         try:
             run_capture(cmd, timeout=10)
         except Exception:
             pass
+
+    # Also write agent settings directly to ensure they're in the right location
+    install_dir = str(state.get("install_dir") or "").strip()
+    home_dir = os.path.expanduser("~")
+    agent_dir = Path(home_dir) / ".openclaw" / "agents" / "main" / "agent"
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    settings_file = agent_dir / "settings.json"
+    if not settings_file.exists():
+        try:
+            settings_file.write_text('{"customInstructions": ""}', encoding="utf-8")
+        except Exception:
+            pass
+
     # Retrieve and save the gateway token to state so the dashboard can use it
     rc, token_out = run_capture([oc_bin, "config", "get", "gateway.auth.token"], timeout=10)
     gateway_token = token_out.strip() if rc == 0 else ""
