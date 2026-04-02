@@ -87,11 +87,21 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
             else
                 NODE_PKG="https://nodejs.org/dist/v22.16.0/node-v22.16.0-darwin-x64.tar.gz"
             fi
-            curl -fsSL "$NODE_PKG" -o /tmp/node.tar.gz 2>&1 && \
-            tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 2>&1 && \
-            rm -f /tmp/node.tar.gz && \
-            log "Node.js installed from binary." || log "Node.js download failed."
-            export PATH="/usr/local/bin:$PATH"
+            NODE_INSTALL_DIR="${STATE_DIR}/node"
+            mkdir -p "$NODE_INSTALL_DIR"
+            if curl -fsSL "$NODE_PKG" -o /tmp/node.tar.gz 2>&1 && \
+               tar -xzf /tmp/node.tar.gz -C "$NODE_INSTALL_DIR" --strip-components=1 2>&1; then
+                rm -f /tmp/node.tar.gz
+                log "Node.js installed to $NODE_INSTALL_DIR"
+            else
+                # Fallback: try /usr/local
+                mkdir -p /usr/local/bin 2>/dev/null || true
+                tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 2>&1 || true
+                rm -f /tmp/node.tar.gz
+                NODE_INSTALL_DIR="/usr/local"
+                log "Node.js installed to /usr/local (fallback)"
+            fi
+            export PATH="${NODE_INSTALL_DIR}/bin:$PATH"
         fi
     fi
 else
