@@ -2005,6 +2005,7 @@ key = os.environ.get("SI_KEY", "")
 root_env_path = pathlib.Path("/root/.env")
 openclaw_env_path = pathlib.Path("/root/.openclaw/.env")
 auth_path = pathlib.Path("/root/.openclaw/agents/main/agent/auth-profiles.json")
+cfg_path = pathlib.Path("/root/.openclaw/openclaw.json")
 auth_path.parent.mkdir(parents=True, exist_ok=True)
 
 def parse_env(path):
@@ -2055,19 +2056,79 @@ auth["profiles"] = profiles
 auth["lastGood"] = last_good
 auth_path.write_text(json.dumps(auth, indent=2), encoding="utf-8")
 
-try:
-    pids = subprocess.check_output(["pgrep", "-f", "openclaw-gateway"], text=True).split()
-except Exception:
-    pids = []
-for pid in pids:
+# Update openclaw.json to register/remove cloud providers (OpenAI, Anthropic)
+# so their models appear in the dashboard model picker.
+CLOUD_PROVIDER_MODELS = {
+    "openai": [
+        {"id": "gpt-4.1", "name": "GPT-4.1", "contextWindow": 1047576, "maxTokens": 32768},
+        {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "contextWindow": 1047576, "maxTokens": 32768},
+        {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "contextWindow": 1047576, "maxTokens": 32768},
+        {"id": "gpt-4o", "name": "GPT-4o", "contextWindow": 128000, "maxTokens": 16384},
+        {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "contextWindow": 128000, "maxTokens": 16384},
+        {"id": "o3-mini", "name": "o3-mini", "contextWindow": 200000, "maxTokens": 100000},
+    ],
+    "anthropic": [
+        {"id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "contextWindow": 200000, "maxTokens": 16384},
+        {"id": "claude-haiku-3-5", "name": "Claude Haiku 3.5", "contextWindow": 200000, "maxTokens": 8192},
+    ],
+}
+
+if provider in CLOUD_PROVIDER_MODELS:
     try:
-        os.kill(int(pid), signal.SIGUSR1)
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
     except Exception:
-        pass
+        cfg = {}
+    models_cfg = cfg.setdefault("models", {})
+    models_cfg["mode"] = "merge"
+    providers_cfg = models_cfg.setdefault("providers", {})
+    defaults = cfg.setdefault("agents", {}).setdefault("defaults", {})
+    catalog_cfg = defaults.setdefault("models", {})
+    model_cfg = defaults.setdefault("model", {})
+
+    if action == "delete":
+        providers_cfg.pop(provider, None)
+        for k in [k for k in list(catalog_cfg.keys()) if str(k).startswith(f"{provider}/")]:
+            catalog_cfg.pop(k, None)
+        if str(model_cfg.get("primary") or "").startswith(f"{provider}/"):
+            model_cfg.pop("primary", None)
+    else:
+        def _make_model_entry(item):
+            mid = str(item.get("id") or "").strip()
+            name = str(item.get("name") or mid).strip()
+            cw = int(item.get("contextWindow") or 128000)
+            mt = int(item.get("maxTokens") or max(2048, min(8192, cw // 4)))
+            return {
+                "id": mid, "name": name, "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": cw, "maxTokens": mt,
+            }
+        model_list = CLOUD_PROVIDER_MODELS[provider]
+        providers_cfg[provider] = {
+            "apiKey": key,
+            "models": [_make_model_entry(m) for m in model_list],
+        }
+        for m in model_list:
+            mid = str(m.get("id") or "").strip()
+            if mid:
+                catalog_cfg[f"{provider}/{mid}"] = {"alias": str(m.get("name") or mid)}
+        if not model_cfg.get("primary") or not any(
+            p for p in profiles if not p.startswith(f"{provider}:")
+        ):
+            first_model = model_list[0]["id"] if model_list else ""
+            if first_model:
+                model_cfg["primary"] = f"{provider}/{first_model}"
+
+    if not providers_cfg:
+        models_cfg.pop("providers", None)
+    if not catalog_cfg:
+        defaults.pop("models", None)
+    cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    print("Updated openclaw.json with", provider, "provider")
 
 print("Updated env file:", openclaw_env_path)
 print("Updated auth profiles:", auth_path)
-print("Gateway reload requested.")
+print("Requesting container restart for env reload...")
 """
                 cmd = [
                     "docker", "exec", "-i",
@@ -2095,8 +2156,22 @@ print("Gateway reload requested.")
                     log(f"Error: {e}")
                     code = 1
                 if code == 0:
-                    log(f"\n{provider.title()} token {'deleted' if action == 'delete' else 'saved'}. Gateway reloading.")
-                    log("Wait a few seconds, then refresh the OpenClaw dashboard.")
+                    log(f"\n{provider.title()} token {'deleted' if action == 'delete' else 'saved'}. Restarting container...")
+                    try:
+                        restart_proc = subprocess.Popen(
+                            ["docker", "restart", container],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                        )
+                        restart_out, _ = restart_proc.communicate(timeout=120)
+                        if restart_out:
+                            for line in restart_out.strip().splitlines():
+                                log(line)
+                        if restart_proc.returncode == 0:
+                            log("Container restarted. Wait a few seconds, then refresh the OpenClaw dashboard.")
+                        else:
+                            log("WARNING: Container restart failed. Try manually: docker restart " + container)
+                    except Exception as e:
+                        log(f"WARNING: Could not restart container: {e}. Try manually: docker restart " + container)
                 else:
                     log(f"\nFailed to update {provider.title()} token.")
                 return code, "\n".join(output)
