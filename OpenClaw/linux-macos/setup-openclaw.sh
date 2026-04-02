@@ -379,45 +379,58 @@ CERTCNF
     fi
     rm -f /tmp/openclaw-cert.cnf
 
-    # Start a Python HTTPS reverse proxy
+    # Start a TCP-level SSL proxy (supports WebSocket + all HTTP traffic transparently)
     HTTPS_PROXY_SCRIPT="${STATE_DIR}/https-proxy.py"
     cat > "$HTTPS_PROXY_SCRIPT" <<'PYPROXY'
-import http.server, ssl, urllib.request, sys, os, signal, threading
+import socket, ssl, threading, os, sys, signal
 
-BACKEND = f"http://127.0.0.1:{os.environ['OC_HTTP_PORT']}"
 CERT = os.environ["OC_CERT"]
 KEY = os.environ["OC_KEY"]
-PORT = int(os.environ["OC_HTTPS_PORT"])
+LISTEN_PORT = int(os.environ["OC_HTTPS_PORT"])
+BACKEND_PORT = int(os.environ["OC_HTTP_PORT"])
 
-class ProxyHandler(http.server.BaseHTTPRequestHandler):
-    def do_request(self):
-        url = BACKEND + self.path
-        headers = {k: v for k, v in self.headers.items() if k.lower() not in ("host",)}
-        headers["Host"] = f"127.0.0.1:{os.environ['OC_HTTP_PORT']}"
-        body = None
-        if "Content-Length" in self.headers:
-            body = self.rfile.read(int(self.headers["Content-Length"]))
-        try:
-            req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                self.send_response(resp.status)
-                for k, v in resp.getheaders():
-                    if k.lower() not in ("transfer-encoding", "connection"):
-                        self.send_header(k, v)
-                self.end_headers()
-                self.wfile.write(resp.read())
-        except Exception as e:
-            self.send_error(502, str(e))
-    do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = do_request
-    def log_message(self, *a): pass
+def pipe(src, dst):
+    try:
+        while True:
+            data = src.recv(65536)
+            if not data:
+                break
+            dst.sendall(data)
+    except Exception:
+        pass
+    finally:
+        try: src.close()
+        except: pass
+        try: dst.close()
+        except: pass
+
+def handle(client):
+    try:
+        backend = socket.create_connection(("127.0.0.1", BACKEND_PORT), timeout=10)
+        t1 = threading.Thread(target=pipe, args=(client, backend), daemon=True)
+        t2 = threading.Thread(target=pipe, args=(backend, client), daemon=True)
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+    except Exception:
+        try: client.close()
+        except: pass
 
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.load_cert_chain(CERT, KEY)
-srv = http.server.HTTPServer(("0.0.0.0", PORT), ProxyHandler)
-srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
-signal.signal(signal.SIGTERM, lambda *a: (srv.shutdown(), sys.exit(0)))
-print(f"HTTPS proxy listening on port {PORT} -> {BACKEND}", flush=True)
-srv.serve_forever()
+srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("0.0.0.0", LISTEN_PORT))
+srv.listen(128)
+ssl_srv = ctx.wrap_socket(srv, server_side=True)
+signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
+print(f"TLS proxy listening on :{LISTEN_PORT} -> 127.0.0.1:{BACKEND_PORT}", flush=True)
+
+while True:
+    try:
+        client, addr = ssl_srv.accept()
+        threading.Thread(target=handle, args=(client,), daemon=True).start()
+    except Exception:
+        pass
 PYPROXY
     # Kill any existing HTTPS proxy
     pkill -f "https-proxy.py" 2>/dev/null || true
