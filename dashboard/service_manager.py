@@ -26,7 +26,7 @@ from constants import (
 )
 from utils import _read_json_file, _write_json_file, command_exists, run_capture, run_process, _sudo_prefix
 from system_admin import is_windows_admin, is_windows_local_system
-from port_manager import _get_linux_minio_direct_ports
+from port_manager import _get_linux_minio_direct_ports, manage_firewall_port
 from installer_runners import run_sam3_delete
 from system_info import (
     choose_service_host,

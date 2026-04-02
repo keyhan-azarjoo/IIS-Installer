@@ -844,6 +844,7 @@ def _cleanup_managed_jupyter():
             run_capture(["systemctl", "reload", "nginx"], timeout=30)
     elif jupyter_port.isdigit():
         try:
+            from port_manager import manage_firewall_port
             manage_firewall_port("close", jupyter_port, "tcp")
         except Exception:
             pass

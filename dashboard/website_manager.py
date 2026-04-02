@@ -40,7 +40,7 @@ from utils import (
 from system_info import _get_docker_container_details, choose_service_host, get_iis_info, get_listening_ports
 from system_admin import _ps_single_quote, is_windows_admin
 from python_manager import _linux_systemd_unit_status, _python_process_running, _windows_process_matches_managed_jupyter
-from port_manager import get_port_usage, is_local_tcp_port_listening
+from port_manager import get_port_usage, is_local_tcp_port_listening, manage_firewall_port
 
 def _safe_website_name(value, default_name="ServerInstallerWebsite"):
     text = re.sub(r"[^A-Za-z0-9 _.-]+", "", str(value or "").strip())
