@@ -2131,9 +2131,19 @@ if provider in CLOUD_PROVIDER_MODELS:
     cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     print("Updated openclaw.json with", provider, "provider")
 
+try:
+    pids = subprocess.check_output(["pgrep", "-f", "openclaw-gateway"], text=True).split()
+except Exception:
+    pids = []
+for pid in pids:
+    try:
+        os.kill(int(pid), signal.SIGUSR1)
+    except Exception:
+        pass
+
 print("Updated env file:", openclaw_env_path)
 print("Updated auth profiles:", auth_path)
-print("Requesting container restart for env reload...")
+print("Gateway reload requested via SIGUSR1.")
 """
                 cmd = [
                     "docker", "exec", "-i",
@@ -2161,22 +2171,8 @@ print("Requesting container restart for env reload...")
                     log(f"Error: {e}")
                     code = 1
                 if code == 0:
-                    log(f"\n{provider.title()} token {'deleted' if action == 'delete' else 'saved'}. Restarting container...")
-                    try:
-                        restart_proc = subprocess.Popen(
-                            ["docker", "restart", container],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                        )
-                        restart_out, _ = restart_proc.communicate(timeout=120)
-                        if restart_out:
-                            for line in restart_out.strip().splitlines():
-                                log(line)
-                        if restart_proc.returncode == 0:
-                            log("Container restarted. Wait a few seconds, then refresh the OpenClaw dashboard.")
-                        else:
-                            log("WARNING: Container restart failed. Try manually: docker restart " + container)
-                    except Exception as e:
-                        log(f"WARNING: Could not restart container: {e}. Try manually: docker restart " + container)
+                    log(f"\n{provider.title()} token {'deleted' if action == 'delete' else 'saved'}. Gateway reloading.")
+                    log("Wait a few seconds, then refresh the OpenClaw dashboard.")
                 else:
                     log(f"\nFailed to update {provider.title()} token.")
                 return code, "\n".join(output)
