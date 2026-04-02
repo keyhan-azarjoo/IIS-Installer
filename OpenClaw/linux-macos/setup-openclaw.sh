@@ -91,6 +91,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
             tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 2>&1 && \
             rm -f /tmp/node.tar.gz && \
             log "Node.js installed from binary." || log "Node.js download failed."
+            export PATH="/usr/local/bin:$PATH"
         fi
     fi
 else
