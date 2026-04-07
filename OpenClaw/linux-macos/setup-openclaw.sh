@@ -25,9 +25,44 @@ OPENCLAW_USER="openclaw"
 OPENCLAW_HOME="/home/${OPENCLAW_USER}"
 NPM_GLOBAL="${OPENCLAW_HOME}/.npm-global"
 OPENCLAW_BIN="${NPM_GLOBAL}/bin/openclaw"
+MIN_NODE_VERSION="${OPENCLAW_MIN_NODE_VERSION:-22.19.0}"
+GATEWAY_OK=0
+DASHBOARD_OK=0
 
 log() { echo "[OpenClaw] $*"; }
 mkdir -p "$STATE_DIR"
+
+version_ge() {
+    [ "$1" = "$2" ] && return 0
+    local first
+    first=$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)
+    [ "$first" = "$2" ]
+}
+
+require_runtime_dep() {
+    local pkg_dir="$1"
+    local dep_name="$2"
+    [ -d "$pkg_dir" ] || return 1
+    if node -e "require(require.resolve('$dep_name', { paths: ['$pkg_dir'] }))" >/dev/null 2>&1; then
+        return 0
+    fi
+    log "Repairing missing OpenClaw runtime dependency: $dep_name"
+    (cd "$pkg_dir" && npm install "$dep_name" 2>&1) || return 1
+    node -e "require(require.resolve('$dep_name', { paths: ['$pkg_dir'] }))" >/dev/null 2>&1
+}
+
+verify_openclaw_install() {
+    [ -x "$OPENCLAW_BIN" ] || return 1
+    "$OPENCLAW_BIN" --version >/dev/null 2>&1 || return 1
+    local bin_dir pkg_dir
+    bin_dir="$(cd "$(dirname "$OPENCLAW_BIN")" && pwd)" || return 1
+    pkg_dir="$(cd "${bin_dir}/../lib/node_modules/openclaw" 2>/dev/null && pwd)" || return 1
+    require_runtime_dep "$pkg_dir" "@buape/carbon" || return 1
+}
+
+check_gateway_http() {
+    curl -sf "http://127.0.0.1:${HTTP_PORT}/" >/dev/null 2>&1
+}
 
 # Determine bind mode
 # Valid --bind: loopback, lan, tailnet, auto, custom
@@ -73,14 +108,15 @@ for _np in "${STATE_DIR}/node/bin" /usr/local/bin /opt/homebrew/bin /opt/homebre
 done
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS — find brew or install node directly
-    if ! command -v node &>/dev/null || [ "$(node --version | sed 's/v//' | cut -d. -f1)" -lt 22 ] 2>/dev/null; then
+    CURRENT_NODE_VERSION="$(node --version 2>/dev/null | sed 's/^v//')"
+    if ! command -v node &>/dev/null || ! version_ge "${CURRENT_NODE_VERSION:-0.0.0}" "$MIN_NODE_VERSION"; then
         BREW_CMD=""
         for bp in /opt/homebrew/bin/brew /usr/local/bin/brew "$(which brew 2>/dev/null)"; do
             if [ -x "$bp" ] 2>/dev/null; then BREW_CMD="$bp"; break; fi
         done
         if [ -n "$BREW_CMD" ]; then
             log "Found brew at $BREW_CMD"
-            "$BREW_CMD" install node@22 2>/dev/null || "$BREW_CMD" install node 2>/dev/null || true
+            "$BREW_CMD" install node@22 2>/dev/null || "$BREW_CMD" upgrade node@22 2>/dev/null || "$BREW_CMD" install node 2>/dev/null || "$BREW_CMD" upgrade node 2>/dev/null || true
             # Add brew node to PATH
             for np in /opt/homebrew/opt/node@22/bin /opt/homebrew/bin /usr/local/bin; do
                 if [ -x "$np/node" ]; then export PATH="$np:$PATH"; break; fi
@@ -90,9 +126,9 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
             log "Downloading Node.js directly..."
             ARCH=$(uname -m)
             if [ "$ARCH" = "arm64" ]; then
-                NODE_PKG="https://nodejs.org/dist/v22.16.0/node-v22.16.0-darwin-arm64.tar.gz"
+                NODE_PKG="https://nodejs.org/dist/v${MIN_NODE_VERSION}/node-v${MIN_NODE_VERSION}-darwin-arm64.tar.gz"
             else
-                NODE_PKG="https://nodejs.org/dist/v22.16.0/node-v22.16.0-darwin-x64.tar.gz"
+                NODE_PKG="https://nodejs.org/dist/v${MIN_NODE_VERSION}/node-v${MIN_NODE_VERSION}-darwin-x64.tar.gz"
             fi
             NODE_INSTALL_DIR="${STATE_DIR}/node"
             mkdir -p "$NODE_INSTALL_DIR"
@@ -133,6 +169,11 @@ else
 fi
 if ! command -v npm &>/dev/null; then
     log "ERROR: npm not found. Cannot continue."
+    exit 1
+fi
+CURRENT_NODE_VERSION="$(node --version 2>/dev/null | sed 's/^v//')"
+if ! version_ge "${CURRENT_NODE_VERSION:-0.0.0}" "$MIN_NODE_VERSION"; then
+    log "ERROR: Node.js ${CURRENT_NODE_VERSION:-unknown} is too old. Need >= ${MIN_NODE_VERSION}."
     exit 1
 fi
 
@@ -183,6 +224,11 @@ else
 fi
 
 # ── Step 3b: Create systemd service ─────────────────────────────────────────
+if ! verify_openclaw_install; then
+    log "FATAL: OpenClaw installation is incomplete or invalid."
+    log "Check package contents under ${NPM_GLOBAL}/lib/node_modules/openclaw"
+    exit 1
+fi
 log "Step 3b: Creating systemd service..."
 if command -v systemctl &>/dev/null; then
     cat > "/etc/systemd/system/${GATEWAY_SERVICE}.service" <<SVCEOF
@@ -271,6 +317,9 @@ else
     # macOS — run in background
     log "Starting gateway in background (macOS)..."
     if [[ "$OSTYPE" == "darwin"* ]]; then
+        pkill -f "openclaw gateway" 2>/dev/null || true
+        pkill -f "https-proxy.py" 2>/dev/null || true
+        sleep 1
         if [ ! -x "$OPENCLAW_BIN" ]; then
             log "ERROR: OpenClaw binary not found at $OPENCLAW_BIN"
             log "Trying to find it..."
@@ -293,19 +342,23 @@ else
             if kill -0 "$GW_PID" 2>/dev/null; then
                 log "Gateway is running."
                 # Verify port is listening
-                if curl -sf "http://127.0.0.1:${HTTP_PORT}/" >/dev/null 2>&1; then
+                if check_gateway_http; then
+                    GATEWAY_OK=1
                     log "Gateway responding on port ${HTTP_PORT}."
                 else
                     log "Gateway running but not responding yet. Check log: $LOG_FILE"
                     tail -10 "$LOG_FILE" 2>/dev/null | while read line; do log "  $line"; done
+                    exit 1
                 fi
             else
                 log "ERROR: Gateway process died. Check log: $LOG_FILE"
                 tail -20 "$LOG_FILE" 2>/dev/null | while read line; do log "  $line"; done
+                exit 1
             fi
         else
             log "FATAL: Cannot find openclaw binary. Install failed."
             log "Try manually: npm install -g openclaw@latest"
+            exit 1
         fi
     fi
 fi
@@ -371,6 +424,12 @@ if command -v systemctl &>/dev/null; then
     systemctl start "${GATEWAY_SERVICE}.service"
     sleep 3
     systemctl status "${GATEWAY_SERVICE}.service" --no-pager 2>&1 || true
+    if check_gateway_http; then
+        GATEWAY_OK=1
+    else
+        log "ERROR: Gateway did not come up on port ${HTTP_PORT}."
+        exit 1
+    fi
 fi
 
 DASHBOARD_URL=""
@@ -382,9 +441,16 @@ fi
 if echo "$DASHBOARD_OUTPUT" | grep -qoE 'https?://'; then
     DASHBOARD_URL=$(echo "$DASHBOARD_OUTPUT" | grep -oE 'https?://[^ ]+' | head -1)
     log "Dashboard URL: $DASHBOARD_URL"
+    DASHBOARD_OK=1
 else
-    DASHBOARD_URL="http://127.0.0.1:${HTTP_PORT}"
-    log "Dashboard: $DASHBOARD_URL (default)"
+    if [ "$GATEWAY_OK" -eq 1 ]; then
+        DASHBOARD_URL="http://127.0.0.1:${HTTP_PORT}"
+        log "Dashboard: $DASHBOARD_URL"
+        DASHBOARD_OK=1
+    else
+        log "ERROR: Could not determine dashboard URL because the gateway is unavailable."
+        exit 1
+    fi
 fi
 
 # ── Step 4c: Set up HTTPS reverse proxy ────────────────────────────────────
@@ -493,7 +559,7 @@ PYPROXY
     if kill -0 "$HTTPS_PID" 2>/dev/null; then
         log "HTTPS proxy running on port $HTTPS_PORT (PID $HTTPS_PID)."
     else
-        log "WARNING: HTTPS proxy failed to start on port $HTTPS_PORT."
+        log "WARNING: HTTPS proxy failed to start on port $HTTPS_PORT. The port may already be in use."
     fi
 elif [ -n "$HTTPS_PORT" ]; then
     log "WARNING: openssl not found, skipping HTTPS setup."
@@ -540,7 +606,7 @@ cat > "$STATE_FILE" <<STEOF
     "install_dir": "${OPENCLAW_HOME}", "host": "${HOST_IP}", "domain": "${DOMAIN}",
     "http_port": "${HTTP_PORT}", "https_port": "${HTTPS_PORT}",
     "http_url": "${HTTP_URL}", "https_url": "${HTTPS_URL}",
-    "deploy_mode": "os", "running": true,
+    "deploy_mode": "os", "running": $([ "$GATEWAY_OK" -eq 1 ] && echo "true" || echo "false"),
     "openclaw_bin": "${OPENCLAW_BIN}",
     "gateway_port": "${HTTP_PORT}",
     "gateway_token": "${GATEWAY_TOKEN}",
@@ -552,6 +618,10 @@ STEOF
 
 log ""
 log "================================================================="
+if [ "$GATEWAY_OK" -ne 1 ] || [ "$DASHBOARD_OK" -ne 1 ]; then
+    log "ERROR: Installation finished without a reachable dashboard."
+    exit 1
+fi
 log " OpenClaw Installation Complete!"
 log "================================================================="
 log " Dashboard:      ${HTTP_URL}"
