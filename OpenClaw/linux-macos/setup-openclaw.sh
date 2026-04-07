@@ -47,7 +47,12 @@ require_runtime_dep() {
         return 0
     fi
     log "Repairing missing OpenClaw runtime dependency: $dep_name"
-    (cd "$pkg_dir" && npm install "$dep_name" 2>&1) || return 1
+    (cd "$pkg_dir" && npm install --no-save "$dep_name" 2>&1) || true
+    if node -e "require(require.resolve('$dep_name', { paths: ['$pkg_dir'] }))" >/dev/null 2>&1; then
+        return 0
+    fi
+    log "Rehydrating OpenClaw package dependencies..."
+    (cd "$pkg_dir" && npm install --include=optional --omit=dev 2>&1) || true
     node -e "require(require.resolve('$dep_name', { paths: ['$pkg_dir'] }))" >/dev/null 2>&1
 }
 
@@ -226,7 +231,7 @@ fi
 # ── Step 3b: Create systemd service ─────────────────────────────────────────
 if ! verify_openclaw_install; then
     log "FATAL: OpenClaw installation is incomplete or invalid."
-    log "Check package contents under ${NPM_GLOBAL}/lib/node_modules/openclaw"
+    log "Dependency repair failed under ${NPM_GLOBAL}/lib/node_modules/openclaw"
     exit 1
 fi
 log "Step 3b: Creating systemd service..."
