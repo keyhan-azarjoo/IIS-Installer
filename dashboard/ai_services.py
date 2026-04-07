@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from copy import deepcopy
 from pathlib import Path
@@ -400,6 +401,18 @@ def _openclaw_ollama_api_root(url):
     return base.rstrip("/")
 
 
+def _openclaw_is_local_ollama(url):
+    root = _openclaw_ollama_api_root(url)
+    if not root:
+        return True
+    try:
+        parsed = urllib.parse.urlparse(root)
+        host = str(parsed.hostname or "").strip().lower()
+    except Exception:
+        return False
+    return host in ("", "127.0.0.1", "localhost")
+
+
 def _openclaw_safe_json(url, headers=None, timeout=8):
     try:
         req = urllib.request.Request(url, headers=headers or {}, method="GET")
@@ -468,12 +481,13 @@ def _discover_openclaw_provider_models(form=None, home_dir=None):
         if models:
             providers["ollama"] = {
                 "label": "Ollama",
-                "baseUrl": ollama_root.rstrip("/") + "/v1",
-                "api": "openai-completions",
+                "baseUrl": ollama_root.rstrip("/"),
+                "api": "ollama",
                 "apiKey": env_keys.get("OLLAMA_API_KEY") or "ollama-local",
                 "models": models,
                 "reachable": True,
                 "sourceUrl": ollama_url,
+                "implicitDiscovery": _openclaw_is_local_ollama(ollama_url),
             }
 
     lmstudio_url = (form.get("OPENCLAW_LMSTUDIO_URL", [""])[0] if form.get("OPENCLAW_LMSTUDIO_URL") else "") or ""
@@ -607,6 +621,13 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
     for provider in ("ollama", "lmstudio", "openai", "anthropic"):
         info = providers.get(provider)
         if not info:
+            continue
+        if provider == "ollama" and info.get("implicitDiscovery"):
+            providers_cfg.pop("ollama", None)
+            for item in info.get("models") or []:
+                mid = str(item.get("id") or "").strip()
+                if mid:
+                    ordered_models.append(f"ollama/{mid}")
             continue
         providers_cfg[provider] = {
             "baseUrl": str(info.get("baseUrl") or "").strip(),

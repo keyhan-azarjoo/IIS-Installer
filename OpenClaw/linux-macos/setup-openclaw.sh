@@ -539,29 +539,19 @@ cfg = load_json(cfg_path)
 agents = cfg.setdefault("agents", {})
 defaults = agents.setdefault("defaults", {})
 model_cfg = defaults.setdefault("model", {})
-models_catalog = defaults.setdefault("models", {})
 models_cfg = cfg.setdefault("models", {})
-providers_cfg = models_cfg.setdefault("providers", {})
-models_cfg["mode"] = "merge"
-providers_cfg["ollama"] = {
-    "baseUrl": "http://127.0.0.1:11434/v1",
-    "api": "openai-completions",
-    "apiKey": ollama_key,
-    "models": [{
-        "id": model,
-        "name": model,
-        "reasoning": False,
-        "input": ["text"],
-        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-        "contextWindow": 16384,
-        "maxTokens": 4096,
-    }],
-}
-models_catalog[f"ollama/{model.lower()}"] = {"alias": model}
-if openai_key:
-    providers_cfg.setdefault("openai", {}).setdefault("baseUrl", "https://api.openai.com/v1")
-if anthropic_key:
-    providers_cfg.setdefault("anthropic", {}).setdefault("baseUrl", "https://api.anthropic.com/v1")
+models_cfg["mode"] = "replace"
+providers_cfg = models_cfg.get("providers")
+if isinstance(providers_cfg, dict):
+    providers_cfg.pop("ollama", None)
+    if not providers_cfg:
+        models_cfg.pop("providers", None)
+models_catalog = defaults.get("models")
+if isinstance(models_catalog, dict):
+    for key in [k for k in list(models_catalog.keys()) if str(k).startswith("ollama/")]:
+        models_catalog.pop(key, None)
+    if not models_catalog:
+        defaults.pop("models", None)
 model_cfg["primary"] = f"{provider}/{model}"
 cfg_path.parent.mkdir(parents=True, exist_ok=True)
 cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
