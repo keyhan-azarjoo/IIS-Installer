@@ -1336,6 +1336,45 @@ def _ensure_openclaw_os_config(form=None, live_cb=None):
         encoding="utf-8",
     )
 
+    def _build_openclaw_path_instructions():
+        desktop_path = Path(home_dir) / "Desktop"
+        documents_path = Path(home_dir) / "Documents"
+        downloads_path = Path(home_dir) / "Downloads"
+        if sys.platform == "darwin":
+            try:
+                console_user = subprocess.run(
+                    ["stat", "-f%Su", "/dev/console"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=5,
+                ).stdout.strip()
+                if console_user and console_user not in {"root", "loginwindow"}:
+                    dscl = subprocess.run(
+                        ["dscl", ".", "-read", f"/Users/{console_user}", "NFSHomeDirectory"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        text=True,
+                        timeout=5,
+                    ).stdout.strip()
+                    parts = dscl.split()
+                    if parts:
+                        real_home = Path(parts[-1])
+                        desktop_path = real_home / "Desktop"
+                        documents_path = real_home / "Documents"
+                        downloads_path = real_home / "Downloads"
+            except Exception:
+                pass
+        return (
+            "You have full access to the entire filesystem. "
+            "You can read, write, and execute files anywhere on this computer. "
+            f"When the user asks for the desktop, use the real desktop path '{desktop_path}'. "
+            f"When the user asks for Documents, use '{documents_path}'. "
+            f"When the user asks for Downloads, use '{downloads_path}'. "
+            "Do not create relative folders named Desktop, Documents, or Downloads inside the current working directory. "
+            "Use absolute paths for user folders."
+        )
+
     # Write agent settings with full filesystem/tool access
     agent_dir = Path(home_dir) / ".openclaw" / "agents" / "main" / "agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
@@ -1348,7 +1387,7 @@ def _ensure_openclaw_os_config(form=None, live_cb=None):
                 settings = _json2.loads(settings_file.read_text(encoding="utf-8"))
             except Exception:
                 settings = {}
-        settings.setdefault("customInstructions", "You have full access to the entire filesystem. You can read, write, and execute files anywhere on this computer.")
+        settings["customInstructions"] = _build_openclaw_path_instructions()
         settings_file.write_text(_json2.dumps(settings, indent=2), encoding="utf-8")
     except Exception:
         pass

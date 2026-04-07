@@ -33,6 +33,35 @@ DASHBOARD_OK=0
 log() { echo "[OpenClaw] $*"; }
 mkdir -p "$STATE_DIR"
 
+detect_real_user_home() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        local console_user home_dir
+        console_user="$(stat -f%Su /dev/console 2>/dev/null || true)"
+        if [ -n "$console_user" ] && [ "$console_user" != "root" ] && [ "$console_user" != "loginwindow" ]; then
+            home_dir="$(dscl . -read "/Users/$console_user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+            if [ -n "$home_dir" ]; then
+                printf '%s\n' "$home_dir"
+                return 0
+            fi
+        fi
+    fi
+    printf '%s\n' "$OPENCLAW_HOME"
+}
+
+link_real_user_dirs() {
+    local real_home="$1"
+    local dir_name src dst
+    [ -n "$real_home" ] || return 0
+    for dir_name in Desktop Documents Downloads; do
+        src="${real_home}/${dir_name}"
+        dst="${HOME}/${dir_name}"
+        if [ -e "$src" ] || [ -L "$src" ]; then
+            rm -rf "$dst" 2>/dev/null || true
+            ln -s "$src" "$dst" 2>/dev/null || true
+        fi
+    done
+}
+
 version_ge() {
     [ "$1" = "$2" ] && return 0
     local first
@@ -249,6 +278,8 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     rm -rf "$NPM_GLOBAL/lib/node_modules/openclaw" "$NPM_GLOBAL/bin/openclaw" 2>/dev/null || true
     npm uninstall -g openclaw 2>&1 || true
     npm install -g "openclaw@${OPENCLAW_VERSION}" 2>&1 || { log "npm global install failed, trying local"; npm install --prefix "$NPM_GLOBAL" "openclaw@${OPENCLAW_VERSION}" 2>&1 || true; }
+    REAL_USER_HOME="$(detect_real_user_home)"
+    link_real_user_dirs "$REAL_USER_HOME"
     # Install optional peer dependencies for channels (Telegram, Discord, Slack, etc.)
     OC_PKG_DIR="$NPM_GLOBAL/lib/node_modules/openclaw"
     if [ -d "$OC_PKG_DIR" ]; then
