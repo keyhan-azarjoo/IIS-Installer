@@ -1,6 +1,40 @@
 (() => {
   var ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
+  var LMSTUDIO_MANUAL_STEPS = [
+    {
+      title: "1. Download and install LM Studio Desktop",
+      note: "Install the LM Studio desktop app on the host machine first. The dashboard proxy depends on the local LM Studio server.",
+      code: "Open https://lmstudio.ai/download\nInstall the desktop app for your OS\nLaunch LM Studio once and complete the first-run setup",
+    },
+    {
+      title: "2. Download a model inside LM Studio",
+      note: "Use the built-in model browser and make sure at least one model is available locally.",
+      code: "Open LM Studio\nGo to Discover or My Models\nDownload a GGUF model such as Qwen2.5 or Llama 3.2\nLoad the model in the local server tab",
+    },
+    {
+      title: "3. Start the local OpenAI-compatible server",
+      note: "This enables the `/v1` endpoints that the dashboard proxy exposes remotely.",
+      code: "In LM Studio open the Developer or Local Server panel\nEnable the local server\nConfirm it is listening on http://127.0.0.1:1234/v1",
+    },
+    {
+      title: "4. Optional: run the dashboard proxy with Docker",
+      note: "Use this if you want the dashboard-facing proxy container instead of the built-in installer flow.",
+      code: "docker run -d -p 1234:1234 --name lmstudio-proxy serverinstaller/lmstudio-webui:latest",
+    },
+  ];
+
+  function renderLmStudioCodeBlock(Paper, Button, copyText, code) {
+    return (
+      <Paper elevation={0} sx={{ bgcolor: "#0f172a", borderRadius: 2, p: 2, mt: 0.5, position: "relative", overflow: "auto" }}>
+        <Button size="small" onClick={function() { if (copyText) copyText(code, "Code"); }}
+          sx={{ position: "absolute", top: 8, right: 8, minWidth: 0, px: 1.5, py: 0.3, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 11, "&:hover": { bgcolor: "#334155" } }}>
+          Copy
+        </Button>
+        <pre style={{ margin: 0, color: "#e2e8f0", fontSize: 12, lineHeight: 1.7, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{code}</pre>
+      </Paper>
+    );
+  }
 
   ns.pages["ai-lmstudio"] = function renderLMStudioPage(p) {
     var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
@@ -136,6 +170,10 @@
                   <Typography variant="caption" color="text.secondary">OpenAI-compatible API — chat, completions, embeddings, models</Typography>
                 </Box>
                 <Chip label="6 endpoints" size="small" sx={{ bgcolor: "#7c3aed15", color: "#7c3aed", fontWeight: 700, border: "1px solid #7c3aed33" }} />
+                <Button variant="outlined" size="small" onClick={function() { setPage("ai-lmstudio-manual"); }}
+                  sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#7c3aed", color: "#7c3aed", px: 2.5 }}>
+                  Manual Install
+                </Button>
                 <Button variant="contained" size="small" onClick={function() { setPage("ai-lmstudio-api"); }}
                   sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, px: 3 }}>
                   API Documents
@@ -279,6 +317,50 @@
   };
 
   // ── LM Studio API Docs Page ─────────────────────────────────────────────────
+  ns.pages["ai-lmstudio-manual"] = function renderLMStudioManualPage(p) {
+    var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
+    var Typography = p.Typography, Stack = p.Stack, Button = p.Button;
+    var Box = p.Box, Chip = p.Chip, Alert = p.Alert, Paper = p.Paper;
+    var setPage = p.setPage, copyText = p.copyText;
+
+    return (
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed33" }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
+                <Button variant="outlined" size="small" onClick={function() { setPage("ai-lmstudio"); }} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#7c3aed", color: "#7c3aed" }}>Back to LM Studio</Button>
+                <Typography variant="h5" fontWeight={900} sx={{ color: "#7c3aed", flexGrow: 1 }}>LM Studio Manual Installation</Typography>
+                <Chip label="Desktop + Proxy" size="small" sx={{ bgcolor: "#7c3aed10", color: "#7c3aed", fontWeight: 700 }} />
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                LM Studio is installed as a desktop application first, then exposed through its local OpenAI-compatible server. Follow these steps in order on the host machine.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              {LMSTUDIO_MANUAL_STEPS.map(function(step, index) {
+                return (
+                  <Box key={step.title} sx={{ mb: index === LMSTUDIO_MANUAL_STEPS.length - 1 ? 0 : 2 }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.5, color: "#1e293b" }}>{step.title}</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{step.note}</Typography>
+                    {renderLmStudioCodeBlock(Paper, Button, copyText, step.code)}
+                  </Box>
+                );
+              })}
+              <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
+                After the LM Studio local server is running, return to the main page and verify that `/v1/models` responds through the API page.
+              </Alert>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
+  };
+
   ns.pages["ai-lmstudio-api"] = function renderLMStudioApiPage(p) {
     var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
     var Typography = p.Typography, Stack = p.Stack, Button = p.Button;

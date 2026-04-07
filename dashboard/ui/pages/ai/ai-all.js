@@ -2,6 +2,33 @@
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
+  const formatInstallMethodLabel = function(key) {
+    const labels = {
+      pip: "Install with pip",
+      docker: "Run with Docker",
+      dockerGpu: "Run with Docker (GPU)",
+      git: "Install from Git",
+      npm: "Install with npm",
+      ollama: "Install via Ollama",
+    };
+    return labels[key] || ("Install using " + String(key).replace(/([A-Z])/g, " $1").replace(/[_-]+/g, " ").trim());
+  };
+
+  const renderManualCodeBlock = function(Paper, Button, copyText, code) {
+    return (
+      <Paper elevation={0} sx={{ bgcolor: "#0f172a", borderRadius: 2, p: 2, mt: 0.5, position: "relative", overflow: "auto" }}>
+        <Button
+          size="small"
+          onClick={function() { if (copyText) copyText(code, "Code"); }}
+          sx={{ position: "absolute", top: 8, right: 8, minWidth: 0, px: 1.5, py: 0.3, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 11, "&:hover": { bgcolor: "#334155" } }}
+        >
+          Copy
+        </Button>
+        <pre style={{ margin: 0, color: "#e2e8f0", fontSize: 12, lineHeight: 1.7, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{code}</pre>
+      </Paper>
+    );
+  };
+
   // ── All AI service definitions ────────────────────────────────────────────
   // Each entry creates a full install/manage page automatically.
   const AI_SERVICES = {
@@ -564,6 +591,12 @@
                         {svc.apiDocs.sections.reduce(function(n, s) { return n + s.endpoints.length; }, 0)} API endpoints
                       </Typography>
                     </Box>
+                    {svc.installCmds && Object.keys(svc.installCmds).length > 0 && (
+                      <Button variant="outlined" size="small" onClick={() => setPage(pageId + "-manual")}
+                        sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: svc.color, color: svc.color, px: 2.5 }}>
+                        Manual Install
+                      </Button>
+                    )}
                     <Button variant="contained" size="small" onClick={() => setPage(pageId + "-api")}
                       sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: svc.color, "&:hover": { bgcolor: svc.color, filter: "brightness(0.9)" }, px: 3 }}>
                       API Documents
@@ -578,6 +611,79 @@
     };
 
     // ── API Docs sub-page ─────────────────────────────────────────────────
+    if (svc.installCmds && Object.keys(svc.installCmds).length > 0) {
+      ns.pages[pageId + "-manual"] = function(p) {
+        const { Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip, Alert, setPage, copyText } = p;
+        const methods = Object.entries(svc.installCmds || {});
+
+        return (
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1.5px solid " + svc.color + "33" }}>
+                <CardContent>
+                  <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
+                    <Button variant="outlined" size="small" onClick={() => setPage(pageId)} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: svc.color, color: svc.color }}>
+                      Back to {svc.title}
+                    </Button>
+                    <Typography variant="h5" fontWeight={900} sx={{ color: svc.color, flexGrow: 1 }}>{svc.title} Manual Installation</Typography>
+                    <Chip label={methods.length + " install option" + (methods.length > 1 ? "s" : "")} size="small" sx={{ bgcolor: svc.color + "10", color: svc.color, fontWeight: 700 }} />
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                    Follow one of the installation methods below to install {svc.title} manually. Run the commands in order for the method you choose, then verify the service is listening on port {svc.defaultPort}.
+                  </Typography>
+                  {svc.gpuNote && (
+                    <Alert severity={svc.gpuRequired ? "warning" : "info"} sx={{ mt: 1.5, borderRadius: 2 }}>
+                      {svc.gpuNote}
+                    </Alert>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  {methods.map(function(entry, index) {
+                    const methodKey = entry[0];
+                    const command = entry[1];
+                    return (
+                      <Box key={methodKey} sx={{ mb: index === methods.length - 1 ? 0 : 2 }}>
+                        <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.5, color: "#1e293b" }}>
+                          {String(index + 1) + ". " + formatInstallMethodLabel(methodKey)}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          {methodKey === "docker" || methodKey === "dockerGpu"
+                            ? "Use this when you want an isolated container deployment."
+                            : "Use this method for a direct manual installation on the host."}
+                        </Typography>
+                        {renderManualCodeBlock(Paper, Button, copyText, command)}
+                      </Box>
+                    );
+                  })}
+
+                  <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
+                    After installation, open the {svc.title} page in the dashboard and use the status panel or API page to confirm the service is reachable.
+                  </Alert>
+
+                  {!!(svc.links && svc.links.length) && (
+                    <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
+                      {svc.links.map(function(link) {
+                        return (
+                          <Button key={link.label} variant="outlined" size="small" href={link.url} target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: svc.color + "44", color: svc.color }}>
+                            {link.label}
+                          </Button>
+                        );
+                      })}
+                    </Stack>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        );
+      };
+    }
+
     if (svc.apiDocs) {
       ns.pages[pageId + "-api"] = function(p) {
         const { Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip, Tooltip, Alert, setPage, copyText } = p;

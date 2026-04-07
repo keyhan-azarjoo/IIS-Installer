@@ -1,6 +1,45 @@
 (() => {
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
+  const SAM3_MANUAL_STEPS = [
+    {
+      title: "1. Create a Python environment",
+      note: "Prepare an isolated environment for the SAM3 service runtime.",
+      code: "python -m venv sam3-venv\nsam3-venv\\Scripts\\activate    # Windows\n# source sam3-venv/bin/activate # Linux/macOS",
+    },
+    {
+      title: "2. Install the application dependencies",
+      note: "Install the Python packages needed to run the inference server.",
+      code: "pip install torch torchvision torchaudio\npip install fastapi uvicorn pillow opencv-python numpy",
+    },
+    {
+      title: "3. Download the model file",
+      note: "SAM3 needs the `sam3.pt` model before it can perform detections.",
+      code: "curl -L \"https://huggingface.co/facebook/sam3/resolve/main/sam3.pt?download=true\" -o sam3.pt",
+    },
+    {
+      title: "4. Start the SAM3 service manually",
+      note: "Run the API on the port you plan to expose through the dashboard or reverse proxy.",
+      code: "uvicorn app:app --host 0.0.0.0 --port 5000",
+    },
+    {
+      title: "5. Optional: run SAM3 with Docker",
+      note: "Use a container if you want an isolated deployment with GPU passthrough.",
+      code: "docker run -d -p 5000:5000 --gpus all --name sam3 serverinstaller/sam3:latest",
+    },
+  ];
+
+  function renderSam3CodeBlock(Paper, Button, copyText, code) {
+    return (
+      <Paper elevation={0} sx={{ bgcolor: "#0f172a", borderRadius: 2, p: 2, mt: 0.5, position: "relative", overflow: "auto" }}>
+        <Button size="small" onClick={function() { if (copyText) copyText(code, "Code"); }}
+          sx={{ position: "absolute", top: 8, right: 8, minWidth: 0, px: 1.5, py: 0.3, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 11, "&:hover": { bgcolor: "#334155" } }}>
+          Copy
+        </Button>
+        <pre style={{ margin: 0, color: "#e2e8f0", fontSize: 12, lineHeight: 1.7, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{code}</pre>
+      </Paper>
+    );
+  }
 
   ns.pages["ai-sam3"] = function renderAiSam3Page(p) {
     const {
@@ -125,6 +164,9 @@
                   <Typography variant="caption" color="text.secondary">16 API endpoints — detect, video, export, model info</Typography>
                 </Box>
                 <Chip label="16 endpoints" size="small" sx={{ bgcolor: "#7c3aed15", color: "#7c3aed", fontWeight: 700, border: "1px solid #7c3aed33" }} />
+                <Button variant="outlined" size="small" onClick={() => setPage("ai-sam3-manual")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#7c3aed", color: "#7c3aed", px: 2.5 }}>
+                  Manual Install
+                </Button>
                 <Button variant="contained" size="small" onClick={() => setPage("ai-sam3-api")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, px: 3 }}>
                   API Documents
                 </Button>
@@ -317,6 +359,45 @@
   };
 
   // ── SAM3 API Documentation Page ─────────────────────────────────────────────
+  ns.pages["ai-sam3-manual"] = function renderSam3ManualPage(p) {
+    const { Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip, Alert, setPage, copyText } = p;
+
+    return (
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed33" }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
+                <Button variant="outlined" size="small" onClick={() => setPage("ai-sam3")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#7c3aed", color: "#7c3aed" }}>Back to SAM3</Button>
+                <Typography variant="h5" fontWeight={900} sx={{ color: "#7c3aed", flexGrow: 1 }}>SAM3 Manual Installation</Typography>
+                <Chip label="Python or Docker" size="small" sx={{ bgcolor: "#7c3aed10", color: "#7c3aed", fontWeight: 700 }} />
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                Prepare the runtime, install the dependencies, download the model file, and then start the service manually on the host or in Docker.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              {SAM3_MANUAL_STEPS.map((step, index) => (
+                <Box key={step.title} sx={{ mb: index === SAM3_MANUAL_STEPS.length - 1 ? 0 : 2 }}>
+                  <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.5, color: "#1e293b" }}>{step.title}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{step.note}</Typography>
+                  {renderSam3CodeBlock(Paper, Button, copyText, step.code)}
+                </Box>
+              ))}
+              <Alert severity="warning" sx={{ mt: 2, borderRadius: 2 }}>
+                GPU acceleration is strongly recommended for SAM3. CPU-only mode works, but detection and tracking will be substantially slower.
+              </Alert>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
+  };
+
   ns.pages["ai-sam3-api"] = function renderSam3ApiPage(p) {
     const { Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip, Tooltip, Alert, setPage, sam3Service, copyText } = p;
     const sam3 = sam3Service || {};

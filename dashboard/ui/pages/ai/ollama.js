@@ -1,6 +1,45 @@
 (() => {
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
+  const OLLAMA_MANUAL_STEPS = [
+    {
+      title: "1. Install Ollama on Windows",
+      note: "Use the official Windows installer or winget to install the Ollama service.",
+      code: "winget install -e --id Ollama.Ollama\nollama --version",
+    },
+    {
+      title: "2. Install Ollama on Linux or macOS",
+      note: "The official install script sets up the binary and background service.",
+      code: "curl -fsSL https://ollama.com/install.sh | sh\nollama --version",
+    },
+    {
+      title: "3. Start the service and verify the API",
+      note: "Make sure the local Ollama API is running before you pull models.",
+      code: "ollama serve\ncurl http://127.0.0.1:11434/api/tags",
+    },
+    {
+      title: "4. Pull a model",
+      note: "Download at least one model so the service can answer requests.",
+      code: "ollama pull llama3.2\nollama list",
+    },
+    {
+      title: "5. Optional: run with Docker",
+      note: "Use this if you prefer a containerized deployment.",
+      code: "docker run -d -p 11434:11434 --name ollama ollama/ollama:latest",
+    },
+  ];
+
+  function renderOllamaCodeBlock(Paper, Button, copyText, code) {
+    return (
+      <Paper elevation={0} sx={{ bgcolor: "#0f172a", borderRadius: 2, p: 2, mt: 0.5, position: "relative", overflow: "auto" }}>
+        <Button size="small" onClick={function() { if (copyText) copyText(code, "Code"); }}
+          sx={{ position: "absolute", top: 8, right: 8, minWidth: 0, px: 1.5, py: 0.3, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 11, "&:hover": { bgcolor: "#334155" } }}>
+          Copy
+        </Button>
+        <pre style={{ margin: 0, color: "#e2e8f0", fontSize: 12, lineHeight: 1.7, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{code}</pre>
+      </Paper>
+    );
+  }
 
   ns.pages["ai-ollama"] = function renderOllamaPage(p) {
     const {
@@ -256,6 +295,10 @@
                   <Typography variant="caption" color="text.secondary">OpenAI-compatible API — chat, generate, embeddings, model management</Typography>
                 </Box>
                 <Chip label="12 endpoints" size="small" sx={{ bgcolor: "#1e40af15", color: "#1e40af", fontWeight: 700, border: "1px solid #1e40af33" }} />
+                <Button variant="outlined" size="small" onClick={function() { setPage("ai-ollama-manual"); }}
+                  sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#1e40af", color: "#1e40af", px: 2.5 }}>
+                  Manual Install
+                </Button>
                 <Button variant="contained" size="small" onClick={function() { setPage("ai-ollama-api"); }}
                   sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#1e40af", "&:hover": { bgcolor: "#1d4ed8" }, px: 3 }}>
                   API Documents
@@ -533,6 +576,50 @@
   };
 
   // ── Ollama API Documentation Page ───────────────────────────────────────────
+  ns.pages["ai-ollama-manual"] = function renderOllamaManualPage(p) {
+    var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
+    var Typography = p.Typography, Stack = p.Stack, Button = p.Button;
+    var Box = p.Box, Chip = p.Chip, Alert = p.Alert, Paper = p.Paper;
+    var setPage = p.setPage, copyText = p.copyText;
+
+    return (
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #1e40af33" }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
+                <Button variant="outlined" size="small" onClick={function() { setPage("ai-ollama"); }} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#1e40af", color: "#1e40af" }}>Back to Ollama</Button>
+                <Typography variant="h5" fontWeight={900} sx={{ color: "#1e40af", flexGrow: 1 }}>Ollama Manual Installation</Typography>
+                <Chip label="Host or Docker" size="small" sx={{ bgcolor: "#1e40af10", color: "#1e40af", fontWeight: 700 }} />
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                Choose the host or Docker path below, install Ollama, start the API, and pull at least one model before using the dashboard integrations.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              {OLLAMA_MANUAL_STEPS.map(function(step, index) {
+                return (
+                  <Box key={step.title} sx={{ mb: index === OLLAMA_MANUAL_STEPS.length - 1 ? 0 : 2 }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.5, color: "#1e293b" }}>{step.title}</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{step.note}</Typography>
+                    {renderOllamaCodeBlock(Paper, Button, copyText, step.code)}
+                  </Box>
+                );
+              })}
+              <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
+                After pulling a model, return to the main Ollama page and use the status or API page to confirm the `/api/tags` endpoint is responding.
+              </Alert>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
+  };
+
   ns.pages["ai-ollama-api"] = function renderOllamaApiPage(p) {
     var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
     var Typography = p.Typography, Stack = p.Stack, Button = p.Button;

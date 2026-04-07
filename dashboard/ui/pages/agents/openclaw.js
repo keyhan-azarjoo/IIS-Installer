@@ -1,6 +1,54 @@
 (() => {
   var ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
+  var OPENCLAW_MANUAL_STEPS = [
+    {
+      title: "1. Create User",
+      code: 'adduser --disabled-password --gecos "" openclaw\nusermod -aG sudo openclaw\necho "openclaw ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/openclaw\nchmod 440 /etc/sudoers.d/openclaw\npasswd openclaw',
+    },
+    {
+      title: "2. Install Required Packages",
+      code: "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\napt-get install -y nodejs build-essential python3",
+    },
+    {
+      title: "3a. Install OpenClaw",
+      code: "su - openclaw -c 'npm config set prefix ~/.npm-global && npm install -g openclaw@latest && echo \"export PATH=\\\"\\$HOME/.npm-global/bin:\\$PATH\\\"\" >> ~/.bashrc'\nls -la /home/openclaw/.npm-global/bin/openclaw",
+    },
+    {
+      title: "3b. Create Systemd Service",
+      code: "tee /etc/systemd/system/clawdbot-gateway.service > /dev/null << 'EOF'\n[Unit]\nDescription=Clawdbot Gateway (always-on)\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nUser=openclaw\nWorkingDirectory=/home/openclaw\nEnvironment=PATH=/usr/bin:/bin:/home/openclaw/.npm-global/bin\nExecStart=/home/openclaw/.npm-global/bin/openclaw gateway --bind loopback --port 18789 --verbose\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\nEOF",
+    },
+    {
+      title: "3c. Configure OpenClaw",
+      code: "su - openclaw -c '/home/openclaw/.npm-global/bin/openclaw onboard'",
+    },
+    {
+      title: "3d. Enable & Start Service",
+      code: "systemctl daemon-reload\nsystemctl enable clawdbot-gateway.service\nsystemctl start clawdbot-gateway.service\nsystemctl status clawdbot-gateway.service",
+    },
+    {
+      title: "4a. Install Ollama & Configure Model",
+      code: "curl -fsSL https://ollama.com/install.sh | sh\nollama pull llama3.2:3b\nsystemctl stop clawdbot-gateway.service\nmkdir -p /tmp/ollama-backups && chmod 1777 /tmp/ollama-backups\nsu - openclaw -c 'ollama launch openclaw --model llama3.2:3b --config'",
+    },
+    {
+      title: "4b. Get Dashboard URL",
+      code: "systemctl start clawdbot-gateway.service\nsystemctl status clawdbot-gateway.service\nsu - openclaw -c '/home/openclaw/.npm-global/bin/openclaw dashboard --no-open'",
+    },
+    {
+      title: "5. SSH Tunnel (run from your local machine)",
+      code: "ssh -N -L 18789:127.0.0.1:18789 openclaw@YOUR_SERVER_IP",
+    },
+  ];
+
+  function createOpenClawCodeBlock(Paper, Button, copyText) {
+    return function OpenClawCodeBlock(props) {
+      return React.createElement(Paper, { elevation: 0, sx: { bgcolor: "#0f172a", borderRadius: 2, p: 2, mt: 0.5, mb: 1.5, position: "relative", overflow: "auto" } },
+        React.createElement(Button, { size: "small", onClick: function() { if (copyText) copyText(props.code, "Code"); },
+          sx: { position: "absolute", top: 8, right: 8, minWidth: 0, px: 1.5, py: 0.3, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 11, "&:hover": { bgcolor: "#334155" } } }, "Copy"),
+        React.createElement("pre", { style: { margin: 0, color: "#e2e8f0", fontSize: 12, lineHeight: 1.7, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" } }, props.code)
+      );
+    };
+  }
 
   ns.pages["agent-openclaw"] = function renderOpenClawPage(p) {
     var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
@@ -58,13 +106,7 @@
       { name: "OPENCLAW_WHATSAPP_PHONE", label: "WhatsApp Phone Number (optional)", defaultValue: "", placeholder: "+1234567890 (will show QR code)" },
     ];
 
-    var CodeBlock = function(props) {
-      return React.createElement(Paper, { elevation: 0, sx: { bgcolor: "#0f172a", borderRadius: 2, p: 2, mt: 0.5, mb: 1.5, position: "relative", overflow: "auto" } },
-        React.createElement(Button, { size: "small", onClick: function() { if (copyText) copyText(props.code, "Code"); },
-          sx: { position: "absolute", top: 8, right: 8, minWidth: 0, px: 1.5, py: 0.3, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 11, "&:hover": { bgcolor: "#334155" } } }, "Copy"),
-        React.createElement("pre", { style: { margin: 0, color: "#e2e8f0", fontSize: 12, lineHeight: 1.7, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" } }, props.code)
-      );
-    };
+    var CodeBlock = createOpenClawCodeBlock(Paper, Button, copyText);
 
     return (
       <Grid container spacing={2}>
@@ -617,55 +659,6 @@
           </Card>
         </Grid>
 
-        {/* Manual Setup Guide */}
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1.5px solid #dc262633" }}>
-            <CardContent>
-              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
-                <Box sx={{ width: 5, height: 32, borderRadius: 3, bgcolor: "#dc2626" }} />
-                <Typography variant="h6" fontWeight={800} sx={{ color: "#dc2626" }}>Manual Setup Guide</Typography>
-                <Chip label="Remote Server" size="small" sx={{ bgcolor: "#dc262610", color: "#dc2626", fontWeight: 600 }} />
-                <Box sx={{ flexGrow: 1 }} />
-                <Button variant="text" size="small" href="https://mer.vin/2026/02/openclaw-remote-server-setup/" target="_blank" sx={{ textTransform: "none", color: "#dc2626" }}>Source Article</Button>
-              </Stack>
-
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>1. Create User</Typography>
-              {React.createElement(CodeBlock, { code: 'adduser --disabled-password --gecos "" openclaw\nusermod -aG sudo openclaw\necho "openclaw ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/openclaw\nchmod 440 /etc/sudoers.d/openclaw\npasswd openclaw' })}
-
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>2. Install Required Packages</Typography>
-              {React.createElement(CodeBlock, { code: 'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\napt-get install -y nodejs build-essential python3' })}
-
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>3a. Install OpenClaw</Typography>
-              {React.createElement(CodeBlock, { code: "su - openclaw -c 'npm config set prefix ~/.npm-global && npm install -g openclaw@latest && echo \"export PATH=\\\"\\$HOME/.npm-global/bin:\\$PATH\\\"\" >> ~/.bashrc'\nls -la /home/openclaw/.npm-global/bin/openclaw" })}
-
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>3b. Create Systemd Service</Typography>
-              {React.createElement(CodeBlock, { code: "tee /etc/systemd/system/clawdbot-gateway.service > /dev/null << 'EOF'\n[Unit]\nDescription=Clawdbot Gateway (always-on)\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nUser=openclaw\nWorkingDirectory=/home/openclaw\nEnvironment=PATH=/usr/bin:/bin:/home/openclaw/.npm-global/bin\nExecStart=/home/openclaw/.npm-global/bin/openclaw gateway --bind loopback --port 18789 --verbose\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\nEOF" })}
-
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>3c. Configure OpenClaw</Typography>
-              {React.createElement(CodeBlock, { code: "su - openclaw -c '/home/openclaw/.npm-global/bin/openclaw onboard'" })}
-
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>3d. Enable & Start Service</Typography>
-              {React.createElement(CodeBlock, { code: 'systemctl daemon-reload\nsystemctl enable clawdbot-gateway.service\nsystemctl start clawdbot-gateway.service\nsystemctl status clawdbot-gateway.service' })}
-
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>4a. Install Ollama & Configure Model</Typography>
-              {React.createElement(CodeBlock, { code: "curl -fsSL https://ollama.com/install.sh | sh\nollama pull llama3.2:3b\nsystemctl stop clawdbot-gateway.service\nmkdir -p /tmp/ollama-backups && chmod 1777 /tmp/ollama-backups\nsu - openclaw -c 'ollama launch openclaw --model llama3.2:3b --config'" })}
-
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>4b. Get Dashboard URL</Typography>
-              {React.createElement(CodeBlock, { code: "systemctl start clawdbot-gateway.service\nsystemctl status clawdbot-gateway.service\nsu - openclaw -c '/home/openclaw/.npm-global/bin/openclaw dashboard --no-open'" })}
-
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mt: 2, mb: 0.5, color: "#1e293b" }}>5. SSH Tunnel (run from your local machine)</Typography>
-              {React.createElement(CodeBlock, { code: 'ssh -N -L 18789:127.0.0.1:18789 openclaw@YOUR_SERVER_IP' })}
-
-              <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
-                <Typography variant="body2"><b>Notes:</b> To remove a previously configured OpenAI model:</Typography>
-                <Paper elevation={0} sx={{ bgcolor: "#0f172a", borderRadius: 1, p: 1, mt: 1 }}>
-                  <pre style={{ margin: 0, color: "#e2e8f0", fontSize: 12, fontFamily: "monospace" }}>{"su - openclaw -c '/home/openclaw/.npm-global/bin/openclaw models list'\nsu - openclaw -c '/home/openclaw/.npm-global/bin/openclaw models aliases remove GPT'"}</pre>
-                </Paper>
-              </Alert>
-            </CardContent>
-          </Card>
-        </Grid>
-
         {/* API Docs */}
         <Grid item xs={12}>
           <Card sx={{ borderRadius: 3, border: "1.5px solid #dc262644", background: "linear-gradient(135deg, #dc262605 0%, #ffffff 100%)" }}>
@@ -676,6 +669,10 @@
                   <Typography variant="h6" fontWeight={800} sx={{ color: "#dc2626" }}>OpenClaw API Documentation</Typography>
                   <Typography variant="caption" color="text.secondary">Gateway WebSocket API, REST endpoints</Typography>
                 </Box>
+                <Button variant="outlined" size="small" onClick={function() { setPage("agent-openclaw-manual"); }}
+                  sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#dc2626", color: "#dc2626", px: 2.5 }}>
+                  Manual Install
+                </Button>
                 <Button variant="contained" size="small" onClick={function() { setPage("agent-openclaw-api"); }}
                   sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, px: 3 }}>
                   API Documents
@@ -689,6 +686,56 @@
   };
 
   // ── OpenClaw API Docs Page ──────────────────────────────────────────────────
+  ns.pages["agent-openclaw-manual"] = function renderOpenClawManualPage(p) {
+    var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
+    var Typography = p.Typography, Stack = p.Stack, Button = p.Button;
+    var Box = p.Box, Paper = p.Paper, Chip = p.Chip, Alert = p.Alert;
+    var setPage = p.setPage, copyText = p.copyText;
+    var CodeBlock = createOpenClawCodeBlock(Paper, Button, copyText);
+
+    return (
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #dc262633" }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
+                <Button variant="outlined" size="small" onClick={function() { setPage("agent-openclaw"); }} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#dc2626", color: "#dc2626" }}>Back to OpenClaw</Button>
+                <Typography variant="h5" fontWeight={900} sx={{ color: "#dc2626", flexGrow: 1 }}>OpenClaw Manual Installation</Typography>
+                <Chip label="Remote Server" size="small" sx={{ bgcolor: "#dc262610", color: "#dc2626", fontWeight: 700 }} />
+                <Button variant="text" size="small" href="https://mer.vin/2026/02/openclaw-remote-server-setup/" target="_blank" rel="noopener" sx={{ textTransform: "none", color: "#dc2626" }}>Source Article</Button>
+              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                Follow these commands in order on the target Linux server. This manual path installs Node.js, OpenClaw, the gateway service, Ollama, and the dashboard access flow step by step.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              {OPENCLAW_MANUAL_STEPS.map(function(step, index) {
+                return (
+                  <Box key={step.title} sx={{ mb: index === OPENCLAW_MANUAL_STEPS.length - 1 ? 0 : 2 }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.5, color: "#1e293b" }}>{step.title}</Typography>
+                    {React.createElement(CodeBlock, { code: step.code })}
+                  </Box>
+                );
+              })}
+
+              <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
+                <Typography variant="body2"><b>Note:</b> To remove a previously configured OpenAI model alias, run these commands:</Typography>
+                <Paper elevation={0} sx={{ bgcolor: "#0f172a", borderRadius: 1, p: 1, mt: 1 }}>
+                  <pre style={{ margin: 0, color: "#e2e8f0", fontSize: 12, fontFamily: "monospace" }}>{"su - openclaw -c '/home/openclaw/.npm-global/bin/openclaw models list'\nsu - openclaw -c '/home/openclaw/.npm-global/bin/openclaw models aliases remove GPT'"}</pre>
+                </Paper>
+              </Alert>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
+  };
+
   ns.pages["agent-openclaw-api"] = function renderOpenClawApiPage(p) {
     var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
     var Typography = p.Typography, Stack = p.Stack, Button = p.Button;

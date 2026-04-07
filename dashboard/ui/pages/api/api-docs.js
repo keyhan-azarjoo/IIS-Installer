@@ -62,6 +62,7 @@
       var tc = docData.color || "#6d28d9";
       var totalEp = 0;
       docData.sections.forEach(function(s) { totalEp += s.endpoints.length; });
+      var canOpenManual = !!(docData.manualPageId && p.setPage);
 
       if (!open) {
         return (
@@ -79,6 +80,15 @@
                     </Typography>
                   </Box>
                   <Chip label={totalEp + " endpoints"} size="small" sx={{ bgcolor: tc + "15", color: tc, fontWeight: 700, border: "1px solid " + tc + "33" }} />
+                  {canOpenManual && (
+                    <Button
+                      variant="outlined" size="small"
+                      onClick={function() { p.setPage(docData.manualPageId); }}
+                      sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: tc, color: tc, px: 2.5 }}
+                    >
+                      Manual Install
+                    </Button>
+                  )}
                   <Button
                     variant="contained" size="small"
                     onClick={function() { setOpen(true); }}
@@ -191,10 +201,85 @@
     });
   };
 
+  ns.renderManualInstallPage = function(p, manualData) {
+    if (!manualData || !manualData.steps || !manualData.steps.length) return null;
+    var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
+    var Typography = p.Typography, Stack = p.Stack, Button = p.Button;
+    var Box = p.Box, Paper = p.Paper, Chip = p.Chip, Alert = p.Alert;
+    var setPage = p.setPage, copyText = p.copyText;
+    var color = manualData.color || "#6d28d9";
+
+    var renderCodeBlock = function(code) {
+      return (
+        <Paper elevation={0} sx={{ bgcolor: "#0f172a", borderRadius: 2, p: 2, mt: 0.5, position: "relative", overflow: "auto" }}>
+          <Button
+            size="small"
+            onClick={function() { if (copyText) copyText(code, "Code"); }}
+            sx={{ position: "absolute", top: 8, right: 8, minWidth: 0, px: 1.5, py: 0.3, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 11, "&:hover": { bgcolor: "#334155" } }}
+          >
+            Copy
+          </Button>
+          <pre style={{ margin: 0, color: "#e2e8f0", fontSize: 12, lineHeight: 1.7, fontFamily: "'Fira Code',monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{code}</pre>
+        </Paper>
+      );
+    };
+
+    return (
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid " + color + "33" }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
+                {manualData.backPageId && (
+                  <Button variant="outlined" size="small" onClick={function() { if (setPage) setPage(manualData.backPageId); }} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: color, color: color }}>
+                    Back to {manualData.backLabel || manualData.title}
+                  </Button>
+                )}
+                <Typography variant="h5" fontWeight={900} sx={{ color: color, flexGrow: 1 }}>{manualData.title}</Typography>
+                {manualData.chip && <Chip label={manualData.chip} size="small" sx={{ bgcolor: color + "10", color: color, fontWeight: 700 }} />}
+              </Stack>
+              {manualData.description && (
+                <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                  {manualData.description}
+                </Typography>
+              )}
+              {manualData.warning && (
+                <Alert severity={manualData.warningSeverity || "info"} sx={{ mt: 1.5, borderRadius: 2 }}>
+                  {manualData.warning}
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              {manualData.steps.map(function(step, index) {
+                return (
+                  <Box key={step.title || index} sx={{ mb: index === manualData.steps.length - 1 ? 0 : 2 }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.5, color: "#1e293b" }}>{step.title}</Typography>
+                    {step.note && <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{step.note}</Typography>}
+                    {step.code && renderCodeBlock(step.code)}
+                  </Box>
+                );
+              })}
+              {manualData.footer && (
+                <Alert severity={manualData.footerSeverity || "info"} sx={{ mt: 2, borderRadius: 2 }}>
+                  {manualData.footer}
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
+  };
+
   // ── Per-service API documentation data ──────────────────────────────────────
   ns.apiDocs = {
     s3: {
       title: "S3 Storage (MinIO) API",
+      manualPageId: "s3-manual",
       color: "#0f766e",
       description: "MinIO S3-compatible API. Use any S3 SDK (AWS SDK, boto3, mc CLI) or these dashboard gateway endpoints. Replace {dashboard-ip}:{dashboard-port} with your dashboard address.",
       baseUrl: "http://{dashboard-ip}:{dashboard-port}",
@@ -220,6 +305,7 @@
 
     mongo: {
       title: "MongoDB API",
+      manualPageId: "mongo-manual",
       color: "#15803d",
       description: "Manage MongoDB databases, collections, and documents. Replace {dashboard-ip}:{dashboard-port} with your dashboard address.",
       baseUrl: "http://{dashboard-ip}:{dashboard-port}",
@@ -250,6 +336,7 @@
 
     proxy: {
       title: "Proxy / VPN API",
+      manualPageId: "proxy-manual",
       color: "#1d4ed8",
       description: "Manage multi-layer proxy/VPN stack. Replace {dashboard-ip}:{dashboard-port} with your dashboard address.",
       baseUrl: "http://{dashboard-ip}:{dashboard-port}",
@@ -335,6 +422,7 @@
 
     dotnet: {
       title: "DotNet Service Management API",
+      manualPageId: "dotnet-manual",
       color: "#6d28d9",
       description: "Control your deployed .NET APIs. Replace {dashboard-ip}:{dashboard-port} with your dashboard address.",
       baseUrl: "http://{dashboard-ip}:{dashboard-port}",
@@ -348,6 +436,7 @@
 
     python: {
       title: "Python Service Management API",
+      manualPageId: "python-api-manual",
       color: "#0d9488",
       description: "Control your deployed Python APIs. Replace {dashboard-ip}:{dashboard-port} with your dashboard address.",
       baseUrl: "http://{dashboard-ip}:{dashboard-port}",
@@ -361,6 +450,7 @@
 
     tgwui: {
       title: "Text Generation WebUI API",
+      manualPageId: "ai-tgwui-manual",
       color: "#7c3aed",
       description: "Oobabooga's Text Generation WebUI API. Replace {host}:{port} with your server address (default API port 5000, UI port 7860).",
       baseUrl: "http://{host}:5000",
@@ -378,6 +468,7 @@
 
     comfyui: {
       title: "ComfyUI API",
+      manualPageId: "ai-comfyui-manual",
       color: "#7c3aed",
       description: "ComfyUI workflow execution API. Replace {host}:{port} with your server address (default port 8188).",
       baseUrl: "http://{host}:8188",
@@ -396,6 +487,7 @@
 
     whisper: {
       title: "Whisper Speech-to-Text API",
+      manualPageId: "ai-whisper-manual",
       color: "#0d9488",
       description: "Upload audio files and get text transcriptions. Replace {host}:{port} with your Whisper server address (default port 9000).",
       baseUrl: "http://{host}:9000",
@@ -412,6 +504,7 @@
 
     piper: {
       title: "Piper Text-to-Speech API",
+      manualPageId: "ai-piper-manual",
       color: "#b45309",
       description: "Send text, receive synthesized speech audio. Replace {host}:{port} with your Piper server address (default port 5500).",
       baseUrl: "http://{host}:5500",
@@ -426,4 +519,149 @@
       ],
     },
   };
+
+  ns.manualInstallDocs = {
+    "s3-manual": {
+      title: "S3 Manual Installation",
+      backPageId: "s3",
+      backLabel: "S3",
+      chip: "MinIO",
+      color: "#0f766e",
+      description: "Install and expose a MinIO S3-compatible storage service manually, then verify the API and console ports.",
+      steps: [
+        { title: "1. Download MinIO server", note: "Use the official MinIO binary for the host OS.", code: "curl -L https://dl.min.io/server/minio/release/linux-amd64/minio -o minio\nchmod +x minio" },
+        { title: "2. Create a data directory and credentials", note: "Set the root user and password before starting the server.", code: "mkdir -p /srv/minio/data\nexport MINIO_ROOT_USER=admin\nexport MINIO_ROOT_PASSWORD=StrongPassword123" },
+        { title: "3. Start the API and console", note: "Expose the S3 API and the web console on separate ports.", code: "./minio server /srv/minio/data --address :9000 --console-address :9001" },
+        { title: "4. Optional: run MinIO with Docker", note: "Use Docker if you want the service isolated in a container.", code: "docker run -d --name minio -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=admin -e MINIO_ROOT_PASSWORD=StrongPassword123 -v minio-data:/data quay.io/minio/minio server /data --console-address ':9001'" },
+      ],
+      footer: "After startup, verify the console and API endpoints from the S3 page and use the API docs card to test `/api/s3/health`.",
+    },
+    "mongo-manual": {
+      title: "MongoDB Manual Installation",
+      backPageId: "mongo",
+      backLabel: "MongoDB",
+      chip: "Native or Docker",
+      color: "#15803d",
+      description: "Install MongoDB manually on the host or with Docker, then confirm the database port is reachable before using the dashboard.",
+      steps: [
+        { title: "1. Install MongoDB Community Server", note: "Use your OS package manager or the official MongoDB installer.", code: "sudo apt-get update\nsudo apt-get install -y mongodb-org" },
+        { title: "2. Start and enable the MongoDB service", note: "Ensure the service starts automatically on boot.", code: "sudo systemctl enable mongod\nsudo systemctl start mongod\nsudo systemctl status mongod" },
+        { title: "3. Verify the server responds", note: "Confirm the local database server is accepting connections.", code: "mongosh --eval \"db.adminCommand({ ping: 1 })\"" },
+        { title: "4. Optional: run MongoDB with Docker", note: "Containerized deployment alternative.", code: "docker run -d --name mongodb -p 27017:27017 -v mongo-data:/data/db mongo:latest" },
+      ],
+      footer: "After MongoDB is up, return to the MongoDB page and use the API docs section to verify `/api/mongo/health`.",
+    },
+    "proxy-manual": {
+      title: "Proxy Manual Installation",
+      backPageId: "proxy",
+      backLabel: "Proxy",
+      chip: "WSL or Linux",
+      color: "#1d4ed8",
+      description: "Install the proxy stack manually, choose the protocol layer you need, and confirm the panel is reachable before adding users.",
+      steps: [
+        { title: "1. Prepare the Linux environment", note: "Use a native Linux host or a WSL distro on Windows.", code: "sudo apt-get update\nsudo apt-get install -y curl git nginx" },
+        { title: "2. Clone the proxy project", note: "Use the vendored project or clone the upstream source into a working directory.", code: "git clone <your-proxy-project-url> proxy-stack\ncd proxy-stack" },
+        { title: "3. Configure the desired layer", note: "Pick the layer mode and provide domain/email details if the chosen mode requires them.", code: "cp .env.example .env\n# edit layer, domain, email, and panel port values" },
+        { title: "4. Start the services", note: "Bring up the proxy panel and the selected transport stack.", code: "docker compose up -d\n# or start the native services/scripts required by the chosen layer" },
+      ],
+      footer: "After the panel is online, use the Proxy page and the API docs card to confirm `/api/proxy/health` and service status.",
+    },
+    "dotnet-manual": {
+      title: ".NET Manual Installation",
+      backPageId: "dotnet",
+      backLabel: ".NET",
+      chip: "IIS, Linux, or Docker",
+      color: "#6d28d9",
+      description: "Publish your .NET app, choose a hosting target, and start it as a managed service or container.",
+      steps: [
+        { title: "1. Publish the application", note: "Build a release publish output for the target runtime.", code: "dotnet publish -c Release -o ./publish" },
+        { title: "2. Run it directly on the host", note: "Use this for a Linux service or a direct Windows process.", code: "cd publish\ndotnet YourApp.dll" },
+        { title: "3. Optional: host behind IIS", note: "For Windows IIS deployments, point a site or application pool at the published directory.", code: "Install Hosting Bundle\nCreate IIS site/app\nSet the physical path to the publish folder" },
+        { title: "4. Optional: run with Docker", note: "Container deployment alternative.", code: "docker build -t my-dotnet-app .\ndocker run -d -p 8080:8080 my-dotnet-app" },
+      ],
+      footer: "After deployment, return to the .NET page and verify the service appears in the dashboard before using the management API.",
+    },
+    "python-api-manual": {
+      title: "Python API Manual Installation",
+      backPageId: "python-api",
+      backLabel: "Python API",
+      chip: "OS, Docker, or IIS",
+      color: "#0d9488",
+      description: "Set up a Python virtual environment, install your app dependencies, and run the API on the chosen hosting target.",
+      steps: [
+        { title: "1. Create a virtual environment", note: "Use an isolated environment for the app runtime.", code: "python -m venv .venv\n.venv\\Scripts\\activate    # Windows\n# source .venv/bin/activate # Linux/macOS" },
+        { title: "2. Install dependencies", note: "Install the framework and your project requirements.", code: "pip install -r requirements.txt" },
+        { title: "3. Start the API manually", note: "Pick the startup command that matches your framework.", code: "uvicorn app:app --host 0.0.0.0 --port 8000\n# or: waitress-serve --host 0.0.0.0 --port 8000 app:app" },
+        { title: "4. Optional: run with Docker or IIS", note: "Use Docker for containers or IIS on Windows if required.", code: "docker build -t my-python-api .\ndocker run -d -p 8000:8000 my-python-api" },
+      ],
+      footer: "After the API is reachable, return to the Python API page and use the service-management API docs to verify the deployment.",
+    },
+    "ai-tgwui-manual": {
+      title: "Text Generation WebUI Manual Installation",
+      backPageId: "ai-tgwui",
+      backLabel: "Text Generation WebUI",
+      chip: "GPU recommended",
+      color: "#7c3aed",
+      description: "Clone Oobabooga Text Generation WebUI, install the runtime, and start the API server manually.",
+      steps: [
+        { title: "1. Clone the repository", note: "Get the upstream WebUI project onto the host.", code: "git clone https://github.com/oobabooga/text-generation-webui.git\ncd text-generation-webui" },
+        { title: "2. Install dependencies", note: "Use the project installer or create your own Python environment.", code: "./start_linux.sh --api --listen\n# or on Windows: start_windows.bat --api --listen" },
+        { title: "3. Load a model", note: "Download or mount a model before serving requests.", code: "# add models under the models/ directory\n# then start the UI and load the model" },
+        { title: "4. Optional: run with Docker", note: "Use a container if you prefer isolation.", code: "docker run -d -p 7860:7860 -p 5000:5000 --gpus all --name tgwui atinoda/text-generation-webui:latest" },
+      ],
+      footer: "Once the API is available, go back to the Text Generation WebUI page and use the API docs card to validate the chat endpoint.",
+    },
+    "ai-comfyui-manual": {
+      title: "ComfyUI Manual Installation",
+      backPageId: "ai-comfyui",
+      backLabel: "ComfyUI",
+      chip: "Workflow Server",
+      color: "#7c3aed",
+      description: "Install ComfyUI manually, then start the workflow server and verify the API port.",
+      steps: [
+        { title: "1. Clone ComfyUI", note: "Download the application source onto the host.", code: "git clone https://github.com/comfyanonymous/ComfyUI.git\ncd ComfyUI" },
+        { title: "2. Install dependencies", note: "Create a Python environment and install the requirements.", code: "python -m venv venv\nvenv\\Scripts\\pip install -r requirements.txt    # Windows\n# venv/bin/pip install -r requirements.txt         # Linux/macOS" },
+        { title: "3. Start the server", note: "Expose the web UI and API on the ComfyUI port.", code: "python main.py --listen 0.0.0.0 --port 8188" },
+        { title: "4. Optional: run with Docker", note: "Container deployment alternative.", code: "docker run -d -p 8188:8188 --gpus all --name comfyui ghcr.io/comfyanonymous/comfyui:latest" },
+      ],
+      footer: "After ComfyUI starts, use the ComfyUI page and API docs to verify `/system_stats` and workflow execution.",
+    },
+    "ai-whisper-manual": {
+      title: "Whisper Manual Installation",
+      backPageId: "ai-whisper",
+      backLabel: "Whisper",
+      chip: "Speech to Text",
+      color: "#0d9488",
+      description: "Set up a Python environment for Whisper, install the speech-to-text dependencies, and run the transcription service manually.",
+      steps: [
+        { title: "1. Create a Python environment", note: "Use a dedicated environment for the Whisper API.", code: "python -m venv whisper-venv\nwhisper-venv\\Scripts\\activate    # Windows\n# source whisper-venv/bin/activate # Linux/macOS" },
+        { title: "2. Install Whisper and API dependencies", note: "Install the Whisper packages plus a lightweight web server.", code: "pip install openai-whisper faster-whisper flask" },
+        { title: "3. Start the transcription service", note: "Run the server on the port expected by the dashboard.", code: "python app.py\n# ensure it listens on 0.0.0.0:9000" },
+        { title: "4. Optional: run with Docker", note: "Container deployment alternative.", code: "docker run -d -p 9000:9000 --name whisper-server serverinstaller/whisper:latest" },
+      ],
+      footer: "After startup, use the Whisper page and the API docs card to verify `/health` and test a transcription upload.",
+    },
+    "ai-piper-manual": {
+      title: "Piper Manual Installation",
+      backPageId: "ai-piper",
+      backLabel: "Piper",
+      chip: "Text to Speech",
+      color: "#b45309",
+      description: "Install Piper, download a voice model, and start the TTS service manually.",
+      steps: [
+        { title: "1. Download Piper", note: "Use the Piper release that matches your operating system.", code: "Download Piper from https://github.com/rhasspy/piper/releases\nExtract the archive on the host" },
+        { title: "2. Download a voice model", note: "At least one `.onnx` voice file is required before starting the service.", code: "Download a voice such as en_US-lessac-medium.onnx\nPlace the voice files in the Piper models directory" },
+        { title: "3. Start the TTS service", note: "Expose the Piper API on the configured port.", code: "python app.py --host 0.0.0.0 --port 5500 --voice en_US-lessac-medium" },
+        { title: "4. Optional: run with Docker", note: "Container deployment alternative.", code: "docker run -d -p 5500:5500 --name piper serverinstaller/piper:latest" },
+      ],
+      footer: "After the service starts, use the Piper page and the API docs card to test `/tts` and `/health`.",
+    },
+  };
+
+  Object.keys(ns.manualInstallDocs).forEach(function(pageId) {
+    ns.pages = ns.pages || {};
+    ns.pages[pageId] = function(p) {
+      return ns.renderManualInstallPage ? ns.renderManualInstallPage(p, ns.manualInstallDocs[pageId]) : null;
+    };
+  });
 })();
