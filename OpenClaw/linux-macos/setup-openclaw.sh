@@ -43,12 +43,13 @@ require_runtime_dep() {
     local pkg_dir="$1"
     local dep_name="$2"
     [ -d "$pkg_dir" ] || return 1
-    if node -e "require.resolve('$dep_name', { paths: ['$pkg_dir'] })" >/dev/null 2>&1; then
+    local dep_dir="${pkg_dir}/node_modules/${dep_name}"
+    if [ -f "${dep_dir}/package.json" ]; then
         return 0
     fi
     log "Repairing missing OpenClaw runtime dependency: $dep_name"
     (cd "$pkg_dir" && npm install --no-save --ignore-scripts "$dep_name" 2>&1) || true
-    if node -e "require.resolve('$dep_name', { paths: ['$pkg_dir'] })" >/dev/null 2>&1; then
+    if [ -f "${dep_dir}/package.json" ]; then
         return 0
     fi
     return 1
