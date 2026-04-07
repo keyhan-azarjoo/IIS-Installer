@@ -241,6 +241,11 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     log "OpenClaw target version: $OPENCLAW_VERSION"
     log "npm prefix: $NPM_GLOBAL"
     log "npm cache: $NPM_CACHE"
+    log "Removing previous OpenClaw install and runtime state..."
+    pkill -f "openclaw gateway" 2>/dev/null || true
+    pkill -f "https-proxy.py" 2>/dev/null || true
+    rm -rf "${HOME}/.openclaw" 2>/dev/null || true
+    rm -f "$STATE_FILE" "$LOG_FILE" "${STATE_DIR}/https-proxy.py" 2>/dev/null || true
     rm -rf "$NPM_GLOBAL/lib/node_modules/openclaw" "$NPM_GLOBAL/bin/openclaw" 2>/dev/null || true
     npm uninstall -g openclaw 2>&1 || true
     npm install -g "openclaw@${OPENCLAW_VERSION}" 2>&1 || { log "npm global install failed, trying local"; npm install --prefix "$NPM_GLOBAL" "openclaw@${OPENCLAW_VERSION}" 2>&1 || true; }
