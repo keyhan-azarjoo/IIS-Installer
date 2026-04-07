@@ -1177,10 +1177,10 @@ def _ensure_openclaw_channel_deps(live_cb=None):
     def _log(m):
         if live_cb:
             live_cb(m + "\n")
-    # Check if grammy is already installed
-    if os.path.isdir(os.path.join(pkg_dir, "node_modules", "grammy")):
+    carbon_dir = os.path.join(pkg_dir, "node_modules", "@buape", "carbon")
+    if os.path.isdir(carbon_dir):
         return
-    _log("[OpenClaw] Installing channel dependencies (grammy, discord.js, @slack/bolt)...")
+    _log("[OpenClaw] Installing required OpenClaw UI dependency (@buape/carbon)...")
     npm_bin = "npm"
     for try_npm in [str(Path(oc_bin).parent / "npm"), str(OPENCLAW_STATE_DIR / "node" / "bin" / "npm"), "/usr/local/bin/npm"]:
         if os.path.isfile(try_npm):
@@ -1194,16 +1194,16 @@ def _ensure_openclaw_channel_deps(live_cb=None):
     _log(f"[OpenClaw] Using npm: {npm_bin}, pkg_dir: {pkg_dir}")
     try:
         proc = subprocess.run(
-            [npm_bin, "install", "grammy", "discord.js", "@slack/bolt"],
+            [npm_bin, "install", "--no-save", "--ignore-scripts", "@buape/carbon"],
             cwd=pkg_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, timeout=120, env=npm_env,
         )
         if proc.returncode == 0:
-            _log("[OpenClaw] Channel dependencies installed.")
+            _log("[OpenClaw] Required OpenClaw UI dependency installed.")
         else:
-            _log(f"[OpenClaw] WARNING: npm install failed: {(proc.stdout or '')[:200]}")
+            _log(f"[OpenClaw] WARNING: npm install failed: {(proc.stdout or '')[:400]}")
     except Exception as e:
-        _log(f"[OpenClaw] WARNING: Could not install channel deps: {e}")
+        _log(f"[OpenClaw] WARNING: Could not install required OpenClaw UI dependency: {e}")
 
 
 def _ensure_openclaw_os_config(form=None, live_cb=None):
