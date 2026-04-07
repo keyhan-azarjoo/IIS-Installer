@@ -360,9 +360,71 @@ def _openclaw_internal_ssl_ctx():
 
 def _openclaw_load_json(path):
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else {}
+        return _openclaw_parse_json_maybe_with_prefix(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else {}
     except Exception:
         return {}
+
+
+def _openclaw_resolve_home_dir(home_dir=None, state=None, oc_bin=""):
+    candidates = []
+    if home_dir:
+        candidates.append(str(home_dir))
+    if isinstance(state, dict):
+        install_dir = str(state.get("install_dir") or "").strip()
+        if install_dir:
+            candidates.append(install_dir)
+    oc_bin = str(oc_bin or "").strip()
+    if oc_bin:
+        try:
+            candidates.append(str(Path(oc_bin).resolve().parent.parent.parent))
+        except Exception:
+            pass
+    candidates.extend([os.path.expanduser("~"), "/home/openclaw", "/root", "/var/root"])
+    seen = set()
+    for candidate in candidates:
+        candidate = str(candidate or "").strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isdir(os.path.join(candidate, ".openclaw")):
+            return candidate
+    for candidate in candidates:
+        candidate = str(candidate or "").strip()
+        if candidate:
+            return candidate
+    return os.path.expanduser("~")
+
+
+def _openclaw_parse_json_maybe_with_prefix(raw_text):
+    text = str(raw_text or "").strip()
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(text):
+            if char not in "{[":
+                continue
+            try:
+                obj, _ = decoder.raw_decode(text[index:])
+                return obj
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return {}
+
+
+def _openclaw_scrub_legacy_model_config(cfg):
+    if not isinstance(cfg, dict):
+        return {}
+    models_cfg = cfg.get("models")
+    if isinstance(models_cfg, dict):
+        models_cfg.pop("default", None)
+    cfg.pop("defaultModel", None)
+    cfg.pop("defaultProvider", None)
+    return cfg
 
 
 def _openclaw_read_env_file(home_dir):
@@ -418,7 +480,7 @@ def _openclaw_safe_json(url, headers=None, timeout=8):
         req = urllib.request.Request(url, headers=headers or {}, method="GET")
         ctx = _openclaw_internal_ssl_ctx() if url.startswith("https://") else None
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
+            return _openclaw_parse_json_maybe_with_prefix(resp.read().decode("utf-8", errors="replace"))
     except Exception:
         return {}
 
@@ -573,7 +635,8 @@ def _discover_openclaw_provider_models(form=None, home_dir=None):
 
 
 def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
-    home_dir = str(home_dir or os.path.expanduser("~"))
+    state = _read_json_file(OPENCLAW_STATE_FILE)
+    home_dir = _openclaw_resolve_home_dir(home_dir=home_dir, state=state)
     agent_dir = Path(home_dir) / ".openclaw" / "agents" / "main" / "agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
     auth_path = agent_dir / "auth-profiles.json"
@@ -584,7 +647,7 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
     providers = _discover_openclaw_provider_models(form=form, home_dir=home_dir)
     auth = _openclaw_load_json(auth_path)
     settings = _openclaw_load_json(settings_path)
-    cfg = _openclaw_load_json(cfg_path)
+    cfg = _openclaw_scrub_legacy_model_config(_openclaw_load_json(cfg_path))
 
     profiles = auth.get("profiles") if isinstance(auth.get("profiles"), dict) else {}
     last_good = auth.get("lastGood") if isinstance(auth.get("lastGood"), dict) else {}
@@ -651,6 +714,8 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
             ordered_models.append(f"{provider}/{mid}")
             catalog_cfg[f"{provider}/{mid.lower()}"] = {"alias": str(item.get("name") or mid)}
 
+    preferred_provider = str((form or {}).get("OPENCLAW_LLM_PROVIDER", [""])[0] if (form or {}).get("OPENCLAW_LLM_PROVIDER") else "").strip().lower()
+    preferred_model = str((form or {}).get("OPENCLAW_LLM_MODEL", [""])[0] if (form or {}).get("OPENCLAW_LLM_MODEL") else "").strip()
     current_primary = str(model_cfg.get("primary") or "").strip()
     current_settings_model = str(settings.get("model") or "").strip()
     if _openclaw_is_blocked_primary_model(current_primary):
@@ -659,7 +724,10 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
     if _openclaw_is_blocked_primary_model(current_settings_model):
         current_settings_model = ""
         settings.pop("model", None)
-    primary = current_primary if current_primary in ordered_models else ""
+    explicit_primary = f"{preferred_provider}/{preferred_model}" if preferred_provider and preferred_model else ""
+    primary = explicit_primary if explicit_primary in ordered_models else ""
+    if not primary:
+        primary = current_primary if current_primary in ordered_models else ""
     if not primary and current_settings_model in ordered_models:
         primary = current_settings_model
     if not primary:
@@ -1561,7 +1629,7 @@ def _ensure_openclaw_channel_deps(live_cb=None):
     def _log(m):
         if live_cb:
             live_cb(m + "\n")
-    required_runtime_deps = ["@buape/carbon", "@larksuiteoapi/node-sdk", "@slack/web-api"]
+    required_runtime_deps = ["@buape/carbon", "@larksuiteoapi/node-sdk", "@slack/web-api", "@slack/bolt", "grammy"]
     missing_runtime_deps = [
         dep for dep in required_runtime_deps
         if not os.path.isdir(os.path.join(pkg_dir, "node_modules", *dep.split("/")))
@@ -1689,7 +1757,7 @@ def _ensure_openclaw_os_config(form=None, live_cb=None):
             pass
 
     # Write channel tokens and API keys to .env file
-    home_dir = os.path.expanduser("~")
+    home_dir = _openclaw_resolve_home_dir(state=state, oc_bin=oc_bin)
     oc_env_file = Path(home_dir) / ".openclaw" / ".env"
     oc_env_file.parent.mkdir(parents=True, exist_ok=True)
     env_data = {}
@@ -1782,6 +1850,7 @@ def _ensure_openclaw_os_config(form=None, live_cb=None):
                 oc_cfg = _json3.loads(oc_config_path.read_text(encoding="utf-8"))
             except Exception:
                 oc_cfg = {}
+        oc_cfg = _openclaw_scrub_legacy_model_config(oc_cfg)
         agents = oc_cfg.setdefault("agents", {})
         defaults = agents.setdefault("defaults", {})
         defaults.setdefault("compaction", {})["mode"] = "safeguard"
@@ -2070,7 +2139,7 @@ def run_openclaw_refresh_models(live_cb=None):
 
     if deploy_mode != "docker":
         try:
-            sync_openclaw_provider_catalog(live_cb=live_cb)
+            sync_openclaw_provider_catalog(home_dir=_openclaw_resolve_home_dir(state=state), live_cb=live_cb)
         except Exception as ex:
             log(f"Warning: provider model sync failed before restart: {ex}")
 

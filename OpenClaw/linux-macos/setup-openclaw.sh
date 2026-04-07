@@ -93,7 +93,7 @@ ensure_openclaw_runtime_deps() {
     local pkg_dir="$1"
     local dep
     local missing=()
-    for dep in "@buape/carbon" "@larksuiteoapi/node-sdk" "@slack/web-api" "@slack/bolt"; do
+    for dep in "@buape/carbon" "@larksuiteoapi/node-sdk" "@slack/web-api" "@slack/bolt" "grammy"; do
         if ! has_runtime_dep "$pkg_dir" "$dep"; then
             missing+=("$dep")
         fi
@@ -115,7 +115,7 @@ repair_runtime_deps_from_log() {
     local missing=()
     for dep in $(grep -oE "Cannot find module '[^']+'" "$LOG_FILE" 2>/dev/null | sed "s/Cannot find module '//; s/'$//" | sort -u); do
         case "$dep" in
-            "@buape/carbon"|@larksuiteoapi/node-sdk|@slack/web-api|@slack/bolt)
+            "@buape/carbon"|@larksuiteoapi/node-sdk|@slack/web-api|@slack/bolt|grammy)
                 log "Repairing runtime dependency reported by gateway log: $dep"
                 missing+=("$dep")
                 ;;
@@ -564,7 +564,20 @@ def _safe_json(url, headers=None):
         req = urllib.request.Request(url, headers=headers or {}, method="GET")
         ctx = ssl._create_unverified_context() if str(url).startswith("https://") else None
         with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
+            raw_text = resp.read().decode("utf-8", errors="replace").strip()
+            try:
+                return json.loads(raw_text)
+            except json.JSONDecodeError:
+                decoder = json.JSONDecoder()
+                for idx, ch in enumerate(raw_text):
+                    if ch not in "{[":
+                        continue
+                    try:
+                        obj, _ = decoder.raw_decode(raw_text[idx:])
+                        return obj
+                    except Exception:
+                        continue
+                return {}
     except Exception:
         return {}
 
@@ -701,8 +714,6 @@ print(f"Agent model registry written: {agent_dir / 'models.json'}")
 PYEOF
 
         # Also set via config CLI as fallback for older builds.
-        "$OPENCLAW_BIN" config set models.default.provider ollama 2>/dev/null || true
-        "$OPENCLAW_BIN" config set models.default.model "$OLLAMA_MODEL" 2>/dev/null || true
     fi
 else
     log "WARNING: Ollama not installed."

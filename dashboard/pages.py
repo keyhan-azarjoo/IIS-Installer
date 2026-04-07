@@ -62,7 +62,7 @@ def start_live_job(title, runner):
             with JOBS_LOCK:
                 if job_id in JOBS:
                     current_output = JOBS[job_id]["output"]
-                    if output and not current_output.endswith(output):
+                    if output and output not in current_output:
                         JOBS[job_id]["output"] += output
                     JOBS[job_id]["exit_code"] = code
                     JOBS[job_id]["done"] = True
