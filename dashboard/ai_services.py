@@ -571,6 +571,7 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
     agent_dir.mkdir(parents=True, exist_ok=True)
     auth_path = agent_dir / "auth-profiles.json"
     settings_path = agent_dir / "settings.json"
+    models_path = agent_dir / "models.json"
     cfg_path = Path(home_dir) / ".openclaw" / "openclaw.json"
 
     providers = _discover_openclaw_provider_models(form=form, home_dir=home_dir)
@@ -669,6 +670,23 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
         defaults.pop("models", None)
 
     settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    agent_models_cfg = {"mode": "replace", "providers": {}}
+    for provider in ("ollama", "lmstudio", "openai", "anthropic"):
+        info = providers.get(provider)
+        if not info:
+            continue
+        if provider == "ollama" and info.get("implicitDiscovery"):
+            continue
+        agent_models_cfg["providers"][provider] = {
+            "baseUrl": str(info.get("baseUrl") or "").strip(),
+            "apiKey": str(info.get("apiKey") or "").strip(),
+            "models": [_openclaw_make_model_entry(item) for item in info.get("models") or []],
+        }
+        if info.get("api"):
+            agent_models_cfg["providers"][provider]["api"] = info["api"]
+    if not agent_models_cfg["providers"]:
+        agent_models_cfg.pop("providers", None)
+    models_path.write_text(json.dumps(agent_models_cfg, indent=2), encoding="utf-8")
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
