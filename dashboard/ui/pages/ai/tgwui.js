@@ -28,7 +28,7 @@
     const httpsPort = String(tgwuiInfo.https_port || "").trim();
     const bestUrl = httpsUrl || httpUrl || (installed && httpsPort ? `https://127.0.0.1:${httpsPort}` : installed ? `http://127.0.0.1:${httpPort}` : "");
 
-    const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
+    const installOsLabel = p.getInstallOsLabel ? p.getInstallOsLabel(cfg) : (cfg.os_label || "Linux");
 
     const commonFields = [
       { name: "TGWUI_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },

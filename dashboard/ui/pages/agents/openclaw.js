@@ -88,7 +88,7 @@
       tokenizedBestUrl = bestUrl + gatewayUrlParam + "#token=" + encodeURIComponent(gatewayToken);
     }
 
-    var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
+    var installOsLabel = p.getInstallOsLabel ? p.getInstallOsLabel(cfg) : (cfg.os_label || "Linux");
     var commonFields = [
       { name: "OPENCLAW_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },
       { name: "OPENCLAW_HTTP_PORT", label: "Gateway Port (HTTP, for OS install)", defaultValue: httpPort || "18789", checkPort: true, placeholder: "Default: 18789" },

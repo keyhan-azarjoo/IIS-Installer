@@ -124,7 +124,7 @@
       }
     }, []);
 
-    const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
+    const installOsLabel = p.getInstallOsLabel ? p.getInstallOsLabel(cfg) : (cfg.os_label || "Linux");
 
     const commonFields = [
       { name: "WHISPER_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },

@@ -260,7 +260,7 @@
       var selectableIps = p.selectableIps, serviceBusy = p.serviceBusy;
       var setPage = p.setPage, copyText = p.copyText;
 
-      var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
+      var installOsLabel = p.getInstallOsLabel ? p.getInstallOsLabel(cfg) : (cfg.os_label || "Linux");
 
       var commonFields = [
         { name: svc.prefix + "_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },

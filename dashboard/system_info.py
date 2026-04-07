@@ -14,6 +14,38 @@ from pathlib import Path
 from constants import WINDOWS_LOCALS3_STATE
 from utils import command_exists, run_capture, _read_json_file
 
+def _read_text_if_exists(path):
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="ignore").strip()
+    except Exception:
+        return ""
+
+
+def detect_host_platform():
+    system_name = platform.system()
+    os_name = system_name.lower()
+    result = {
+        "os": os_name,
+        "os_label": system_name,
+        "os_variant": "",
+    }
+    if os_name != "linux":
+        return result
+    combined = "\n".join(filter(None, [
+        _read_text_if_exists("/etc/dgx-release"),
+        _read_text_if_exists("/etc/os-release"),
+        _read_text_if_exists("/sys/class/dmi/id/product_name"),
+        _read_text_if_exists("/sys/class/dmi/id/product_version"),
+        _read_text_if_exists("/sys/class/dmi/id/board_name"),
+        _read_text_if_exists("/sys/class/dmi/id/chassis_vendor"),
+        _read_text_if_exists("/sys/class/dmi/id/sys_vendor"),
+    ])).lower()
+    if "dgx" in combined:
+        result["os_label"] = "NVIDIA DGX"
+        result["os_variant"] = "nvidia-dgx"
+    return result
+
+
 def _curl_status(url, insecure=False, timeout=6):
     if not command_exists("curl"):
         return None

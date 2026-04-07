@@ -26,7 +26,7 @@
     const installState = pythonService.installed
       ? `${pythonService.python_version || "installed"}`
       : "Not installed yet";
-    const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
+    const installOsLabel = p.getInstallOsLabel ? p.getInstallOsLabel(cfg) : (cfg.os_label || "Linux");
     const commandShellLabel = cfg.os === "windows" ? "Windows cmd" : "shell";
     return (
       <Grid container spacing={2}>

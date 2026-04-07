@@ -1879,8 +1879,8 @@ function App() {
     DownloadCompassIcon, CopyCompassIcon, TryOpenCompassIcon, OpenCompassStyleIcon,
     RefreshSmallIcon, StartAllIcon, StopAllIcon, FolderIcon,
     // Utilities
-    clampPercent, defaultNotebookDirForOs, defaultPythonApiDirForOs, defaultWebsiteDirForOs,
-    extractLabeledUrl, formatBytes, formatUptime, getDefaultSelectableIp, getSelectableIps, uniqUrls,
+      clampPercent, defaultNotebookDirForOs, defaultPythonApiDirForOs, defaultWebsiteDirForOs,
+      extractLabeledUrl, formatBytes, formatUptime, getInstallOsLabel, getDefaultSelectableIp, getSelectableIps, uniqUrls,
     // Actions
     ActionIcon, formatServiceState, IconOnlyAction, isServiceRunningStatus, MiniMetric,
     // App state

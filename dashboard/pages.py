@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from constants import BUILD_ID, JOBS, JOBS_LOCK
-from system_info import get_windows_s3_docker_support, choose_service_host
+from system_info import get_windows_s3_docker_support, choose_service_host, detect_host_platform
 from mongo_manager import get_windows_native_mongo_info, get_windows_native_mongo_uri
 from ui_assets import (
     DASHBOARD_UI_SCRIPTS,
@@ -83,10 +83,15 @@ def page_login(message=""):
 
 
 def page_dashboard_mui(message="", system_name=""):
-    s3_docker = get_windows_s3_docker_support() if (system_name or platform.system()).lower() == "windows" else {"supported": True, "reason": ""}
+    host_platform = detect_host_platform()
+    os_name = (system_name or str(host_platform.get("os") or platform.system()).lower()).lower()
+    os_label = str(host_platform.get("os_label") or platform.system()).strip() or platform.system()
+    os_variant = str(host_platform.get("os_variant") or "").strip()
+    s3_docker = get_windows_s3_docker_support() if os_name == "windows" else {"supported": True, "reason": ""}
     config = {
-        "os": (system_name or platform.system()).lower(),
-        "os_label": platform.system(),
+        "os": os_name,
+        "os_label": os_label,
+        "os_variant": os_variant,
         "message": message or "",
         "s3_windows_docker_supported": bool(s3_docker.get("supported", True)),
         "s3_windows_docker_reason": str(s3_docker.get("reason") or ""),
@@ -458,4 +463,3 @@ if (savedAuth) {{
 }}
 </script>
 </div></body></html>"""
-

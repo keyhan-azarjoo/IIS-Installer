@@ -233,7 +233,7 @@
       if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
     }, [chatMessages]);
 
-    var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
+    var installOsLabel = p.getInstallOsLabel ? p.getInstallOsLabel(cfg) : (cfg.os_label || "Linux");
 
     var commonFields = [
       { name: "OLLAMA_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },

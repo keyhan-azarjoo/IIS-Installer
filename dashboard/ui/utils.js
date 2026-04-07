@@ -102,6 +102,17 @@
     return "/var/www/site";
   }
 
+  function getInstallOsLabel(cfg) {
+    const osName = String(cfg?.os || "").toLowerCase();
+    const osVariant = String(cfg?.os_variant || "").toLowerCase();
+    const osLabel = String(cfg?.os_label || "").trim();
+    if (osVariant === "nvidia-dgx") return "NVIDIA DGX";
+    if (osName === "windows") return "Windows";
+    if (osName === "linux") return "Linux";
+    if (osName === "darwin" || osName === "macos") return "macOS";
+    return osLabel || "Linux";
+  }
+
   ns.utils = {
     clampPercent,
     defaultNotebookDirForOs,
@@ -110,6 +121,7 @@
     extractLabeledUrl,
     formatBytes,
     formatUptime,
+    getInstallOsLabel,
     getDefaultSelectableIp,
     getSelectableIps,
     isSelectableHostIp,

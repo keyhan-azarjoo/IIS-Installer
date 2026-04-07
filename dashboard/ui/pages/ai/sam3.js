@@ -66,7 +66,7 @@
     const deployMode = String(sam3.deploy_mode || "os").trim();
     const authEnabled = !!sam3.auth_enabled;
     const authUser = String(sam3.auth_username || "").trim();
-    const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
+    const installOsLabel = p.getInstallOsLabel ? p.getInstallOsLabel(cfg) : (cfg.os_label || "Linux");
     const modelPath = String(sam3.model_path || "").trim();
     const modelDir = String(sam3.model_dir || sam3.default_model_dir || "").trim();
     const installDir = String(sam3.install_dir || "").trim();

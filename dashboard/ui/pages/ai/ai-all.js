@@ -389,7 +389,7 @@
       const bestUrl = String(info.https_url || info.http_url || "").trim() || (installed || running ? "http://" + (host || "127.0.0.1") + ":" + httpPort : "");
       const modelName = String(info.model_name || svc.defaultModel || "").trim();
 
-      const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
+      const installOsLabel = p.getInstallOsLabel ? p.getInstallOsLabel(cfg) : (cfg.os_label || "Linux");
 
       const commonFields = [
         { name: svc.prefix + "_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },
