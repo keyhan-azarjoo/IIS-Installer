@@ -231,11 +231,14 @@ def _download_file_with_timeout(url, target_path, timeout_sec=30):
 
 
 def ensure_repo_files(relative_paths, live_cb=None, refresh=True, retries=2):
+    refresh_remote = str(os.environ.get("SERVER_INSTALLER_REFRESH_REMOTE_FILES", "")).strip().lower() in {"1", "true", "yes", "on"}
     for rel in relative_paths:
         rel_path = Path(rel)
         target = ROOT / rel_path
         exists_before = target.exists()
-        if exists_before and (not refresh):
+        if exists_before and ((not refresh) or (refresh and not refresh_remote)):
+            if live_cb:
+                live_cb(f"Using local workspace file: {rel_path.as_posix()}\n")
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp_target = target.with_suffix(target.suffix + ".download")
