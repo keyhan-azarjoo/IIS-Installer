@@ -253,9 +253,14 @@ fi
 
 # ── Step 3b: Create systemd service ─────────────────────────────────────────
 if ! verify_openclaw_install; then
-    log "FATAL: OpenClaw installation is incomplete or invalid."
-    log "Dependency repair failed under ${NPM_GLOBAL}/lib/node_modules/openclaw"
-    exit 1
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        log "WARNING: OpenClaw preflight dependency verification did not fully pass."
+        log "Continuing on macOS and letting gateway startup repair missing runtime deps."
+    else
+        log "FATAL: OpenClaw installation is incomplete or invalid."
+        log "Dependency repair failed under ${NPM_GLOBAL}/lib/node_modules/openclaw"
+        exit 1
+    fi
 fi
 log "Step 3b: Creating systemd service..."
 if command -v systemctl &>/dev/null; then
