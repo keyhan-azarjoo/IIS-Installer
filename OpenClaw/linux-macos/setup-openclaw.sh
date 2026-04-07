@@ -25,6 +25,7 @@ OPENCLAW_USER="openclaw"
 OPENCLAW_HOME="/home/${OPENCLAW_USER}"
 NPM_GLOBAL="${OPENCLAW_HOME}/.npm-global"
 OPENCLAW_BIN="${NPM_GLOBAL}/bin/openclaw"
+OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.4.2}"
 MIN_NODE_VERSION="${OPENCLAW_MIN_NODE_VERSION:-22.19.0}"
 GATEWAY_OK=0
 DASHBOARD_OK=0
@@ -63,7 +64,7 @@ ensure_openclaw_runtime_deps() {
     local pkg_dir="$1"
     local dep
     local missing=()
-    for dep in "@buape/carbon" "@larksuiteoapi/node-sdk"; do
+    for dep in "@buape/carbon" "@larksuiteoapi/node-sdk" "@slack/web-api"; do
         if ! has_runtime_dep "$pkg_dir" "$dep"; then
             missing+=("$dep")
         fi
@@ -85,7 +86,7 @@ repair_runtime_deps_from_log() {
     local missing=()
     for dep in $(grep -oE "Cannot find module '[^']+'" "$LOG_FILE" 2>/dev/null | sed "s/Cannot find module '//; s/'$//" | sort -u); do
         case "$dep" in
-            "@buape/carbon"|@larksuiteoapi/node-sdk)
+            "@buape/carbon"|@larksuiteoapi/node-sdk|@slack/web-api)
                 log "Repairing runtime dependency reported by gateway log: $dep"
                 missing+=("$dep")
                 ;;
@@ -237,9 +238,12 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     export npm_config_cache="$NPM_CACHE"
     export HOME="$STATE_DIR"
     export PATH="$NPM_GLOBAL/bin:$PATH"
+    log "OpenClaw target version: $OPENCLAW_VERSION"
     log "npm prefix: $NPM_GLOBAL"
     log "npm cache: $NPM_CACHE"
-    npm install -g openclaw@latest 2>&1 || { log "npm global install failed, trying local"; npm install --prefix "$NPM_GLOBAL" openclaw@latest 2>&1 || true; }
+    rm -rf "$NPM_GLOBAL/lib/node_modules/openclaw" "$NPM_GLOBAL/bin/openclaw" 2>/dev/null || true
+    npm uninstall -g openclaw 2>&1 || true
+    npm install -g "openclaw@${OPENCLAW_VERSION}" 2>&1 || { log "npm global install failed, trying local"; npm install --prefix "$NPM_GLOBAL" "openclaw@${OPENCLAW_VERSION}" 2>&1 || true; }
     # Install optional peer dependencies for channels (Telegram, Discord, Slack, etc.)
     OC_PKG_DIR="$NPM_GLOBAL/lib/node_modules/openclaw"
     if [ -d "$OC_PKG_DIR" ]; then
@@ -247,7 +251,8 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     fi
 else
     # Linux — install as openclaw user
-    su - "$OPENCLAW_USER" -c "npm config set prefix ~/.npm-global && npm install -g openclaw@latest" 2>&1
+    su - "$OPENCLAW_USER" -c "npm config set prefix ~/.npm-global && npm uninstall -g openclaw 2>/dev/null || true" 2>&1
+    su - "$OPENCLAW_USER" -c "npm config set prefix ~/.npm-global && npm install -g openclaw@${OPENCLAW_VERSION}" 2>&1
     su - "$OPENCLAW_USER" -c 'grep -q npm-global ~/.bashrc 2>/dev/null || echo "export PATH=\"\$HOME/.npm-global/bin:\$PATH\"" >> ~/.bashrc'
 fi
 
@@ -266,7 +271,7 @@ else
         fi
     done
     if [ ! -x "$OPENCLAW_BIN" ]; then
-        log "FATAL: Cannot find openclaw binary. Install manually: npm install -g openclaw@latest"
+        log "FATAL: Cannot find openclaw binary. Install manually: npm install -g openclaw@${OPENCLAW_VERSION}"
         exit 1
     fi
 fi
@@ -421,7 +426,7 @@ else
             [ "$STARTUP_REPAIRED" -eq 1 ] && log "Gateway recovered after runtime dependency repair."
         else
             log "FATAL: Cannot find openclaw binary. Install failed."
-            log "Try manually: npm install -g openclaw@latest"
+            log "Try manually: npm install -g openclaw@${OPENCLAW_VERSION}"
             exit 1
         fi
     fi

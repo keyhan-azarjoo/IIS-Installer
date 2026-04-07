@@ -1181,7 +1181,7 @@ def _ensure_openclaw_channel_deps(live_cb=None):
     def _log(m):
         if live_cb:
             live_cb(m + "\n")
-    required_runtime_deps = ["@buape/carbon", "@larksuiteoapi/node-sdk"]
+    required_runtime_deps = ["@buape/carbon", "@larksuiteoapi/node-sdk", "@slack/web-api"]
     missing_runtime_deps = [
         dep for dep in required_runtime_deps
         if not os.path.isdir(os.path.join(pkg_dir, "node_modules", *dep.split("/")))
