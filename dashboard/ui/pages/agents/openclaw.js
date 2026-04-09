@@ -198,6 +198,7 @@
     var installScriptCommand = cfg.os === "windows"
       ? "powershell -c \"irm https://openclaw.ai/install.ps1 | iex\"\r"
       : "curl -fsSL https://openclaw.ai/install.sh | bash\n";
+    var configureCommand = "openclaw configure" + (cfg.os === "windows" ? "\r" : "\n");
     var installCwd = String(ocInfo.install_dir || "").trim();
     var _terminalStatus = React.useState("Connecting");
     var terminalStatus = _terminalStatus[0], setTerminalStatus = _terminalStatus[1];
@@ -209,6 +210,10 @@
 
     var startInstall = function() {
       setQueuedInput(installScriptCommand);
+      setQueuedInputKey(Date.now());
+    };
+    var startConfigure = function() {
+      setQueuedInput(configureCommand);
       setQueuedInputKey(Date.now());
     };
 
@@ -229,6 +234,10 @@
                   <Button variant="contained" onClick={startInstall}
                     sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, fontWeight: 700, px: 3 }}>
                     Start
+                  </Button>
+                  <Button variant="outlined" onClick={startConfigure}
+                    sx={{ textTransform: "none", fontWeight: 700, borderColor: "#dc2626", color: "#dc2626" }}>
+                    Configure
                   </Button>
                   <Button variant="outlined" onClick={function() { if (copyText) copyText(installScriptCommand.trim(), "Command"); }}
                     sx={{ textTransform: "none", fontWeight: 700 }}>
