@@ -3136,6 +3136,8 @@ fi
 def run_linux_docker_deploy(form, live_cb=None):
     if os.name == "nt":
         return 1, "Linux Docker deploy can only run on Linux hosts."
+    if sys.platform == "darwin":
+        _docker_add_macos_path()
 
     source_value = resolve_source_value(form, "SOURCE_VALUE", "SOURCE_FILE", "SOURCE_FOLDER")
     if not source_value:
@@ -3149,6 +3151,14 @@ def run_linux_docker_deploy(form, live_cb=None):
         return 1, "HTTP Port must be numeric."
     if https_port and not https_port.isdigit():
         return 1, "HTTPS Port must be numeric."
+    if sys.platform == "darwin" and https_port:
+        return 1, "macOS .NET Docker deployment currently supports HTTP_PORT only. Leave HTTPS_PORT empty or configure your own reverse proxy."
+
+    ok, docker_prefix, err_msg = _ensure_docker_linux_ready(live_cb=live_cb)
+    if not ok:
+        return 1, err_msg
+    if sys.platform == "darwin":
+        docker_prefix = []
 
     # Determine the Docker host-to-container port binding.
     # HTTP_PORT → expose container directly on that host port.
@@ -3185,10 +3195,6 @@ def run_linux_docker_deploy(form, live_cb=None):
         ]),
         encoding="utf-8",
     )
-
-    docker_prefix = []
-    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-        docker_prefix = ["sudo"]
 
     raw_name = (form.get("CONTAINER_NAME", [""])[0] or "dotnetapp").strip()
     container_name = re.sub(r"[^a-z0-9\-]", "-", raw_name.lower()).strip("-") or "dotnetapp"

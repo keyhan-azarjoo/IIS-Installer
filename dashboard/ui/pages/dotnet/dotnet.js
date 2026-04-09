@@ -4,7 +4,7 @@
 
   ns.pages.dotnet = function renderDotnetPage(p) {
     const {
-      Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
+      Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper,
       NavCard,
       cfg, serviceBusy,
       dotnetServices, dockerServices,
@@ -19,6 +19,9 @@
       return /(dotnet|aspnet|dotnetapp)/i.test(text) && !/python/i.test(text);
     });
     const allServices = [...(dotnetServices || []), ...dotnetDockerServices];
+    const isUnixLike = cfg.os === "linux" || cfg.os === "darwin";
+    const nativeLabel = cfg.os === "darwin" ? "macOS" : "Linux";
+    const dockerLabel = cfg.os === "darwin" ? "Docker Desktop" : "Docker";
 
     const serviceList = (svcs) => (
       <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 460px)", overflow: "auto" }}>
@@ -92,14 +95,14 @@
         </Grid>
       );
     }
-    if (cfg.os === "linux") {
+    if (isUnixLike) {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <NavCard title="Linux" text="Install and deploy on Linux." onClick={() => setPage("dotnet-linux")} />
+            <NavCard title={nativeLabel} text={`Open the ${nativeLabel} deployment page for .NET apps.`} onClick={() => setPage("dotnet-linux")} />
           </Grid>
           <Grid item xs={12} md={6}>
-            <NavCard title="Docker" text="Install and deploy on Docker (Linux)." onClick={() => setPage("dotnet-docker")} />
+            <NavCard title={dockerLabel} text={`Install and deploy .NET apps with ${dockerLabel}.`} onClick={() => setPage("dotnet-docker")} />
           </Grid>
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
@@ -128,6 +131,6 @@
         </Grid>
       );
     }
-    return <Alert severity="info">macOS installer actions are not configured yet.</Alert>;
+    return <Alert severity="info">No .NET installer actions are configured for {cfg.os_label}.</Alert>;
   };
 })();

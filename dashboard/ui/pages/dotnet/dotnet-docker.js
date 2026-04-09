@@ -4,32 +4,36 @@
 
   ns.pages["dotnet-docker"] = function renderDotnetDockerPage(p) {
     const {
-      Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
+      Grid, Card, CardContent, Typography, Stack, Button, Box, Paper,
       ActionCard, Divider,
       cfg, run, serviceBusy,
       dockerServices,
       isScopeLoading, loadDockerInfo, loadDockerServices,
       hasStoppedServices, batchServiceAction,
-      isServiceRunningStatus, formatServiceState, onServiceAction,
+      isServiceRunningStatus, onServiceAction,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
-      setPage, setFileManagerPath,
     } = p;
+
+    const isUnixLike = cfg.os === "linux" || cfg.os === "darwin";
+    const isMacOs = cfg.os === "darwin";
 
     const dockerInfoCard = (
       <Grid item xs={12} md={4}>
         <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
           <CardContent>
             <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Docker Deploy Target</Typography>
-            <Typography variant="body2" sx={{ mb: 1 }}>Docker is installed automatically if not present.</Typography>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              {isMacOs ? "Docker Desktop must be installed and running on macOS before deployment." : "Docker is installed automatically if not present."}
+            </Typography>
             <Divider sx={{ my: 1 }} />
-            <Typography variant="body2" sx={{ mb: 1 }}><b>Source Path or URL</b> — local folder, a <code>.zip</code> archive, or a GitHub URL. A <code>Dockerfile</code> is auto-generated if not found.</Typography>
+            <Typography variant="body2" sx={{ mb: 1 }}><b>Source Path or URL</b> - local folder, a <code>.zip</code> archive, or a GitHub URL. A <code>Dockerfile</code> is auto-generated if not found.</Typography>
             <Divider sx={{ my: 1 }} />
-            <Typography variant="body2" sx={{ mb: 1 }}><b>Container Name</b> — name of the Docker container. Redeploying the same name stops and recreates the container with updated files.</Typography>
+            <Typography variant="body2" sx={{ mb: 1 }}><b>Container Name</b> - name of the Docker container. Redeploying the same name stops and recreates the container with updated files.</Typography>
             <Divider sx={{ my: 1 }} />
-            <Typography variant="body2" sx={{ mb: 1 }}><b>.NET Channel</b> — base image version, e.g. <code>8.0</code> or <code>9.0</code>.</Typography>
+            <Typography variant="body2" sx={{ mb: 1 }}><b>.NET Channel</b> - base image version, e.g. <code>8.0</code> or <code>9.0</code>.</Typography>
             <Divider sx={{ my: 1 }} />
-            <Typography variant="body2" sx={{ mb: 1 }}><b>HTTP Port</b> — serve plain HTTP on this port. Leave empty to disable HTTP.</Typography>
-            <Typography variant="body2"><b>HTTPS Port</b> — serve HTTPS (TLS) on this port. Leave empty to disable HTTPS.</Typography>
+            <Typography variant="body2" sx={{ mb: 1 }}><b>HTTP Port</b> - serve plain HTTP on this port. Leave empty to disable HTTP.</Typography>
+            <Typography variant="body2"><b>HTTPS Port</b> - serve HTTPS on this port. Leave empty to disable HTTPS.{isMacOs ? " On macOS, automatic HTTPS proxying is not configured yet, so leave this empty unless you manage your own reverse proxy." : ""}</Typography>
           </CardContent>
         </Card>
       </Grid>
@@ -40,13 +44,76 @@
       return /(dotnet|aspnet|dotnetapp)/i.test(text) && !/python/i.test(text);
     });
 
+    const containersCard = (
+      <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+          <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+              <Typography variant="h6" fontWeight={800}>Running .NET Docker Containers</Typography>
+              <Box sx={{ flexGrow: 1 }} />
+              <Button
+                variant="outlined"
+                disabled={isScopeLoading("docker")}
+                onClick={() => Promise.all([loadDockerInfo.current(), loadDockerServices.current()])}
+                sx={{ textTransform: "none" }}
+              >
+                Refresh
+              </Button>
+              {dotnetDockerServices.length > 0 && (
+                <Button
+                  variant="outlined"
+                  color={hasStoppedServices(dotnetDockerServices) ? "success" : "error"}
+                  disabled={serviceBusy || dotnetDockerServices.length === 0}
+                  onClick={() => batchServiceAction(dotnetDockerServices, "Docker", hasStoppedServices(dotnetDockerServices) ? "start" : "stop")}
+                  sx={{ textTransform: "none" }}
+                >
+                  {hasStoppedServices(dotnetDockerServices) ? "Start All" : "Stop All"}
+                </Button>
+              )}
+            </Stack>
+            <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
+              {dotnetDockerServices.length === 0 && (
+                <Typography variant="body2" color="text.secondary">No .NET Docker containers found. Deploy an app above to see containers here.</Typography>
+              )}
+              {dotnetDockerServices.map((svc) => (
+                <Paper key={`dd-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                    <Box sx={{ minWidth: 250 }}>
+                      <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "docker"})</Typography>
+                      {svc.image && <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>}
+                      {renderServiceUrls(svc)}
+                      {renderServicePorts(svc)}
+                    </Box>
+                    {renderServiceStatus(svc)}
+                    <Box sx={{ flexGrow: 1 }} />
+                    {renderFolderIcon(svc)}
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                      disabled={serviceBusy}
+                      onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                    </Button>
+                    <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
+                  </Stack>
+                </Paper>
+              ))}
+            </Box>
+          </CardContent>
+        </Card>
+      </Grid>
+    );
+
     if (cfg.os === "windows") {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
             <ActionCard
               title="Deploy Docker"
-              description="Deploy application to Docker. Docker will be installed automatically if not present. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
+              description="Deploy application to Docker. Docker will be installed automatically if not present. Leave HTTP Port or HTTPS Port empty to skip that protocol - at least one must be set."
               action="/run/windows_docker"
               fields={[
                 { name: "SourceValue", label: "Source Path or URL", enableUpload: true },
@@ -59,148 +126,32 @@
             />
           </Grid>
           {dockerInfoCard}
-          <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
-              <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>Running .NET Docker Containers</Typography>
-                  <Box sx={{ flexGrow: 1 }} />
-                  <Button
-                    variant="outlined"
-                    disabled={isScopeLoading("docker")}
-                    onClick={() => Promise.all([loadDockerInfo.current(), loadDockerServices.current()])}
-                    sx={{ textTransform: "none" }}
-                  >
-                    Refresh
-                  </Button>
-                  {dotnetDockerServices.length > 0 && (
-                    <Button
-                      variant="outlined"
-                      color={hasStoppedServices(dotnetDockerServices) ? "success" : "error"}
-                      disabled={serviceBusy || dotnetDockerServices.length === 0}
-                      onClick={() => batchServiceAction(dotnetDockerServices, "Docker", hasStoppedServices(dotnetDockerServices) ? "start" : "stop")}
-                      sx={{ textTransform: "none" }}
-                    >
-                      {hasStoppedServices(dotnetDockerServices) ? "Start All" : "Stop All"}
-                    </Button>
-                  )}
-                </Stack>
-                <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
-                  {dotnetDockerServices.length === 0 && (
-                    <Typography variant="body2" color="text.secondary">No .NET Docker containers found. Deploy an app above to see containers here.</Typography>
-                  )}
-                  {dotnetDockerServices.map((svc) => (
-                    <Paper key={`dd-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                        <Box sx={{ minWidth: 250 }}>
-                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "docker"})</Typography>
-                          {svc.image && <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>}
-                          {renderServiceUrls(svc)}
-                          {renderServicePorts(svc)}
-                        </Box>
-                        {renderServiceStatus(svc)}
-                        <Box sx={{ flexGrow: 1 }} />
-                        {renderFolderIcon(svc)}
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                          disabled={serviceBusy}
-                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                        </Button>
-                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
+          {containersCard}
         </Grid>
       );
     }
-    if (cfg.os === "linux") {
+    if (isUnixLike) {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
             <ActionCard
               title="Deploy Docker"
-              description="Build and run Docker container for your .NET app. Docker will be installed automatically if not present. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
+              description={isMacOs
+                ? "Build and run a Docker container for your .NET app on macOS. Docker Desktop must already be running. Use HTTP Port for direct access; automatic HTTPS proxying is not configured on macOS yet."
+                : "Build and run Docker container for your .NET app. Docker will be installed automatically if not present. Leave HTTP Port or HTTPS Port empty to skip that protocol - at least one must be set."}
               action="/run/linux_docker"
               fields={[
                 { name: "CONTAINER_NAME", label: "Container Name", defaultValue: "dotnetapp", required: true },
                 { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true },
                 { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80", placeholder: "Leave empty to skip HTTP", checkPort: true },
-                { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443", placeholder: "Leave empty to skip HTTPS", checkPort: true, certSelect: "SSL_CERT_NAME" },
+                { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: isMacOs ? "" : "443", placeholder: "Leave empty to skip HTTPS", checkPort: true, certSelect: "SSL_CERT_NAME" },
               ]}
               onRun={run}
               color="#334155"
             />
           </Grid>
           {dockerInfoCard}
-          <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
-              <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>Running .NET Docker Containers</Typography>
-                  <Box sx={{ flexGrow: 1 }} />
-                  <Button
-                    variant="outlined"
-                    disabled={isScopeLoading("docker")}
-                    onClick={() => Promise.all([loadDockerInfo.current(), loadDockerServices.current()])}
-                    sx={{ textTransform: "none" }}
-                  >
-                    Refresh
-                  </Button>
-                  {dotnetDockerServices.length > 0 && (
-                    <Button
-                      variant="outlined"
-                      color={hasStoppedServices(dotnetDockerServices) ? "success" : "error"}
-                      disabled={serviceBusy || dotnetDockerServices.length === 0}
-                      onClick={() => batchServiceAction(dotnetDockerServices, "Docker", hasStoppedServices(dotnetDockerServices) ? "start" : "stop")}
-                      sx={{ textTransform: "none" }}
-                    >
-                      {hasStoppedServices(dotnetDockerServices) ? "Start All" : "Stop All"}
-                    </Button>
-                  )}
-                </Stack>
-                <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
-                  {dotnetDockerServices.length === 0 && (
-                    <Typography variant="body2" color="text.secondary">No .NET Docker containers found. Deploy an app above to see containers here.</Typography>
-                  )}
-                  {dotnetDockerServices.map((svc) => (
-                    <Paper key={`dd-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                        <Box sx={{ minWidth: 250 }}>
-                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "docker"})</Typography>
-                          {svc.image && <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>}
-                          {renderServiceUrls(svc)}
-                          {renderServicePorts(svc)}
-                        </Box>
-                        {renderServiceStatus(svc)}
-                        <Box sx={{ flexGrow: 1 }} />
-                        {renderFolderIcon(svc)}
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                          disabled={serviceBusy}
-                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                        </Button>
-                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
+          {containersCard}
         </Grid>
       );
     }
