@@ -119,6 +119,7 @@ function App() {
   const pageHistoryRef = React.useRef(["home"]);
   const historyBackRef = React.useRef(false);
   const fileManagerInitRef = React.useRef(false);
+  const updateUploadInputRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
   const selectableIps = React.useMemo(() => getSelectableIps(systemInfo), [systemInfo]);
 
@@ -829,6 +830,27 @@ function App() {
 
   const renderEditServiceIcon = (svc) => {
     if (!svc?.name) return null;
+    const isPythonApiService = !!svc?.python_api || String(svc?.target_page || "").startsWith("python-");
+    const isDotnetIisUpdateContext = svc.kind === "iis_site" && !isPythonApiService && (page === "api" || page === "dotnet-iis");
+    if (isDotnetIisUpdateContext) {
+      return (
+        <Tooltip title="Update deployed files">
+          <IconButton
+            size="small"
+            onClick={() => setUpdateSourceDlg({
+              mode: "dotnet-iis",
+              svc,
+              files: [],
+              uploading: false,
+              error: "",
+            })}
+            sx={{ color: "text.secondary", "&:hover": { color: "primary.main" } }}
+          >
+            <EditSettingsIcon size={16} />
+          </IconButton>
+        </Tooltip>
+      );
+    }
     const ports = Array.isArray(svc.ports) ? svc.ports : [];
     if (ports.length === 0 && !svc.host) return null;
     return (
@@ -1193,6 +1215,40 @@ function App() {
         if (Number(j.exit_code ?? 1) !== 0) setRunError(`${title} failed. Check terminal output.`);
         setTermState("Idle");
         Promise.all([loadPythonInfo.current(), loadPythonServices.current()]);
+        return;
+      }
+      poll(j.job_id, title, 0);
+    } catch (err) {
+      append(`Error: ${err}`);
+      setTermState("Error");
+    }
+  }, []);
+
+  const runDotnetIisUpdateSource = React.useCallback(async (svc, files) => {
+    const selectedFiles = Array.isArray(files) ? files : [];
+    if (!svc?.name || selectedFiles.length === 0) return;
+    const title = "Update .NET IIS Files";
+    append("============================================================");
+    append(`[${new Date().toLocaleTimeString()}] ${title} started for ${svc.form_name || svc.name}`);
+    append(`[INFO] Uploading ${selectedFiles.length} file(s) for replacement.`);
+    setTermState(`Running: ${title}`);
+    setTermOpen(true);
+    setTermMin(false);
+    setRunError("");
+    try {
+      const fd = new FormData();
+      fd.append("service_name", svc.form_name || svc.name);
+      selectedFiles.forEach((file) => {
+        fd.append("SourceUpload", file, file.webkitRelativePath || file.name);
+      });
+      const r = await fetch("/run/dotnet_iis_update_source", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.job_id) {
+        append(j.output || "No output.");
+        append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code ?? 1})`);
+        if (Number(j.exit_code ?? 1) !== 0) setRunError(`${title} failed. Check terminal output.`);
+        setTermState("Idle");
+        Promise.all([loadDotnetInfo.current(), loadDotnetServices.current(), loadServices.current()]);
         return;
       }
       poll(j.job_id, title, 0);
@@ -2085,36 +2141,97 @@ function App() {
 
   const updateSourceDialog = updateSourceDlg ? (
     <Dialog open onClose={() => setUpdateSourceDlg(null)} maxWidth="sm" fullWidth>
-      <DialogTitle>Update Files — {updateSourceDlg.svc.form_name || updateSourceDlg.svc.name}</DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" sx={{ mb: 1.5, color: "text.secondary" }}>
-          Enter the path to the source folder on this server. All files in that folder will replace the current deployed files and the service will be restarted.
-        </Typography>
-        <TextField
-          fullWidth
-          size="small"
-          label="Source folder path on server"
-          placeholder="/home/user/my-project"
-          value={updateSourceDlg.path}
-          onChange={(e) => setUpdateSourceDlg((prev) => ({ ...prev, path: e.target.value }))}
-          autoFocus
-        />
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={() => setUpdateSourceDlg(null)} sx={{ textTransform: "none" }}>Cancel</Button>
-        <Button
-          variant="contained"
-          disabled={!updateSourceDlg.path.trim()}
-          onClick={() => {
-            const { svc, path } = updateSourceDlg;
-            setUpdateSourceDlg(null);
-            runPythonApiUpdateSource(svc, path.trim());
-          }}
-          sx={{ textTransform: "none" }}
-        >
-          Update
-        </Button>
-      </DialogActions>
+      <DialogTitle>{updateSourceDlg.mode === "dotnet-iis" ? ".NET IIS Files" : "Update Files"} — {updateSourceDlg.svc.form_name || updateSourceDlg.svc.name}</DialogTitle>
+      {updateSourceDlg.mode === "dotnet-iis" ? (
+        <>
+          <DialogContent>
+            <Typography variant="body2" sx={{ mb: 1.5, color: "text.secondary" }}>
+              Select the replacement published files. When you click upload, the dashboard will stop IIS for this site, replace the old files, and start IIS again.
+            </Typography>
+            <input
+              ref={updateUploadInputRef}
+              type="file"
+              style={{ display: "none" }}
+              webkitdirectory=""
+              directory=""
+              multiple
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                setUpdateSourceDlg((prev) => prev ? ({ ...prev, files, error: "" }) : prev);
+              }}
+            />
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }}>
+              <Button
+                variant="outlined"
+                onClick={() => updateUploadInputRef.current && updateUploadInputRef.current.click()}
+                sx={{ textTransform: "none" }}
+              >
+                Select
+              </Button>
+              <Button
+                variant="contained"
+                disabled={!Array.isArray(updateSourceDlg.files) || updateSourceDlg.files.length === 0 || !!updateSourceDlg.uploading}
+                onClick={async () => {
+                  const { svc, files } = updateSourceDlg;
+                  setUpdateSourceDlg((prev) => prev ? ({ ...prev, uploading: true, error: "" }) : prev);
+                  try {
+                    await runDotnetIisUpdateSource(svc, files);
+                    setUpdateSourceDlg(null);
+                  } catch (err) {
+                    setUpdateSourceDlg((prev) => prev ? ({ ...prev, uploading: false, error: String(err) }) : prev);
+                  }
+                }}
+                sx={{ textTransform: "none" }}
+              >
+                {updateSourceDlg.uploading ? "Uploading..." : "Upload"}
+              </Button>
+              {Array.isArray(updateSourceDlg.files) && updateSourceDlg.files.length > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  {updateSourceDlg.files[0]?.webkitRelativePath?.split("/")[0] || updateSourceDlg.files[0]?.name || "files"} — {updateSourceDlg.files.length} file(s) ready
+                </Typography>
+              )}
+            </Stack>
+            {!!updateSourceDlg.error && (
+              <Alert severity="error" sx={{ mt: 1.5 }}>{updateSourceDlg.error}</Alert>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setUpdateSourceDlg(null)} sx={{ textTransform: "none" }}>Cancel</Button>
+          </DialogActions>
+        </>
+      ) : (
+        <>
+          <DialogContent>
+            <Typography variant="body2" sx={{ mb: 1.5, color: "text.secondary" }}>
+              Enter the path to the source folder on this server. All files in that folder will replace the current deployed files and the service will be restarted.
+            </Typography>
+            <TextField
+              fullWidth
+              size="small"
+              label="Source folder path on server"
+              placeholder="/home/user/my-project"
+              value={updateSourceDlg.path}
+              onChange={(e) => setUpdateSourceDlg((prev) => ({ ...prev, path: e.target.value }))}
+              autoFocus
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setUpdateSourceDlg(null)} sx={{ textTransform: "none" }}>Cancel</Button>
+            <Button
+              variant="contained"
+              disabled={!updateSourceDlg.path.trim()}
+              onClick={() => {
+                const { svc, path } = updateSourceDlg;
+                setUpdateSourceDlg(null);
+                runPythonApiUpdateSource(svc, path.trim());
+              }}
+              sx={{ textTransform: "none" }}
+            >
+              Update
+            </Button>
+          </DialogActions>
+        </>
+      )}
     </Dialog>
   ) : null;
 

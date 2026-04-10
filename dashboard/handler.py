@@ -114,6 +114,7 @@ from installer_runners import (
     run_windows_installer,
     run_windows_setup_only,
     run_windows_docker_setup_only,
+    run_windows_dotnet_iis_update_source,
     run_linux_installer,
     run_windows_sam3_installer,
     run_unix_sam3_installer,
@@ -1690,6 +1691,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_python_api_update_source(service_name, source_path)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/dotnet_iis_update_source":
+            title = "Update .NET IIS Files"
+            service_name = (form.get("service_name", [""])[0] or "").strip()
+            source_path = (
+                (form.get("source_path", [""])[0] or "").strip()
+                or (form.get("SourceUpload", [""])[0] or "").strip()
+            )
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_dotnet_iis_update_source(service_name, source_path, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_dotnet_iis_update_source(service_name, source_path)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/python_api_iis":

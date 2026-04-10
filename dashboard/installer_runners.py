@@ -70,6 +70,10 @@ DOWNLOAD_TIMEOUT = 60
 DOWNLOAD_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
+def _ps_single_quote(value):
+    return "'" + str(value or "").replace("'", "''") + "'"
+
+
 def _repo_archive_url():
     raw = REPO_RAW_BASE.rstrip("/")
     parts = raw.split("/")
@@ -342,6 +346,78 @@ def run_linux_installer(form, live_cb=None, require_source=True):
             env[key] = value
 
     return run_process(installer_cmd, env=env, live_cb=live_cb)
+
+
+def run_windows_dotnet_iis_update_source(service_name, source_path, live_cb=None):
+    if os.name != "nt":
+        return 1, ".NET IIS file update is only available on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+
+    site_name = str(service_name or "").strip()
+    source_value = str(source_path or "").strip()
+    if not site_name:
+        return 1, "Service name is required."
+    if not source_value:
+        return 1, "Upload a replacement folder or archive first."
+
+    ensure_repo_files(
+        [
+            "DotNet/windows/modules/common.ps1",
+            "DotNet/windows/modules/iis-mode.ps1",
+        ],
+        live_cb=live_cb,
+    )
+
+    staging_root = Path(tempfile.mkdtemp(prefix="server-installer-dotnet-iis-update-"))
+    common_module = ROOT / "DotNet" / "windows" / "modules" / "common.ps1"
+    iis_module = ROOT / "DotNet" / "windows" / "modules" / "iis-mode.ps1"
+
+    ps_script = "\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        f". {_ps_single_quote(str(common_module))}",
+        f". {_ps_single_quote(str(iis_module))}",
+        "Import-Module WebAdministration",
+        f"$siteName = {_ps_single_quote(site_name)}",
+        f"$sourceValue = {_ps_single_quote(source_value)}",
+        f"$stagingRoot = {_ps_single_quote(str(staging_root))}",
+        "$site = Get-Website -Name $siteName -ErrorAction Stop",
+        "$physicalPath = [Environment]::ExpandEnvironmentVariables([string]$site.physicalPath)",
+        "if ([string]::IsNullOrWhiteSpace($physicalPath)) { throw 'IIS site physical path is empty.' }",
+        "Write-Host ('Updating IIS site: ' + $siteName)",
+        "Write-Host ('Source: ' + $sourceValue)",
+        "Write-Host ('Target path: ' + $physicalPath)",
+        "$contentPath = Prepare-DeploymentContent -SourceValue $sourceValue -StagingRoot $stagingRoot",
+        "Write-Host ('Prepared content: ' + $contentPath)",
+        "Remove-DeploymentPath -TargetPath $physicalPath -WebsiteName $siteName",
+        "Copy-FolderContent -SourcePath $contentPath -TargetPath $physicalPath",
+        "$assemblyPath = Find-ApplicationAssembly -DeploymentPath $physicalPath",
+        "$assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)",
+        "$publishPath = Split-Path -Path $assemblyPath -Parent",
+        "Ensure-WebConfig -PublishPath $publishPath -AssemblyName $assemblyName",
+        "Grant-IisFolderAccess -PublishPath $publishPath -AppPoolName $siteName",
+        "if (Test-Path ('IIS:\\AppPools\\' + $siteName)) { Start-WebAppPool -Name $siteName -ErrorAction SilentlyContinue | Out-Null }",
+        "Start-Website -Name $siteName | Out-Null",
+        "Write-Host ('Application assembly: ' + $assemblyPath)",
+        "Write-Host ('Publish path: ' + $publishPath)",
+        "Write-Host 'IIS site files updated successfully.'",
+    ])
+
+    try:
+        return run_process(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ps_script,
+            ],
+            env=os.environ.copy(),
+            live_cb=live_cb,
+        )
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
 
 
 def run_windows_sam3_installer(form=None, live_cb=None):
