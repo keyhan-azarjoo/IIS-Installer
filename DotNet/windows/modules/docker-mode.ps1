@@ -345,25 +345,91 @@ function Get-DockerRuntimeTag {
 function Write-Dockerfile {
     param(
         [Parameter(Mandatory = $true)][string]$ContentPath,
-        [Parameter(Mandatory = $true)][string]$AssemblyName,
+        [Parameter(Mandatory = $true)][string]$LaunchPath,
+        [Parameter(Mandatory = $true)][ValidateSet("dll", "apphost")][string]$LaunchKind,
         [Parameter(Mandatory = $true)][string]$DotNetChannel,
         [Parameter(Mandatory = $true)][ValidateSet("windows", "linux")][string]$EngineOsType
     )
 
     $dockerfilePath = Join-Path $ContentPath "Dockerfile"
     $runtimeTag = Get-DockerRuntimeTag -DotNetChannel $DotNetChannel -EngineOsType $EngineOsType
+    $normalizedLaunchPath = ($LaunchPath -replace '\\', '/').TrimStart('/')
+    if ($LaunchKind -eq "apphost") {
+        $entrypoint = "ENTRYPOINT [`"./$normalizedLaunchPath`"]"
+    }
+    else {
+        $entrypoint = "ENTRYPOINT [`"dotnet`", `"$normalizedLaunchPath`"]"
+    }
     $content = @"
 FROM mcr.microsoft.com/dotnet/aspnet:$runtimeTag
 WORKDIR /app
 COPY . .
 ENV ASPNETCORE_URLS=http://+:8080
+# HTTPS is not enabled automatically in Docker mode.
+# To enable HTTPS manually, mount certificates and uncomment the lines below.
+# ENV ASPNETCORE_URLS=https://+:8443;http://+:8080
+# ENV ASPNETCORE_Kestrel__Certificates__Default__Path=/https/tls.pfx
+# ENV ASPNETCORE_Kestrel__Certificates__Default__Password=changeit
 EXPOSE 8080
-ENTRYPOINT ["dotnet", "$AssemblyName.dll"]
+$entrypoint
 "@
     if (-not (Test-Path -LiteralPath $dockerfilePath)) {
         Set-Content -Path $dockerfilePath -Value $content -Encoding UTF8
     }
     return $dockerfilePath
+}
+
+function Get-DockerLaunchConfig {
+    param(
+        [Parameter(Mandatory = $true)][string]$DeploymentRoot,
+        [Parameter(Mandatory = $true)][string]$AssemblyPath,
+        [Parameter(Mandatory = $true)][ValidateSet("windows", "linux")][string]$EngineOsType
+    )
+
+    $assemblyItem = Get-Item -LiteralPath $AssemblyPath -ErrorAction Stop
+    $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyItem.Name)
+    $assemblyDirectory = $assemblyItem.DirectoryName
+    $dllRelativePath = [System.IO.Path]::GetRelativePath($DeploymentRoot, $assemblyPath)
+
+    $runtimeConfigPath = Join-Path $assemblyDirectory "$assemblyName.runtimeconfig.json"
+    if (Test-Path -LiteralPath $runtimeConfigPath) {
+        try {
+            $runtimeConfig = Get-Content -LiteralPath $runtimeConfigPath -Raw | ConvertFrom-Json
+            $runtimeOptions = $runtimeConfig.runtimeOptions
+            $hasFramework = $false
+            if ($runtimeOptions) {
+                if ($runtimeOptions.PSObject.Properties.Name -contains "framework") {
+                    $framework = $runtimeOptions.framework
+                    if ($framework -and $framework.name) {
+                        $hasFramework = $true
+                    }
+                }
+                if (-not $hasFramework -and ($runtimeOptions.PSObject.Properties.Name -contains "frameworks")) {
+                    $frameworks = @($runtimeOptions.frameworks)
+                    if ($frameworks.Count -gt 0) {
+                        $hasFramework = $true
+                    }
+                }
+            }
+
+            if (-not $hasFramework) {
+                $appHostName = if ($EngineOsType -eq "windows") { "$assemblyName.exe" } else { $assemblyName }
+                $appHostPath = Join-Path $assemblyDirectory $appHostName
+                if (Test-Path -LiteralPath $appHostPath) {
+                    return @{
+                        Kind = "apphost"
+                        Path = [System.IO.Path]::GetRelativePath($DeploymentRoot, $appHostPath)
+                    }
+                }
+            }
+        } catch {
+        }
+    }
+
+    return @{
+        Kind = "dll"
+        Path = $dllRelativePath
+    }
 }
 
 function Confirm-LinuxFallback {
@@ -511,11 +577,10 @@ function Invoke-DockerDeployment {
     Copy-FolderContent -SourcePath $ContentPath -TargetPath $targetPath
 
     $assemblyPath = Find-ApplicationAssembly -DeploymentPath $targetPath
-    $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)
-    $dockerfileDirectory = Split-Path -Path $assemblyPath -Parent
-    $dockerfilePath = Join-Path $dockerfileDirectory "Dockerfile"
+    $launchConfig = Get-DockerLaunchConfig -DeploymentRoot $targetPath -AssemblyPath $assemblyPath -EngineOsType $engineOsType
+    $dockerfilePath = Join-Path $targetPath "Dockerfile"
     if (-not (Test-Path -LiteralPath $dockerfilePath)) {
-        $dockerfilePath = Write-Dockerfile -ContentPath $dockerfileDirectory -AssemblyName $assemblyName -DotNetChannel $DotNetChannel -EngineOsType $engineOsType
+        $dockerfilePath = Write-Dockerfile -ContentPath $targetPath -LaunchPath $launchConfig.Path -LaunchKind $launchConfig.Kind -DotNetChannel $DotNetChannel -EngineOsType $engineOsType
     }
 
     $imageName = ("{0}:latest" -f ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-'))
