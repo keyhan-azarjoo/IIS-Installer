@@ -379,6 +379,34 @@ $entrypoint
     return $dockerfilePath
 }
 
+function Get-RelativePathSafe {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    try {
+        $relativeMethod = [System.IO.Path].GetMethod("GetRelativePath", [Type[]]@([string], [string]))
+        if ($relativeMethod) {
+            return [System.IO.Path]::GetRelativePath($BasePath, $TargetPath)
+        }
+    }
+    catch {
+    }
+
+    $baseFull = [System.IO.Path]::GetFullPath($BasePath)
+    $targetFull = [System.IO.Path]::GetFullPath($TargetPath)
+    if (-not $baseFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $baseFull += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $baseUri = New-Object System.Uri($baseFull)
+    $targetUri = New-Object System.Uri($targetFull)
+    $relativeUri = $baseUri.MakeRelativeUri($targetUri)
+    $relativePath = [System.Uri]::UnescapeDataString($relativeUri.ToString())
+    return $relativePath.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+}
+
 function Get-DockerLaunchConfig {
     param(
         [Parameter(Mandatory = $true)][string]$DeploymentRoot,
@@ -389,7 +417,7 @@ function Get-DockerLaunchConfig {
     $assemblyItem = Get-Item -LiteralPath $AssemblyPath -ErrorAction Stop
     $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyItem.Name)
     $assemblyDirectory = $assemblyItem.DirectoryName
-    $dllRelativePath = [System.IO.Path]::GetRelativePath($DeploymentRoot, $assemblyPath)
+    $dllRelativePath = Get-RelativePathSafe -BasePath $DeploymentRoot -TargetPath $AssemblyPath
 
     $runtimeConfigPath = Join-Path $assemblyDirectory "$assemblyName.runtimeconfig.json"
     if (Test-Path -LiteralPath $runtimeConfigPath) {
@@ -418,7 +446,7 @@ function Get-DockerLaunchConfig {
                 if (Test-Path -LiteralPath $appHostPath) {
                     return @{
                         Kind = "apphost"
-                        Path = [System.IO.Path]::GetRelativePath($DeploymentRoot, $appHostPath)
+                        Path = Get-RelativePathSafe -BasePath $DeploymentRoot -TargetPath $appHostPath
                     }
                 }
             }
