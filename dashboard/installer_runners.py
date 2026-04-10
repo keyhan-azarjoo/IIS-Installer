@@ -743,7 +743,8 @@ EXPOSE {http_port} {https_port}
 CMD ["/app/venv/bin/python", "/app/app.py"]
 """
     dockerfile_path = Path(sam3_data) / "Dockerfile"
-    dockerfile_path.write_text(dockerfile_content, encoding="utf-8")
+    if not dockerfile_path.exists():
+        dockerfile_path.write_text(dockerfile_content, encoding="utf-8")
 
     # Copy app files to docker build context
     for item in Path(common_dir).rglob("*"):

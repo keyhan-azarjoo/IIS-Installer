@@ -1508,48 +1508,51 @@ def run_website_docker(form=None, live_cb=None):
     runtime = str(deploy.get("runtime") or "static").strip().lower()
     dockerfile = Path(deploy["deploy_root"]) / "Dockerfile"
     if runtime == "static":
-        dockerfile.write_text(
-            "\n".join([
-                "FROM nginx:alpine",
-                "WORKDIR /usr/share/nginx/html",
-                "RUN rm -rf /usr/share/nginx/html/*",
-                "COPY ./ /usr/share/nginx/html/",
-                "EXPOSE 80",
-                'CMD ["nginx", "-g", "daemon off;"]',
-                "",
-            ]),
-            encoding="utf-8",
-        )
+        if not dockerfile.exists():
+            dockerfile.write_text(
+                "\n".join([
+                    "FROM nginx:alpine",
+                    "WORKDIR /usr/share/nginx/html",
+                    "RUN rm -rf /usr/share/nginx/html/*",
+                    "COPY ./ /usr/share/nginx/html/",
+                    "EXPOSE 80",
+                    'CMD ["nginx", "-g", "daemon off;"]',
+                    "",
+                ]),
+                encoding="utf-8",
+            )
         container_port = 80
     elif runtime == "node":
-        dockerfile.write_text(
-            "\n".join([
-                "FROM node:20-alpine",
-                "WORKDIR /app",
-                "COPY . ./",
-                "RUN npm install",
-                "RUN npm run build",
-                f"EXPOSE {int(deploy['site_port'])}",
-                f'CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "{int(deploy["site_port"])}"]',
-                "",
-            ]),
-            encoding="utf-8",
-        )
+        if not dockerfile.exists():
+            dockerfile.write_text(
+                "\n".join([
+                    "FROM node:20-alpine",
+                    "WORKDIR /app",
+                    "COPY . ./",
+                    "RUN npm install",
+                    "RUN npm run build",
+                    f"EXPOSE {int(deploy['site_port'])}",
+                    f'CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "{int(deploy["site_port"])}"]',
+                    "",
+                ]),
+                encoding="utf-8",
+            )
         container_port = int(deploy["site_port"])
     elif runtime == "php":
         public_rel = str(deploy.get("content_rel") or ".").strip()
         php_root = f"/app/{public_rel}" if public_rel not in ("", ".") else "/app"
-        dockerfile.write_text(
-            "\n".join([
-                "FROM php:8.2-cli-alpine",
-                "WORKDIR /app",
-                "COPY . /app/",
-                f"EXPOSE {int(deploy['site_port'])}",
-                f'CMD ["php", "-S", "0.0.0.0:{int(deploy["site_port"])}", "-t", "{php_root}"]',
-                "",
-            ]),
-            encoding="utf-8",
-        )
+        if not dockerfile.exists():
+            dockerfile.write_text(
+                "\n".join([
+                    "FROM php:8.2-cli-alpine",
+                    "WORKDIR /app",
+                    "COPY . /app/",
+                    f"EXPOSE {int(deploy['site_port'])}",
+                    f'CMD ["php", "-S", "0.0.0.0:{int(deploy["site_port"])}", "-t", "{php_root}"]',
+                    "",
+                ]),
+                encoding="utf-8",
+            )
         container_port = int(deploy["site_port"])
     else:
         return 1, f"Unsupported website runtime '{runtime}' for Docker deployment."
@@ -2322,22 +2325,23 @@ def run_python_api_docker(form=None, live_cb=None):
         encoding="utf-8",
     )
     dockerfile = deploy["deploy_root"] / "Dockerfile"
-    dockerfile.write_text(
-        "\n".join([
-            "FROM python:3.12-slim",
-            "WORKDIR /app",
-            "COPY app/ /app/app/",
-            "COPY .serverinstaller/ /app/.serverinstaller/",
-            "RUN python -m venv /opt/serverinstaller-venv \\",
-            " && /opt/serverinstaller-venv/bin/python -m pip install --upgrade pip setuptools wheel uvicorn \\",
-            " && if [ -f /app/app/requirements.txt ]; then /opt/serverinstaller-venv/bin/python -m pip install -r /app/app/requirements.txt; fi",
-            f"EXPOSE {deploy['https_port']}",
-            "ENV PATH=/opt/serverinstaller-venv/bin:$PATH",
-            f'CMD ["/opt/serverinstaller-venv/bin/python", "/app/.serverinstaller/{runner_script.name}"]',
-            "",
-        ]),
-        encoding="utf-8",
-    )
+    if not dockerfile.exists():
+        dockerfile.write_text(
+            "\n".join([
+                "FROM python:3.12-slim",
+                "WORKDIR /app",
+                "COPY app/ /app/app/",
+                "COPY .serverinstaller/ /app/.serverinstaller/",
+                "RUN python -m venv /opt/serverinstaller-venv \\",
+                " && /opt/serverinstaller-venv/bin/python -m pip install --upgrade pip setuptools wheel uvicorn \\",
+                " && if [ -f /app/app/requirements.txt ]; then /opt/serverinstaller-venv/bin/python -m pip install -r /app/app/requirements.txt; fi",
+                f"EXPOSE {deploy['https_port']}",
+                "ENV PATH=/opt/serverinstaller-venv/bin:$PATH",
+                f'CMD ["/opt/serverinstaller-venv/bin/python", "/app/.serverinstaller/{runner_script.name}"]',
+                "",
+            ]),
+            encoding="utf-8",
+        )
     image_name = deployment_name
     run_capture(["docker", "rm", "-f", deployment_name], timeout=30)
     code, output = run_process(["docker", "build", "-t", image_name, str(deploy["deploy_root"])], live_cb=live_cb)

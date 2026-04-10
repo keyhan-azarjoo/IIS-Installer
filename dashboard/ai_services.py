@@ -3241,7 +3241,9 @@ RUN chmod +x /entrypoint.sh
 
 CMD ["/entrypoint.sh"]
 """
-    Path(build_dir, "Dockerfile").write_text(dockerfile, encoding="utf-8")
+    dockerfile_path = Path(build_dir, "Dockerfile")
+    if not dockerfile_path.exists():
+        dockerfile_path.write_text(dockerfile, encoding="utf-8")
 
     code = _run_install_cmd(["docker", "build", "--no-cache", "-t", "serverinstaller/openclaw:latest", build_dir], log, timeout=600)
     if code != 0:
@@ -3515,7 +3517,9 @@ ENV OLLAMA_AUTH_PASSWORD={password}
 EXPOSE {expose_ports}
 CMD ["python", "ollama_web.py"]
 """
-    Path(webui_build, "Dockerfile").write_text(dockerfile, encoding="utf-8")
+    dockerfile_path = Path(webui_build, "Dockerfile")
+    if not dockerfile_path.exists():
+        dockerfile_path.write_text(dockerfile, encoding="utf-8")
 
     # Build web UI image
     code2 = _run_install_cmd(["docker", "build", "--no-cache", "-t", "serverinstaller/ollama-webui:latest", webui_build], log, timeout=300)
@@ -3778,7 +3782,9 @@ ENV LMSTUDIO_AUTH_PASSWORD={password}
 EXPOSE {expose_ports}
 CMD ["python", "lmstudio_web.py"]
 """
-    Path(webui_build, "Dockerfile").write_text(dockerfile, encoding="utf-8")
+    dockerfile_path = Path(webui_build, "Dockerfile")
+    if not dockerfile_path.exists():
+        dockerfile_path.write_text(dockerfile, encoding="utf-8")
 
     code = _run_install_cmd(["docker", "build", "--no-cache", "-t", "serverinstaller/lmstudio-webui:latest", webui_build], log, timeout=300)
     if code != 0:

@@ -350,7 +350,7 @@ function Write-Dockerfile {
         [Parameter(Mandatory = $true)][ValidateSet("windows", "linux")][string]$EngineOsType
     )
 
-    $dockerfilePath = Join-Path $ContentPath "Dockerfile.generated"
+    $dockerfilePath = Join-Path $ContentPath "Dockerfile"
     $runtimeTag = Get-DockerRuntimeTag -DotNetChannel $DotNetChannel -EngineOsType $EngineOsType
     $content = @"
 FROM mcr.microsoft.com/dotnet/aspnet:$runtimeTag
@@ -360,7 +360,9 @@ ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "$AssemblyName.dll"]
 "@
-    Set-Content -Path $dockerfilePath -Value $content -Encoding UTF8
+    if (-not (Test-Path -LiteralPath $dockerfilePath)) {
+        Set-Content -Path $dockerfilePath -Value $content -Encoding UTF8
+    }
     return $dockerfilePath
 }
 
@@ -510,7 +512,11 @@ function Invoke-DockerDeployment {
 
     $assemblyPath = Find-ApplicationAssembly -DeploymentPath $targetPath
     $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)
-    $dockerfilePath = Write-Dockerfile -ContentPath (Split-Path -Path $assemblyPath -Parent) -AssemblyName $assemblyName -DotNetChannel $DotNetChannel -EngineOsType $engineOsType
+    $dockerfileDirectory = Split-Path -Path $assemblyPath -Parent
+    $dockerfilePath = Join-Path $dockerfileDirectory "Dockerfile"
+    if (-not (Test-Path -LiteralPath $dockerfilePath)) {
+        $dockerfilePath = Write-Dockerfile -ContentPath $dockerfileDirectory -AssemblyName $assemblyName -DotNetChannel $DotNetChannel -EngineOsType $engineOsType
+    }
 
     $imageName = ("{0}:latest" -f ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-'))
     $containerName = ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-')
