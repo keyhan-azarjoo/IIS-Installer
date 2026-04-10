@@ -1219,6 +1219,13 @@ def launch_windows_dashboard_direct(root: Path, bind_host: str, selected_port: i
         stop_existing_dashboard_on_port(selected_port)
 
     python_exe = resolve_windows_python()
+    python_launch_exe = python_exe
+    try:
+        pythonw_candidate = str(Path(python_exe).with_name("pythonw.exe"))
+        if Path(pythonw_candidate).exists():
+            python_launch_exe = pythonw_candidate
+    except Exception:
+        python_launch_exe = python_exe
     log_dir = cache_root() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "server-installer-dashboard.log"
@@ -1243,7 +1250,7 @@ def launch_windows_dashboard_direct(root: Path, bind_host: str, selected_port: i
     log_fp = try_open_append_log(log_path, fallback_log_path)
     creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     cmd = [
-        python_exe,
+        python_launch_exe,
         str((root / "dashboard" / "start-server-dashboard.py").resolve()),
         "--run-server",
         "--host",
