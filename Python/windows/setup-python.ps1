@@ -132,6 +132,61 @@ function Install-PythonWithWinget {
     }
 }
 
+function Install-PythonFromOfficialInstaller {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Version
+    )
+
+    $versionKey = $Version.Trim()
+    $candidateVersions = @()
+    switch ($versionKey) {
+        "3.12" {
+            $candidateVersions = @(
+                "3.12.10",
+                "3.12.9",
+                "3.12.8",
+                "3.12.7",
+                "3.12.6"
+            )
+        }
+        default {
+            throw "Automatic direct-download install is not configured for Python $Version."
+        }
+    }
+
+    $tempRoot = Join-Path $env:TEMP "server-installer-python"
+    New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+    $installerPath = Join-Path $tempRoot ("python-" + $Version.Replace('.', '_') + "-amd64.exe")
+
+    $lastError = $null
+    foreach ($fullVersion in $candidateVersions) {
+        $url = "https://www.python.org/ftp/python/$fullVersion/python-$fullVersion-amd64.exe"
+        try {
+            Write-Host "Downloading Python $fullVersion from python.org..."
+            Invoke-WebRequest -Uri $url -OutFile $installerPath -UseBasicParsing -ErrorAction Stop
+            Write-Host "Installing Python $fullVersion from official installer..."
+            & $installerPath /quiet InstallAllUsers=1 PrependPath=1 Include_launcher=1 Include_pip=1 Shortcuts=0
+            if ($LASTEXITCODE -ne 0) {
+                throw "Installer exited with code $LASTEXITCODE."
+            }
+
+            return [PSCustomObject]@{
+                InstallMethod = "python.org"
+                PackageId = $fullVersion
+            }
+        } catch {
+            $lastError = $_
+            Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($lastError) {
+        throw "Official Python installer download/install failed: $($lastError.Exception.Message)"
+    }
+    throw "Official Python installer download/install failed."
+}
+
 function Ensure-Pip {
     param(
         [Parameter(Mandatory = $true)]
@@ -217,7 +272,12 @@ if (-not $pythonInfo) {
     $pythonInfo = Resolve-PythonFromPathOrCommonLocations -Version $requestedVersion
 }
 if (-not $pythonInfo) {
-    $installInfo = Install-PythonWithWinget -Version $requestedVersion
+    try {
+        $installInfo = Install-PythonWithWinget -Version $requestedVersion
+    } catch {
+        Write-Warning ("winget install failed. Falling back to python.org installer. Details: {0}" -f $_.Exception.Message)
+        $installInfo = Install-PythonFromOfficialInstaller -Version $requestedVersion
+    }
     if ($installInfo) {
         $installMethod = $installInfo.InstallMethod
         $installPackageId = $installInfo.PackageId
