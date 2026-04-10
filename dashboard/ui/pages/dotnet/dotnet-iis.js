@@ -7,6 +7,7 @@
       Grid, Card, CardContent, Typography, Divider, ActionCard, Alert,
       Stack, Button, Box, Paper, Chip,
       cfg, run, serviceBusy,
+      openManualHelper, buildDotnetIisManualHelper,
       isServiceRunningStatus, onServiceAction,
       hasStoppedServices, batchServiceAction,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon, renderEditServiceIcon,
@@ -40,6 +41,15 @@
 
     return (
       <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Button
+            variant="outlined"
+            onClick={() => openManualHelper && openManualHelper(buildDotnetIisManualHelper ? buildDotnetIisManualHelper() : null)}
+            sx={{ textTransform: "none" }}
+          >
+            Manual Helper
+          </Button>
+        </Grid>
         <Grid item xs={12} md={4}>
           <ActionCard title="Install IIS" description="Install IIS features and .NET prerequisites." action="/run/windows_setup_iis" fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]} onRun={run} color="#0f766e" />
         </Grid>

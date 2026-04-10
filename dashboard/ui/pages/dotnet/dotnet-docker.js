@@ -8,6 +8,7 @@
       ActionCard, Divider,
       cfg, run, serviceBusy,
       dockerServices,
+      openManualHelper, buildDotnetDockerManualHelper,
       isScopeLoading, loadDockerInfo, loadDockerServices,
       hasStoppedServices, batchServiceAction,
       isServiceRunningStatus, onServiceAction,
@@ -111,6 +112,14 @@
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
+            <Stack spacing={1.25}>
+              <Button
+                variant="outlined"
+                onClick={() => openManualHelper && openManualHelper(buildDotnetDockerManualHelper ? buildDotnetDockerManualHelper() : null)}
+                sx={{ alignSelf: "flex-start", textTransform: "none" }}
+              >
+                Manual Helper
+              </Button>
             <ActionCard
               title="Deploy Docker"
               description="Deploy application to Docker. Docker will be installed automatically if not present. Leave HTTP Port or HTTPS Port empty to skip that protocol - at least one must be set."
@@ -124,6 +133,7 @@
               onRun={run}
               color="#334155"
             />
+            </Stack>
           </Grid>
           {dockerInfoCard}
           {containersCard}
@@ -134,6 +144,14 @@
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
+            <Stack spacing={1.25}>
+              <Button
+                variant="outlined"
+                onClick={() => openManualHelper && openManualHelper(buildDotnetDockerManualHelper ? buildDotnetDockerManualHelper() : null)}
+                sx={{ alignSelf: "flex-start", textTransform: "none" }}
+              >
+                Manual Helper
+              </Button>
             <ActionCard
               title="Deploy Docker"
               description={isMacOs
@@ -149,6 +167,7 @@
               onRun={run}
               color="#334155"
             />
+            </Stack>
           </Grid>
           {dockerInfoCard}
           {containersCard}

@@ -101,6 +101,7 @@ function App() {
   const [pythonApiEditorSeed, setPythonApiEditorSeed] = React.useState(0);
   const [serviceEditDlg, setServiceEditDlg] = React.useState(null);
   const [updateSourceDlg, setUpdateSourceDlg] = React.useState(null);
+  const [manualHelperDlg, setManualHelperDlg] = React.useState(null);
   const [updateAvailable, setUpdateAvailable] = React.useState(null); // null=checking, true=update ready, false=up-to-date
   const [websiteEditor, setWebsiteEditor] = React.useState(null);
   const [websiteEditorSeed, setWebsiteEditorSeed] = React.useState(0);
@@ -1285,6 +1286,247 @@ function App() {
     setPage("website");
   }, []);
 
+  const buildDotnetDockerManualHelper = React.useCallback(() => ({
+    title: ".NET API Docker Helper",
+    intro: "Run a .NET 9 Web API manually in Docker without using the dashboard.",
+    sections: [
+      {
+        title: "Direct Docker Workflow",
+        body: "Publish your API, build a .NET 9 image, then map any host port you want to the container's internal port 8080.",
+        code: [
+          "dotnet publish .\\YourApi.csproj -c Release -f net9.0 -o .\\publish",
+          "@'",
+          "FROM mcr.microsoft.com/dotnet/aspnet:9.0",
+          "WORKDIR /app",
+          "COPY publish/ .",
+          "ENV ASPNETCORE_URLS=http://+:8080",
+          "EXPOSE 8080",
+          "ENTRYPOINT [\"dotnet\", \"YourApi.dll\"]",
+          "'@ | Set-Content .\\Dockerfile",
+          "docker build -t yourapi:net9 .",
+          "docker run -d --name yourapi -p 5000:8080 yourapi:net9",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Use The Repo Script Manually",
+        body: "This runs the same Docker-oriented installer flow the dashboard uses, but straight from the terminal.",
+        code: [
+          "powershell -NoProfile -ExecutionPolicy Bypass -File .\\DotNet\\windows\\install-windows-dotnet-host.ps1 `",
+          "  -DeploymentMode Docker `",
+          "  -DotNetChannel 9.0 `",
+          "  -SourceValue C:\\path\\to\\published-app-or-zip `",
+          "  -SiteName YourApi `",
+          "  -DockerHostPort 5000 `",
+          "  -NonInteractive",
+        ].join("\n"),
+        language: "powershell",
+      },
+    ],
+  }), []);
+
+  const buildDotnetIisManualHelper = React.useCallback(() => ({
+    title: ".NET API IIS Helper",
+    intro: "Manual IIS deployment steps for a published ASP.NET Core API without using the dashboard.",
+    sections: [
+      {
+        title: "Publish The API",
+        body: "Publish the project first so IIS serves the compiled output instead of raw source files.",
+        code: [
+          "dotnet publish .\\YourApi.csproj -c Release -f net9.0 -o C:\\deploy\\YourApi",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Install IIS + ASP.NET Core Hosting Bundle",
+        body: "IIS needs the ASP.NET Core Hosting Bundle for in-process or reverse-proxy hosting.",
+        code: [
+          "powershell -NoProfile -ExecutionPolicy Bypass -File .\\DotNet\\windows\\install-windows-dotnet-host.ps1 `",
+          "  -DeploymentMode IIS `",
+          "  -DotNetChannel 9.0 `",
+          "  -NonInteractive",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Deploy With The Repo Script",
+        body: "This runs the same IIS deployment flow the dashboard uses, but directly from PowerShell.",
+        code: [
+          "powershell -NoProfile -ExecutionPolicy Bypass -File .\\DotNet\\windows\\install-windows-dotnet-host.ps1 `",
+          "  -DeploymentMode IIS `",
+          "  -DotNetChannel 9.0 `",
+          "  -SiteName YourApi `",
+          "  -SourceValue C:\\deploy\\YourApi `",
+          "  -HTTP_PORT 5000 `",
+          "  -HTTPS_PORT 5443 `",
+          "  -NonInteractive",
+        ].join("\n"),
+        language: "powershell",
+      },
+    ],
+  }), []);
+
+  const buildS3ManualHelper = React.useCallback(() => {
+    const isWindows = cfg.os === "windows";
+    return {
+      title: "S3 Manual Helper",
+      intro: "Manual commands for the S3/MinIO flows that this dashboard supports.",
+      sections: isWindows ? [
+        {
+          title: "Windows Docker Mode",
+          body: "Run MinIO directly in Docker. Adjust ports and credentials as needed.",
+          code: [
+            "docker volume create locals3-data",
+            "docker run -d --name locals3-minio `",
+            "  -p 39000:9000 -p 39001:9001 `",
+            "  -e MINIO_ROOT_USER=admin `",
+            "  -e MINIO_ROOT_PASSWORD=StrongPassword123 `",
+            "  -v locals3-data:/data `",
+            "  quay.io/minio/minio server /data --console-address \":9001\"",
+          ].join("\n"),
+          language: "powershell",
+        },
+        {
+          title: "Windows Repo Script",
+          body: "Run the included Windows setup script manually. Switch `S3_MODE` between `docker` and `iis` depending on the flow you want.",
+          code: [
+            "$env:LOCALS3_INSTANCE_NAME='locals3'",
+            "$env:S3_MODE='docker'",
+            "$env:LOCALS3_HOST_IP='127.0.0.1'",
+            "$env:LOCALS3_HTTP_PORT=''",
+            "$env:LOCALS3_HTTPS_PORT='8443'",
+            "$env:LOCALS3_API_PORT='39000'",
+            "$env:LOCALS3_UI_PORT='39001'",
+            "$env:LOCALS3_CONSOLE_PORT='9443'",
+            "$env:LOCALS3_ROOT_USER='admin'",
+            "$env:LOCALS3_ROOT_PASSWORD='StrongPassword123'",
+            "powershell -NoProfile -ExecutionPolicy Bypass -File .\\S3\\windows\\setup-storage.ps1",
+          ].join("\n"),
+          language: "powershell",
+        },
+      ] : [
+        {
+          title: "Linux/macOS Docker Mode",
+          body: "Run MinIO directly in Docker.",
+          code: [
+            "docker volume create locals3-data",
+            "docker run -d --name locals3-minio \\",
+            "  -p 9000:9000 -p 9001:9001 \\",
+            "  -e MINIO_ROOT_USER=admin \\",
+            "  -e MINIO_ROOT_PASSWORD=StrongPassword123 \\",
+            "  -v locals3-data:/data \\",
+            "  quay.io/minio/minio server /data --console-address ':9001'",
+          ].join("\n"),
+          language: "bash",
+        },
+        {
+          title: "Linux/macOS Repo Script",
+          body: "Run the included script manually. Use `LOCALS3_MODE=os` for the native/nginx path or `docker` for containers.",
+          code: [
+            "sudo env \\",
+            "  LOCALS3_INSTANCE_NAME=locals3 \\",
+            "  LOCALS3_MODE=docker \\",
+            "  LOCALS3_HOST_IP=127.0.0.1 \\",
+            "  LOCALS3_HTTP_PORT= \\",
+            "  LOCALS3_HTTPS_PORT=9443 \\",
+            "  LOCALS3_CONSOLE_PORT=18443 \\",
+            "  LOCALS3_API_PORT=9000 \\",
+            "  LOCALS3_UI_PORT=9001 \\",
+            "  LOCALS3_ROOT_USER=admin \\",
+            "  LOCALS3_ROOT_PASSWORD=StrongPassword123 \\",
+            "  bash ./S3/linux-macos/setup-storage.sh",
+          ].join("\n"),
+          language: "bash",
+        },
+      ],
+    };
+  }, [cfg.os]);
+
+  const buildMongoDockerManualHelper = React.useCallback(() => ({
+    title: "MongoDB Docker Helper",
+    intro: "Manual Docker commands for MongoDB and mongo-express without using the dashboard.",
+    sections: [
+      {
+        title: "Direct Docker Workflow",
+        body: "Create a dedicated network, run MongoDB, then run mongo-express against it.",
+        code: cfg.os === "windows" ? [
+          "docker network create localmongo-net",
+          "docker volume create localmongo-data",
+          "docker run -d --name localmongo-mongodb --network localmongo-net `",
+          "  -p 27017:27017 `",
+          "  -e MONGO_INITDB_ROOT_USERNAME=admin `",
+          "  -e MONGO_INITDB_ROOT_PASSWORD=StrongPassword123 `",
+          "  -v localmongo-data:/data/db mongo:7",
+          "docker run -d --name localmongo-web --network localmongo-net `",
+          "  -p 8081:8081 `",
+          "  -e ME_CONFIG_MONGODB_ADMINUSERNAME=admin `",
+          "  -e ME_CONFIG_MONGODB_ADMINPASSWORD=StrongPassword123 `",
+          "  -e ME_CONFIG_MONGODB_URL=mongodb://admin:StrongPassword123@localmongo-mongodb:27017/ `",
+          "  mongo-express:1.0.2-20",
+        ].join("\n") : [
+          "docker network create localmongo-net",
+          "docker volume create localmongo-data",
+          "docker run -d --name localmongo-mongodb --network localmongo-net \\",
+          "  -p 27017:27017 \\",
+          "  -e MONGO_INITDB_ROOT_USERNAME=admin \\",
+          "  -e MONGO_INITDB_ROOT_PASSWORD=StrongPassword123 \\",
+          "  -v localmongo-data:/data/db mongo:7",
+          "docker run -d --name localmongo-web --network localmongo-net \\",
+          "  -p 8081:8081 \\",
+          "  -e ME_CONFIG_MONGODB_ADMINUSERNAME=admin \\",
+          "  -e ME_CONFIG_MONGODB_ADMINPASSWORD=StrongPassword123 \\",
+          "  -e ME_CONFIG_MONGODB_URL=mongodb://admin:StrongPassword123@localmongo-mongodb:27017/ \\",
+          "  mongo-express:1.0.2-20",
+        ].join("\n"),
+        language: cfg.os === "windows" ? "powershell" : "bash",
+      },
+    ],
+  }), [cfg.os]);
+
+  const buildMongoNativeManualHelper = React.useCallback(() => ({
+    title: "MongoDB Native Helper",
+    intro: "Manual terminal commands for the native MongoDB flow the repo already supports.",
+    sections: cfg.os === "windows" ? [
+      {
+        title: "Windows Native Script",
+        body: "Run the included PowerShell installer directly instead of using the dashboard UI.",
+        code: [
+          "$env:LOCALMONGO_INSTANCE_NAME='localmongo'",
+          "$env:LOCALMONGO_HOST_IP='127.0.0.1'",
+          "$env:LOCALMONGO_MONGO_PORT='27017'",
+          "$env:LOCALMONGO_HTTP_PORT=''",
+          "$env:LOCALMONGO_HTTPS_PORT='9445'",
+          "$env:LOCALMONGO_WEB_PORT='8081'",
+          "$env:LOCALMONGO_ADMIN_USER='admin'",
+          "$env:LOCALMONGO_ADMIN_PASSWORD='StrongPassword123'",
+          "$env:LOCALMONGO_UI_USER='admin'",
+          "$env:LOCALMONGO_UI_PASSWORD='StrongPassword123'",
+          "powershell -NoProfile -ExecutionPolicy Bypass -File .\\Mongo\\windows\\setup-mongodb.ps1",
+        ].join("\n"),
+        language: "powershell",
+      },
+    ] : [
+      {
+        title: "Linux/macOS Native Script",
+        body: "Use the bundled shell installer. On macOS, Docker is usually the easier path if native packages are unavailable.",
+        code: [
+          "sudo env \\",
+          "  LOCALMONGO_INSTANCE_NAME=localmongo \\",
+          "  LOCALMONGO_HOST_IP=127.0.0.1 \\",
+          "  LOCALMONGO_MONGO_PORT=27017 \\",
+          "  LOCALMONGO_ADMIN_USER=admin \\",
+          "  LOCALMONGO_ADMIN_PASSWORD=StrongPassword123 \\",
+          "  bash ./Mongo/linux-macos/setup-mongodb.sh",
+        ].join("\n"),
+        language: "bash",
+      },
+    ],
+  }), [cfg.os]);
+
+  const openManualHelper = React.useCallback((payload) => {
+    setManualHelperDlg(payload || null);
+  }, []);
+
   const renderPythonApiRunsCard = React.useCallback(() => (
     <Grid item xs={12}>
       <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
@@ -2032,6 +2274,12 @@ function App() {
     createFolderInCurrentPath, createFileInCurrentPath,
     renameFileManagerPath, deleteFileManagerPath, uploadIntoCurrentPath,
     setFileEditorContent, setFileEditorDirty,
+    openManualHelper,
+    buildDotnetDockerManualHelper,
+    buildDotnetIisManualHelper,
+    buildS3ManualHelper,
+    buildMongoDockerManualHelper,
+    buildMongoNativeManualHelper,
     ...genericAiProps,
   };
 
@@ -2279,11 +2527,63 @@ function App() {
     </Dialog>
   ) : null;
 
+  const manualHelperDialog = manualHelperDlg ? (
+    <Dialog open onClose={() => setManualHelperDlg(null)} maxWidth="md" fullWidth>
+      <DialogTitle>{manualHelperDlg.title || "Manual Helper"}</DialogTitle>
+      <DialogContent dividers>
+        {!!manualHelperDlg.intro && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {manualHelperDlg.intro}
+          </Typography>
+        )}
+        <Stack spacing={2}>
+          {Array.isArray(manualHelperDlg.sections) && manualHelperDlg.sections.map((section, idx) => (
+            <Box key={`${manualHelperDlg.title || "helper"}-${idx}`}>
+              {!!section.title && (
+                <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.75 }}>
+                  {section.title}
+                </Typography>
+              )}
+              {!!section.body && (
+                <Typography variant="body2" sx={{ mb: 1, color: "text.secondary" }}>
+                  {section.body}
+                </Typography>
+              )}
+              {!!section.code && (
+                <Box
+                  component="pre"
+                  sx={{
+                    m: 0,
+                    p: 1.5,
+                    borderRadius: 2,
+                    border: "1px solid #dbe5f6",
+                    bgcolor: "#0f172a",
+                    color: "#e2e8f0",
+                    overflowX: "auto",
+                    fontSize: 13,
+                    lineHeight: 1.45,
+                    fontFamily: "Consolas, 'Courier New', monospace",
+                  }}
+                >
+                  {section.code}
+                </Box>
+              )}
+            </Box>
+          ))}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setManualHelperDlg(null)} sx={{ textTransform: "none" }}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  ) : null;
+
   return (
     <Box sx={{ display: "flex", minHeight: "100%" }}>
       <CssBaseline />
       {serviceEditDialog}
       {updateSourceDialog}
+      {manualHelperDialog}
       <AppBar position="fixed" sx={{ zIndex: 1300, ml: `${mainMargin}px`, width: `calc(100% - ${mainMargin}px)`, background: "linear-gradient(90deg,#081726,#1a3f66)", transition: "all .2s ease" }}>
         <Toolbar sx={{ gap: 1 }}>
           <IconButton color="inherit" onClick={() => isMobile ? setMobileOpen(true) : setCollapsed((v) => !v)} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>

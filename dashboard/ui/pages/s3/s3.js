@@ -7,6 +7,7 @@
       Alert, Grid, Card, CardContent, Typography, Button, Box, Stack, Paper, Chip,
       ActionCard, ActionIcon,
       cfg, run, selectableIps, getDefaultSelectableIp, serviceBusy,
+      openManualHelper, buildS3ManualHelper,
       s3WindowsModeOptions, s3WindowsDockerSupported, s3WindowsDockerReason,
       s3ConsoleUrl, s3ApiUrl, s3LoginText, s3Services,
       isScopeLoading, loadS3Info, loadS3Services,
@@ -135,6 +136,14 @@
             </Card>
           </Grid>
           <Grid item xs={12} md={8}>
+            <Stack spacing={1.25}>
+              <Button
+                variant="outlined"
+                onClick={() => openManualHelper && openManualHelper(buildS3ManualHelper ? buildS3ManualHelper() : null)}
+                sx={{ alignSelf: "flex-start", textTransform: "none" }}
+              >
+                Manual Helper
+              </Button>
             <ActionCard
               title="Install S3 (Windows)"
               description="Choose IIS or Docker mode, host type (local/DNS/IP), and ports. Use a unique Instance Name to run multiple isolated S3 instances side by side. Leave HTTP Port or HTTPS Port empty to skip that protocol."
@@ -154,6 +163,7 @@
               onRun={run}
               color="#0f766e"
             />
+            </Stack>
             {!s3WindowsDockerSupported && (
               <Alert severity="warning" sx={{ mt: 1.5 }}>
                 Docker mode is disabled on this Windows host. {s3WindowsDockerReason || "This machine is not currently usable for Linux-container Docker workloads."}
@@ -191,6 +201,14 @@
             </Card>
           </Grid>
           <Grid item xs={12} md={8}>
+            <Stack spacing={1.25}>
+              <Button
+                variant="outlined"
+                onClick={() => openManualHelper && openManualHelper(buildS3ManualHelper ? buildS3ManualHelper() : null)}
+                sx={{ alignSelf: "flex-start", textTransform: "none" }}
+              >
+                Manual Helper
+              </Button>
             <ActionCard
               title="Install S3 (Linux/macOS)"
               description="Run local S3 installer. Choose OS (native nginx proxy) or Docker (MinIO + nginx containers). Use a unique Instance Name to run multiple isolated S3 instances side by side. Leave HTTP Port or HTTPS Port empty to skip that protocol."
@@ -210,6 +228,7 @@
               onRun={run}
               color="#1e40af"
             />
+            </Stack>
           </Grid>
           {renderApiDocs && apiDocData && renderApiDocs(p, apiDocData)}
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>

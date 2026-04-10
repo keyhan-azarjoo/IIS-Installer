@@ -120,6 +120,7 @@
       TextField, Select, MenuItem, FormControl, InputLabel, InputAdornment, IconButton, Alert, Tooltip,
       ActionIcon,
       cfg, run, selectableIps, serviceBusy,
+      openManualHelper, buildMongoNativeManualHelper,
       mongo, mongoWebsiteUrl, mongoDisplayServices,
       mongoCompassDownloadUrl, mongoCompassUri,
       isScopeLoading, loadMongoInfo, loadMongoServices,
@@ -224,6 +225,14 @@
                   {cfg.os === "windows" ? "Install MongoDB (Windows Native)" : `Install MongoDB (${cfg.os === "linux" ? "Linux" : "macOS"})`}
                 </Typography>
                 <Box sx={{ flexGrow: 1 }} />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => openManualHelper && openManualHelper(buildMongoNativeManualHelper ? buildMongoNativeManualHelper() : null)}
+                  sx={{ textTransform: "none", fontWeight: 700 }}
+                >
+                  Manual Helper
+                </Button>
                 <Button
                   size="small" variant="outlined"
                   onClick={addInstance}

@@ -106,6 +106,7 @@
       TextField, InputAdornment, IconButton, Alert,
       ActionIcon,
       cfg, run, serviceBusy,
+      openManualHelper, buildMongoDockerManualHelper,
       mongo, mongoWebsiteUrl, mongoDisplayServices,
       mongoCompassDownloadUrl, mongoCompassUri,
       isScopeLoading, loadMongoInfo, loadMongoServices,
@@ -195,6 +196,14 @@
               <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
                 <Typography variant="h6" fontWeight={800}>Deploy MongoDB (Docker)</Typography>
                 <Box sx={{ flexGrow: 1 }} />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => openManualHelper && openManualHelper(buildMongoDockerManualHelper ? buildMongoDockerManualHelper() : null)}
+                  sx={{ textTransform: "none", fontWeight: 700 }}
+                >
+                  Manual Helper
+                </Button>
                 <Button
                   size="small" variant="outlined"
                   onClick={addInstance}
