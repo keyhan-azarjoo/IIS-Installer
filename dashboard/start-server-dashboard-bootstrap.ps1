@@ -41,6 +41,34 @@ function Get-CommandPath([string]$name) {
   return $null
 }
 
+function Resolve-WorkingPythonPath {
+  $candidates = @()
+  foreach ($name in @("python", "py")) {
+    $path = Get-CommandPath $name
+    if ($path) {
+      $candidates += $path
+    }
+  }
+
+  foreach ($candidate in ($candidates | Select-Object -Unique)) {
+    try {
+      $output = & $candidate -c "import sys; print(sys.executable)" 2>$null
+      if ($LASTEXITCODE -eq 0) {
+        $resolved = @($output | Where-Object { $_ -and $_.Trim() } | Select-Object -First 1)
+        if ($resolved.Count -gt 0 -and (Test-Path -LiteralPath $resolved[0].Trim())) {
+          return $resolved[0].Trim()
+        }
+        if (Test-Path -LiteralPath $candidate) {
+          return $candidate
+        }
+      }
+    } catch {
+    }
+  }
+
+  return $null
+}
+
 function Stop-ExistingDashboardProcesses {
   if (-not $IsWindows) {
     return
@@ -442,8 +470,7 @@ Stop-ExistingDashboardProcesses
 Sync-ServerInstallerFiles -SourceRoot $localSourceRoot -DestinationRoot $root -RepoBase $repo
 Repair-DashboardLauncher -Path $dashboard
 
-$python = Get-CommandPath "python"
-if (-not $python) { $python = Get-CommandPath "py" }
+$python = Resolve-WorkingPythonPath
 
 if (-not $python) {
   Write-Host "[INFO] Python not found. Bootstrapping embeddable Python..."
