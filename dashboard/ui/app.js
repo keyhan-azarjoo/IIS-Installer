@@ -1288,78 +1288,136 @@ function App() {
 
   const buildDotnetDockerManualHelper = React.useCallback(() => ({
     title: ".NET API Docker Helper",
-    intro: "Run a .NET 9 Web API manually in Docker without using the dashboard.",
+    intro: "Step-by-step manual setup for running a .NET 9 API in Docker without using this installer.",
     sections: [
       {
-        title: "Direct Docker Workflow",
-        body: "Publish your API, build a .NET 9 image, then map any host port you want to the container's internal port 8080.",
+        title: "Step 1: Install Docker",
+        body: "Install Docker Desktop on Windows or macOS, or Docker Engine on Linux. Confirm Docker works before continuing.",
+        code: [
+          "docker --version",
+          "docker ps",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Step 2: Publish Your API",
+        body: "Publish the ASP.NET Core project into a deployment folder.",
         code: [
           "dotnet publish .\\YourApi.csproj -c Release -f net9.0 -o .\\publish",
-          "@'",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Step 3: Create Dockerfile",
+        body: "Create a `Dockerfile` beside the `publish` folder.",
+        code: [
           "FROM mcr.microsoft.com/dotnet/aspnet:9.0",
           "WORKDIR /app",
           "COPY publish/ .",
           "ENV ASPNETCORE_URLS=http://+:8080",
           "EXPOSE 8080",
           "ENTRYPOINT [\"dotnet\", \"YourApi.dll\"]",
-          "'@ | Set-Content .\\Dockerfile",
+        ].join("\n"),
+        language: "dockerfile",
+      },
+      {
+        title: "Step 4: Build The Image",
+        body: "Run this from the folder that contains the `Dockerfile`.",
+        code: [
           "docker build -t yourapi:net9 .",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Step 5: Run On Your Port",
+        body: "Map any host port you want to container port `8080`. Example below uses port `5000`.",
+        code: [
           "docker run -d --name yourapi -p 5000:8080 yourapi:net9",
         ].join("\n"),
         language: "powershell",
       },
       {
-        title: "Use The Repo Script Manually",
-        body: "This runs the same Docker-oriented installer flow the dashboard uses, but straight from the terminal.",
+        title: "Step 6: Verify And Manage",
+        body: "Use these commands to inspect logs, stop, start, or remove the container.",
         code: [
-          "powershell -NoProfile -ExecutionPolicy Bypass -File .\\DotNet\\windows\\install-windows-dotnet-host.ps1 `",
-          "  -DeploymentMode Docker `",
-          "  -DotNetChannel 9.0 `",
-          "  -SourceValue C:\\path\\to\\published-app-or-zip `",
-          "  -SiteName YourApi `",
-          "  -DockerHostPort 5000 `",
-          "  -NonInteractive",
+          "docker ps",
+          "docker logs yourapi",
+          "docker stop yourapi",
+          "docker start yourapi",
+          "docker rm -f yourapi",
         ].join("\n"),
         language: "powershell",
+      },
+      {
+        title: "Optional: Use Docker Compose",
+        body: "If you prefer Compose, create `docker-compose.yml` and run `docker compose up -d`.",
+        code: [
+          "services:",
+          "  yourapi:",
+          "    image: yourapi:net9",
+          "    build: .",
+          "    container_name: yourapi",
+          "    ports:",
+          "      - \"5000:8080\"",
+        ].join("\n"),
+        language: "yaml",
       },
     ],
   }), []);
 
   const buildDotnetIisManualHelper = React.useCallback(() => ({
     title: ".NET API IIS Helper",
-    intro: "Manual IIS deployment steps for a published ASP.NET Core API without using the dashboard.",
+    intro: "Step-by-step manual IIS deployment for an ASP.NET Core API without using this installer.",
     sections: [
       {
-        title: "Publish The API",
-        body: "Publish the project first so IIS serves the compiled output instead of raw source files.",
+        title: "Step 1: Install IIS",
+        body: "Enable IIS on the Windows server if it is not already installed.",
+        code: [
+          "Enable-WindowsOptionalFeature -Online -FeatureName IIS-WebServerRole -All",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Step 2: Install .NET 9 Hosting Bundle",
+        body: "Install the ASP.NET Core Hosting Bundle manually so IIS can host the app.",
+        code: [
+          "dotnet --info",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Step 3: Publish The API",
+        body: "Publish your app to the final deployment folder.",
         code: [
           "dotnet publish .\\YourApi.csproj -c Release -f net9.0 -o C:\\deploy\\YourApi",
         ].join("\n"),
         language: "powershell",
       },
       {
-        title: "Install IIS + ASP.NET Core Hosting Bundle",
-        body: "IIS needs the ASP.NET Core Hosting Bundle for in-process or reverse-proxy hosting.",
+        title: "Step 4: Create App Pool",
+        body: "Create an IIS app pool and set it to `No Managed Code`.",
         code: [
-          "powershell -NoProfile -ExecutionPolicy Bypass -File .\\DotNet\\windows\\install-windows-dotnet-host.ps1 `",
-          "  -DeploymentMode IIS `",
-          "  -DotNetChannel 9.0 `",
-          "  -NonInteractive",
+          "Import-Module WebAdministration",
+          "New-WebAppPool -Name 'YourApiPool'",
+          "Set-ItemProperty IIS:\\AppPools\\YourApiPool -Name managedRuntimeVersion -Value ''",
         ].join("\n"),
         language: "powershell",
       },
       {
-        title: "Deploy With The Repo Script",
-        body: "This runs the same IIS deployment flow the dashboard uses, but directly from PowerShell.",
+        title: "Step 5: Create IIS Site",
+        body: "Create the site and bind it to your chosen port. Example below uses port `5000`.",
         code: [
-          "powershell -NoProfile -ExecutionPolicy Bypass -File .\\DotNet\\windows\\install-windows-dotnet-host.ps1 `",
-          "  -DeploymentMode IIS `",
-          "  -DotNetChannel 9.0 `",
-          "  -SiteName YourApi `",
-          "  -SourceValue C:\\deploy\\YourApi `",
-          "  -HTTP_PORT 5000 `",
-          "  -HTTPS_PORT 5443 `",
-          "  -NonInteractive",
+          "New-Website -Name 'YourApi' -PhysicalPath 'C:\\deploy\\YourApi' -Port 5000 -ApplicationPool 'YourApiPool'",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Step 6: Start And Test",
+        body: "Start the site and test it locally.",
+        code: [
+          "Start-Website -Name 'YourApi'",
+          "Get-Website -Name 'YourApi'",
+          "curl http://localhost:5000",
         ].join("\n"),
         language: "powershell",
       },
@@ -1370,13 +1428,29 @@ function App() {
     const isWindows = cfg.os === "windows";
     return {
       title: "S3 Manual Helper",
-      intro: "Manual commands for the S3/MinIO flows that this dashboard supports.",
+      intro: "Step-by-step manual MinIO setup without using this installer.",
       sections: isWindows ? [
         {
-          title: "Windows Docker Mode",
-          body: "Run MinIO directly in Docker. Adjust ports and credentials as needed.",
+          title: "Step 1: Install Docker",
+          body: "Install Docker Desktop and verify Docker is working.",
+          code: [
+            "docker --version",
+            "docker ps",
+          ].join("\n"),
+          language: "powershell",
+        },
+        {
+          title: "Step 2: Create Persistent Storage",
+          body: "Create a Docker volume so the S3 data remains after container restarts.",
           code: [
             "docker volume create locals3-data",
+          ].join("\n"),
+          language: "powershell",
+        },
+        {
+          title: "Step 3: Run MinIO",
+          body: "This exposes the S3 API on `39000` and the MinIO web console on `39001`.",
+          code: [
             "docker run -d --name locals3-minio `",
             "  -p 39000:9000 -p 39001:9001 `",
             "  -e MINIO_ROOT_USER=admin `",
@@ -1387,29 +1461,57 @@ function App() {
           language: "powershell",
         },
         {
-          title: "Windows Repo Script",
-          body: "Run the included Windows setup script manually. Switch `S3_MODE` between `docker` and `iis` depending on the flow you want.",
+          title: "Step 4: Open The Console",
+          body: "Open the MinIO console in a browser and sign in.",
           code: [
-            "$env:LOCALS3_INSTANCE_NAME='locals3'",
-            "$env:S3_MODE='docker'",
-            "$env:LOCALS3_HOST_IP='127.0.0.1'",
-            "$env:LOCALS3_HTTP_PORT=''",
-            "$env:LOCALS3_HTTPS_PORT='8443'",
-            "$env:LOCALS3_API_PORT='39000'",
-            "$env:LOCALS3_UI_PORT='39001'",
-            "$env:LOCALS3_CONSOLE_PORT='9443'",
-            "$env:LOCALS3_ROOT_USER='admin'",
-            "$env:LOCALS3_ROOT_PASSWORD='StrongPassword123'",
-            "powershell -NoProfile -ExecutionPolicy Bypass -File .\\S3\\windows\\setup-storage.ps1",
+            "http://localhost:39001",
+          ].join("\n"),
+          language: "text",
+        },
+        {
+          title: "Step 5: Create Bucket And Use The API",
+          body: "Create a bucket in the console, then use these values in your application.",
+          code: [
+            "S3 endpoint: http://localhost:39000",
+            "Access key: admin",
+            "Secret key: StrongPassword123",
+          ].join("\n"),
+          language: "text",
+        },
+        {
+          title: "Step 6: Manage The Container",
+          body: "Use Docker commands to inspect logs or stop/start the service later.",
+          code: [
+            "docker ps",
+            "docker logs locals3-minio",
+            "docker stop locals3-minio",
+            "docker start locals3-minio",
+            "docker rm -f locals3-minio",
           ].join("\n"),
           language: "powershell",
         },
       ] : [
         {
-          title: "Linux/macOS Docker Mode",
-          body: "Run MinIO directly in Docker.",
+          title: "Step 1: Install Docker",
+          body: "Install Docker Engine or Docker Desktop and verify it is ready.",
+          code: [
+            "docker --version",
+            "docker ps",
+          ].join("\n"),
+          language: "bash",
+        },
+        {
+          title: "Step 2: Create Persistent Storage",
+          body: "Create a Docker volume for MinIO data.",
           code: [
             "docker volume create locals3-data",
+          ].join("\n"),
+          language: "bash",
+        },
+        {
+          title: "Step 3: Run MinIO",
+          body: "This exposes the S3 API on `9000` and the console on `9001`.",
+          code: [
             "docker run -d --name locals3-minio \\",
             "  -p 9000:9000 -p 9001:9001 \\",
             "  -e MINIO_ROOT_USER=admin \\",
@@ -1420,21 +1522,32 @@ function App() {
           language: "bash",
         },
         {
-          title: "Linux/macOS Repo Script",
-          body: "Run the included script manually. Use `LOCALS3_MODE=os` for the native/nginx path or `docker` for containers.",
+          title: "Step 4: Open The Console",
+          body: "Open the MinIO console in a browser and sign in.",
           code: [
-            "sudo env \\",
-            "  LOCALS3_INSTANCE_NAME=locals3 \\",
-            "  LOCALS3_MODE=docker \\",
-            "  LOCALS3_HOST_IP=127.0.0.1 \\",
-            "  LOCALS3_HTTP_PORT= \\",
-            "  LOCALS3_HTTPS_PORT=9443 \\",
-            "  LOCALS3_CONSOLE_PORT=18443 \\",
-            "  LOCALS3_API_PORT=9000 \\",
-            "  LOCALS3_UI_PORT=9001 \\",
-            "  LOCALS3_ROOT_USER=admin \\",
-            "  LOCALS3_ROOT_PASSWORD=StrongPassword123 \\",
-            "  bash ./S3/linux-macos/setup-storage.sh",
+            "http://localhost:9001",
+          ].join("\n"),
+          language: "text",
+        },
+        {
+          title: "Step 5: Create Bucket And Use The API",
+          body: "Create a bucket in the console, then use these values in your application.",
+          code: [
+            "S3 endpoint: http://localhost:9000",
+            "Access key: admin",
+            "Secret key: StrongPassword123",
+          ].join("\n"),
+          language: "text",
+        },
+        {
+          title: "Step 6: Manage The Container",
+          body: "Use Docker commands to inspect logs or stop/start the service later.",
+          code: [
+            "docker ps",
+            "docker logs locals3-minio",
+            "docker stop locals3-minio",
+            "docker start locals3-minio",
+            "docker rm -f locals3-minio",
           ].join("\n"),
           language: "bash",
         },
@@ -1444,19 +1557,48 @@ function App() {
 
   const buildMongoDockerManualHelper = React.useCallback(() => ({
     title: "MongoDB Docker Helper",
-    intro: "Manual Docker commands for MongoDB and mongo-express without using the dashboard.",
+    intro: "Step-by-step manual MongoDB Docker setup without using this installer.",
     sections: [
       {
-        title: "Direct Docker Workflow",
-        body: "Create a dedicated network, run MongoDB, then run mongo-express against it.",
-        code: cfg.os === "windows" ? [
+        title: "Step 1: Install Docker",
+        body: "Install Docker and verify it is working.",
+        code: [
+          "docker --version",
+          "docker ps",
+        ].join("\n"),
+        language: cfg.os === "windows" ? "powershell" : "bash",
+      },
+      {
+        title: "Step 2: Create Network And Volume",
+        body: "Create a private Docker network and a persistent volume for MongoDB data.",
+        code: [
           "docker network create localmongo-net",
           "docker volume create localmongo-data",
+        ].join("\n"),
+        language: cfg.os === "windows" ? "powershell" : "bash",
+      },
+      {
+        title: "Step 3: Run MongoDB",
+        body: "Expose MongoDB on port `27017` with an admin username and password.",
+        code: cfg.os === "windows" ? [
           "docker run -d --name localmongo-mongodb --network localmongo-net `",
           "  -p 27017:27017 `",
           "  -e MONGO_INITDB_ROOT_USERNAME=admin `",
           "  -e MONGO_INITDB_ROOT_PASSWORD=StrongPassword123 `",
           "  -v localmongo-data:/data/db mongo:7",
+        ].join("\n") : [
+          "docker run -d --name localmongo-mongodb --network localmongo-net \\",
+          "  -p 27017:27017 \\",
+          "  -e MONGO_INITDB_ROOT_USERNAME=admin \\",
+          "  -e MONGO_INITDB_ROOT_PASSWORD=StrongPassword123 \\",
+          "  -v localmongo-data:/data/db mongo:7",
+        ].join("\n"),
+        language: cfg.os === "windows" ? "powershell" : "bash",
+      },
+      {
+        title: "Step 4: Run mongo-express",
+        body: "Start the optional web UI on port `8081`.",
+        code: cfg.os === "windows" ? [
           "docker run -d --name localmongo-web --network localmongo-net `",
           "  -p 8081:8081 `",
           "  -e ME_CONFIG_MONGODB_ADMINUSERNAME=admin `",
@@ -1464,13 +1606,6 @@ function App() {
           "  -e ME_CONFIG_MONGODB_URL=mongodb://admin:StrongPassword123@localmongo-mongodb:27017/ `",
           "  mongo-express:1.0.2-20",
         ].join("\n") : [
-          "docker network create localmongo-net",
-          "docker volume create localmongo-data",
-          "docker run -d --name localmongo-mongodb --network localmongo-net \\",
-          "  -p 27017:27017 \\",
-          "  -e MONGO_INITDB_ROOT_USERNAME=admin \\",
-          "  -e MONGO_INITDB_ROOT_PASSWORD=StrongPassword123 \\",
-          "  -v localmongo-data:/data/db mongo:7",
           "docker run -d --name localmongo-web --network localmongo-net \\",
           "  -p 8081:8081 \\",
           "  -e ME_CONFIG_MONGODB_ADMINUSERNAME=admin \\",
@@ -1480,43 +1615,139 @@ function App() {
         ].join("\n"),
         language: cfg.os === "windows" ? "powershell" : "bash",
       },
+      {
+        title: "Step 5: Connect With MongoDB Compass",
+        body: "Install MongoDB Compass manually, then connect with this URI.",
+        code: [
+          "mongodb://admin:StrongPassword123@localhost:27017/",
+        ].join("\n"),
+        language: "text",
+      },
+      {
+        title: "Step 6: Open The Web UI",
+        body: "If you started `mongo-express`, open it in your browser.",
+        code: [
+          "http://localhost:8081",
+        ].join("\n"),
+        language: "text",
+      },
+      {
+        title: "Step 7: Manage The Containers",
+        body: "Inspect logs or stop/start the containers later with these commands.",
+        code: [
+          "docker ps",
+          "docker logs localmongo-mongodb",
+          "docker logs localmongo-web",
+          "docker stop localmongo-web",
+          "docker stop localmongo-mongodb",
+          "docker start localmongo-mongodb",
+          "docker start localmongo-web",
+        ].join("\n"),
+        language: cfg.os === "windows" ? "powershell" : "bash",
+      },
+      {
+        title: "Optional: Use Docker Compose",
+        body: "If you prefer Compose, create `docker-compose.yml` and run `docker compose up -d`.",
+        code: [
+          "services:",
+          "  mongodb:",
+          "    image: mongo:7",
+          "    container_name: localmongo-mongodb",
+          "    ports:",
+          "      - \"27017:27017\"",
+          "    environment:",
+          "      MONGO_INITDB_ROOT_USERNAME: admin",
+          "      MONGO_INITDB_ROOT_PASSWORD: StrongPassword123",
+          "    volumes:",
+          "      - localmongo-data:/data/db",
+          "",
+          "  mongo-express:",
+          "    image: mongo-express:1.0.2-20",
+          "    container_name: localmongo-web",
+          "    ports:",
+          "      - \"8081:8081\"",
+          "    environment:",
+          "      ME_CONFIG_MONGODB_ADMINUSERNAME: admin",
+          "      ME_CONFIG_MONGODB_ADMINPASSWORD: StrongPassword123",
+          "      ME_CONFIG_MONGODB_URL: mongodb://admin:StrongPassword123@mongodb:27017/",
+          "",
+          "volumes:",
+          "  localmongo-data:",
+        ].join("\n"),
+        language: "yaml",
+      },
     ],
   }), [cfg.os]);
 
   const buildMongoNativeManualHelper = React.useCallback(() => ({
     title: "MongoDB Native Helper",
-    intro: "Manual terminal commands for the native MongoDB flow the repo already supports.",
+    intro: "Step-by-step native MongoDB setup without using this installer.",
     sections: cfg.os === "windows" ? [
       {
-        title: "Windows Native Script",
-        body: "Run the included PowerShell installer directly instead of using the dashboard UI.",
+        title: "Step 1: Install MongoDB Server",
+        body: "Install MongoDB Community Server manually on Windows.",
         code: [
-          "$env:LOCALMONGO_INSTANCE_NAME='localmongo'",
-          "$env:LOCALMONGO_HOST_IP='127.0.0.1'",
-          "$env:LOCALMONGO_MONGO_PORT='27017'",
-          "$env:LOCALMONGO_HTTP_PORT=''",
-          "$env:LOCALMONGO_HTTPS_PORT='9445'",
-          "$env:LOCALMONGO_WEB_PORT='8081'",
-          "$env:LOCALMONGO_ADMIN_USER='admin'",
-          "$env:LOCALMONGO_ADMIN_PASSWORD='StrongPassword123'",
-          "$env:LOCALMONGO_UI_USER='admin'",
-          "$env:LOCALMONGO_UI_PASSWORD='StrongPassword123'",
-          "powershell -NoProfile -ExecutionPolicy Bypass -File .\\Mongo\\windows\\setup-mongodb.ps1",
+          "mongod --version",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Step 2: Start MongoDB Service",
+        body: "Start the MongoDB Windows service after installation.",
+        code: [
+          "net start MongoDB",
+        ].join("\n"),
+        language: "powershell",
+      },
+      {
+        title: "Step 3: Connect With MongoDB Compass",
+        body: "Install MongoDB Compass manually, then connect with the local URI.",
+        code: [
+          "mongodb://localhost:27017/",
+        ].join("\n"),
+        language: "text",
+      },
+      {
+        title: "Step 4: Manage The Service",
+        body: "Use Windows service commands to stop or restart MongoDB.",
+        code: [
+          "net stop MongoDB",
+          "net start MongoDB",
         ].join("\n"),
         language: "powershell",
       },
     ] : [
       {
-        title: "Linux/macOS Native Script",
-        body: "Use the bundled shell installer. On macOS, Docker is usually the easier path if native packages are unavailable.",
+        title: "Step 1: Install MongoDB",
+        body: "Install MongoDB Community Edition from the official package source for your OS.",
         code: [
-          "sudo env \\",
-          "  LOCALMONGO_INSTANCE_NAME=localmongo \\",
-          "  LOCALMONGO_HOST_IP=127.0.0.1 \\",
-          "  LOCALMONGO_MONGO_PORT=27017 \\",
-          "  LOCALMONGO_ADMIN_USER=admin \\",
-          "  LOCALMONGO_ADMIN_PASSWORD=StrongPassword123 \\",
-          "  bash ./Mongo/linux-macos/setup-mongodb.sh",
+          "mongod --version",
+        ].join("\n"),
+        language: "bash",
+      },
+      {
+        title: "Step 2: Start MongoDB",
+        body: "Start the MongoDB service and confirm it is running.",
+        code: [
+          "sudo systemctl start mongod",
+          "sudo systemctl status mongod",
+        ].join("\n"),
+        language: "bash",
+      },
+      {
+        title: "Step 3: Connect With MongoDB Compass",
+        body: "Install MongoDB Compass manually, then connect with the local URI.",
+        code: [
+          "mongodb://localhost:27017/",
+        ].join("\n"),
+        language: "text",
+      },
+      {
+        title: "Step 4: Manage The Service",
+        body: "Use service commands to stop or restart MongoDB later.",
+        code: [
+          "sudo systemctl stop mongod",
+          "sudo systemctl start mongod",
         ].join("\n"),
         language: "bash",
       },
