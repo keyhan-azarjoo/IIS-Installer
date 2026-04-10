@@ -574,6 +574,7 @@ function Start-ContainersFallback([string]$dockerCtx, [string]$ngconf, [string]$
     "--name", "minio",
     "--label", $Script:LocalS3Label,
     "--label", "com.locals3.role=minio",
+    "--label", "com.serverinstaller.project_path=$project",
     "--network", $network,
     "-e", "MINIO_ROOT_USER=admin",
     "-e", "MINIO_ROOT_PASSWORD=StrongPassword123",
@@ -600,6 +601,7 @@ function Start-ContainersFallback([string]$dockerCtx, [string]$ngconf, [string]$
     "--name", "nginx",
     "--label", $Script:LocalS3Label,
     "--label", "com.locals3.role=nginx",
+    "--label", "com.serverinstaller.project_path=$project",
     "--network", $network,
     "-p", "${httpsPort}:443",
     "-p", "${consoleHttpsPort}:4443",
@@ -740,6 +742,7 @@ services:
     labels:
       - "com.locals3.installer=true"
       - "com.locals3.role=minio"
+      - "com.serverinstaller.project_path=$project"
     environment:
       MINIO_ROOT_USER: admin
       MINIO_ROOT_PASSWORD: StrongPassword123
@@ -768,6 +771,7 @@ services:
     labels:
       - "com.locals3.installer=true"
       - "com.locals3.role=nginx"
+      - "com.serverinstaller.project_path=$project"
     ports:
       - "$httpsPort:443"
       - "$consoleHttpsPort:4443"

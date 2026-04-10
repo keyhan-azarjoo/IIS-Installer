@@ -12,7 +12,7 @@
       isScopeLoading, loadDockerInfo, loadDockerServices,
       hasStoppedServices, batchServiceAction,
       isServiceRunningStatus, onServiceAction,
-      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+      renderServiceUrls, renderServiceProjectPath, renderServicePorts, renderServiceStatus, renderFolderIcon,
     } = p;
 
     const isUnixLike = cfg.os === "linux" || cfg.os === "darwin";
@@ -83,6 +83,7 @@
                       <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "docker"})</Typography>
                       {svc.image && <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>}
                       {renderServiceUrls(svc)}
+                      {renderServiceProjectPath(svc)}
                       {renderServicePorts(svc)}
                     </Box>
                     {renderServiceStatus(svc)}

@@ -202,13 +202,19 @@ function Ensure-Python {
     $pythonInfo = Get-PythonInfo
     if (-not $pythonInfo) {
         Write-Host "Python $RequestedPythonVersion not found. Installing the minimum required runtime..."
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pythonSetupScript
-        if ($LASTEXITCODE -ne 0) {
-            throw "Python setup failed."
+        try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pythonSetupScript
+            if ($LASTEXITCODE -ne 0) {
+                throw "Python setup failed with exit code $LASTEXITCODE."
+            }
+        } catch {
+            Write-Warning ("Python setup failed. Falling back to dashboard bootstrap runtime. Details: {0}" -f $_.Exception.Message)
+            return $null
         }
         $pythonInfo = Get-PythonInfo
         if (-not $pythonInfo) {
-            throw "Python $RequestedPythonVersion was not found after install."
+            Write-Warning "Python $RequestedPythonVersion was not found after install. Falling back to dashboard bootstrap runtime."
+            return $null
         }
         return $pythonInfo
     }
@@ -216,14 +222,20 @@ function Ensure-Python {
     # Python exists, but may be missing the Windows service deps (pywin32/pythonservice.exe). Repair in-place.
     if (-not (Test-WindowsServicePythonReady -PythonExe $pythonInfo.Executable)) {
         Write-Host "Python $RequestedPythonVersion found, but Windows service dependencies are missing. Repairing..."
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pythonSetupScript
-        if ($LASTEXITCODE -ne 0) {
-            throw "Python repair failed."
+        try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pythonSetupScript
+            if ($LASTEXITCODE -ne 0) {
+                throw "Python repair failed with exit code $LASTEXITCODE."
+            }
+        } catch {
+            Write-Warning ("Python repair failed. Continuing with the existing interpreter and dashboard fallback logic. Details: {0}" -f $_.Exception.Message)
+            return $pythonInfo
         }
 
         $pythonInfo = Get-PythonInfo
         if (-not $pythonInfo) {
-            throw "Python $RequestedPythonVersion was not found after repair."
+            Write-Warning "Python $RequestedPythonVersion was not found after repair. Falling back to dashboard bootstrap runtime."
+            return $null
         }
     }
 
@@ -357,7 +369,11 @@ if (-not (Test-IsAdministrator)) {
 }
 
 $pythonInfo = Ensure-Python
-$env:SERVER_INSTALLER_PYTHON = $pythonInfo.Executable
+if ($pythonInfo -and $pythonInfo.Executable) {
+    $env:SERVER_INSTALLER_PYTHON = $pythonInfo.Executable
+} else {
+    Remove-Item Env:SERVER_INSTALLER_PYTHON -ErrorAction SilentlyContinue
+}
 $exitCode = Invoke-DashboardBootstrap
 Show-DashboardUrls
 exit $exitCode

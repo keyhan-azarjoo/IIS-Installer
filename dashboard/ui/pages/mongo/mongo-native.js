@@ -126,7 +126,7 @@
       isScopeLoading, loadMongoInfo, loadMongoServices,
       hasStoppedServices, batchServiceAction, copyText, tryOpenCompass, promptOpenMongoWebsite,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+      renderServiceUrls, renderServiceProjectPath, renderServicePorts, renderServiceStatus, renderFolderIcon,
       renderEditServiceIcon,
       launchCompassProtocol,
       DownloadCompassIcon, CopyCompassIcon, TryOpenCompassIcon, OpenCompassStyleIcon,
@@ -316,6 +316,7 @@
                         <Box sx={{ minWidth: 250 }}>
                           <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "service"})</Typography></Typography>
                           {renderServiceUrls(svc)}
+                          {renderServiceProjectPath(svc)}
                           {renderServicePorts(svc)}
                           {!!svcUri && (
                             <Typography

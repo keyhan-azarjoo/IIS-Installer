@@ -797,6 +797,28 @@ function App() {
     );
   };
 
+  const renderServiceProjectPath = (svc) => {
+    const projectPath = String(svc?.project_path || "").trim();
+    if (!projectPath) return null;
+    const canOpen = !!setPage && !!setFileManagerPath;
+    return (
+      <Typography
+        variant="caption"
+        component="div"
+        onClick={canOpen ? () => { setFileManagerPath(projectPath); setPage("files"); } : undefined}
+        sx={{
+          mt: 0.5,
+          color: canOpen ? "primary.main" : "text.secondary",
+          wordBreak: "break-all",
+          cursor: canOpen ? "pointer" : "default",
+          "&:hover": canOpen ? { textDecoration: "underline" } : undefined,
+        }}
+      >
+        Files: {projectPath}
+      </Typography>
+    );
+  };
+
   const renderServiceStatus = (svc) => {
     const running = isServiceRunningStatus(svc?.status, svc?.sub_status);
     const title = formatServiceState(svc?.status, svc?.sub_status) || (running ? "Running" : "Stopped");
@@ -1782,6 +1804,7 @@ function App() {
                       </Typography>
                     )}
                     {renderServiceUrls(svc)}
+                    {renderServiceProjectPath(svc)}
                     {renderServicePorts(svc)}
                   </Box>
                   {renderServiceStatus(svc)}
@@ -1819,7 +1842,7 @@ function App() {
         </CardContent>
       </Card>
     </Grid>
-  ), [isScopeLoading, openPythonApiRun, onServiceAction, pythonApiRuns, renderServicePorts, renderServiceUrls, renderFolderIcon, serviceBusy]);
+  ), [isScopeLoading, openPythonApiRun, onServiceAction, pythonApiRuns, renderServicePorts, renderServiceProjectPath, renderServiceUrls, renderFolderIcon, serviceBusy]);
 
   const software = systemInfo?.software || {};
   const mongoStatusInfo = mongoInfoState || systemInfo || {};
@@ -2492,7 +2515,7 @@ function App() {
     goBack, onPortAction, closeListeningPort, onServicePortAction,
     renderEditServiceIcon, onServiceBindingChange,
     serviceEditDlg, setServiceEditDlg,
-    renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+    renderServiceUrls, renderServiceProjectPath, renderServicePorts, renderServiceStatus, renderFolderIcon,
     renderStartupTypeDropdown,
     onServiceAction, stopServicesBatch, batchServiceAction, hasStoppedServices,
     onProxyServiceAction, actionLabel,

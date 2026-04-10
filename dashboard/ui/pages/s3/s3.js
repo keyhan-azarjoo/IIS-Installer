@@ -13,7 +13,7 @@
       isScopeLoading, loadS3Info, loadS3Services,
       hasStoppedServices, batchServiceAction, copyText,
       onServiceAction, isServiceRunningStatus,
-      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+      renderServiceUrls, renderServiceProjectPath, renderServicePorts, renderServiceStatus, renderFolderIcon,
       OpenCompassStyleIcon, TryOpenCompassIcon, CopyCompassIcon,
     } = p;
 
@@ -88,6 +88,7 @@
                         <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>
                       )}
                       {typeof renderServiceUrls === "function" && renderServiceUrls(svc)}
+                      {typeof renderServiceProjectPath === "function" && renderServiceProjectPath(svc)}
                       {typeof renderServicePorts === "function" && renderServicePorts(svc)}
                     </Box>
                     {typeof renderServiceStatus === "function" && renderServiceStatus(svc)}

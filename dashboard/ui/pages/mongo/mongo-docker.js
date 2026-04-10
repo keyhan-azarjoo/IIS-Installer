@@ -112,7 +112,7 @@
       isScopeLoading, loadMongoInfo, loadMongoServices,
       hasStoppedServices, batchServiceAction, copyText, tryOpenCompass, promptOpenMongoWebsite,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+      renderServiceUrls, renderServiceProjectPath, renderServicePorts, renderServiceStatus, renderFolderIcon,
       DownloadCompassIcon, CopyCompassIcon, TryOpenCompassIcon, OpenCompassStyleIcon,
       setPage, setFileManagerPath,
     } = p;
@@ -294,6 +294,7 @@
                             <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "docker"})</Typography></Typography>
                             {svc.image && <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>}
                             {renderServiceUrls(svc)}
+                            {renderServiceProjectPath(svc)}
                             {renderServicePorts(svc)}
                           </Box>
                           {renderServiceStatus(svc)}

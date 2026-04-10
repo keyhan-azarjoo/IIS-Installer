@@ -10,7 +10,7 @@
       openManualHelper, buildDotnetIisManualHelper,
       isServiceRunningStatus, onServiceAction,
       hasStoppedServices, batchServiceAction,
-      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon, renderEditServiceIcon,
+      renderServiceUrls, renderServiceProjectPath, renderServicePorts, renderServiceStatus, renderFolderIcon, renderEditServiceIcon,
     } = p;
 
     const [iisServices, setIisServices] = React.useState([]);
@@ -126,6 +126,7 @@
                           <Typography variant="caption" color="text.secondary" sx={{ display: "block", wordBreak: "break-all" }}>{svc.display_name}</Typography>
                         )}
                         {renderServiceUrls && renderServiceUrls(svc)}
+                        {renderServiceProjectPath && renderServiceProjectPath(svc)}
                         {renderServicePorts && renderServicePorts(svc)}
                       </Box>
                       {renderServiceStatus && renderServiceStatus(svc)}

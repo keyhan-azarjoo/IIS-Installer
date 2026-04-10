@@ -157,6 +157,61 @@ def get_service_items():
             compass_uri = ""
         return port_list, host_val, compass_uri, admin_user, admin_password
 
+    def _resolve_managed_project_path(name, image="", details=None):
+        details = details or {}
+        labels = details.get("labels", {}) or {}
+        explicit = str(labels.get("com.serverinstaller.project_path") or "").strip()
+        if explicit:
+            return explicit
+
+        lower_name = str(name or "").strip().lower()
+        lower_image = str(image or "").strip().lower()
+
+        if _is_locals3_name(lower_name) or _is_locals3_name(lower_image):
+            if os.name == "nt":
+                return str(WINDOWS_LOCALS3_STATE.parent)
+            inst_name = re.sub(r"[-_](?:minio|nginx|console)$", "", lower_name, flags=re.IGNORECASE) or "locals3"
+            for candidate in (Path("/opt") / inst_name, Path("/opt") / "locals3"):
+                if candidate.exists():
+                    return str(candidate)
+
+        mongo_instance = str(labels.get("com.localmongo.instance") or "").strip()
+        if mongo_instance:
+            if os.name == "nt":
+                return str(Path(os.environ.get("ProgramData", r"C:\ProgramData")) / f"LocalMongoDB-{mongo_instance}")
+            return str(Path("/opt") / f"localmongodb-{mongo_instance}")
+
+        if _is_mongo_name(lower_name) or _is_mongo_name(lower_image):
+            if os.name == "nt":
+                pd_path = Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+                candidates = sorted([p for p in pd_path.glob("LocalMongoDB-*") if p.is_dir()])
+            else:
+                candidates = sorted([p for p in Path("/opt").glob("localmongodb-*") if p.is_dir()])
+            if len(candidates) == 1:
+                return str(candidates[0])
+
+        if _is_dotnet_name(lower_name) or _is_dotnet_name(lower_image):
+            docker_root = SERVER_INSTALLER_DATA / "docker"
+            if docker_root.exists():
+                image_repo = lower_image.split(":", 1)[0].strip()
+                candidate_names = [
+                    lower_name,
+                    image_repo,
+                    re.sub(r"[^a-z0-9\-]", "-", lower_name),
+                    re.sub(r"[^a-z0-9\-]", "-", image_repo),
+                ]
+                for candidate_name in candidate_names:
+                    if not candidate_name:
+                        continue
+                    candidate = docker_root / candidate_name
+                    if candidate.exists():
+                        return str(candidate)
+                children = [p for p in docker_root.iterdir() if p.is_dir()]
+                if len(children) == 1:
+                    return str(children[0])
+
+        return ""
+
     if os.name == "nt":
         cmd = [
             "powershell.exe",
@@ -197,6 +252,9 @@ def get_service_items():
                         item["compass_uri"] = compass_uri
                         item["admin_user"] = adm_user
                         item["admin_password"] = adm_pass
+                        mongo_meta = all_mongo_meta.get(name) or {}
+                        if mongo_meta:
+                            item["project_path"] = str(Path(mongo_meta.get("mongod_path") or "").resolve().parent.parent) if str(mongo_meta.get("mongod_path") or "").strip() else str((Path(os.environ.get("ProgramData", r"C:\ProgramData")) / name))
                     items.append(item)
             except Exception:
                 pass
@@ -281,6 +339,7 @@ def get_service_items():
                         "platform": "windows",
                         "urls": sorted(set(task_urls)),
                         "ports": task_ports,
+                        "project_path": str(WINDOWS_LOCALS3_STATE.parent),
                     }
                 )
             except Exception:
@@ -594,6 +653,7 @@ def get_service_items():
                         "platform": "docker",
                         "urls": sorted(set(urls)),
                         "ports": ports,
+                        "project_path": _resolve_managed_project_path(name, details.get("image") or image, details),
                     }
                 )
 
@@ -624,6 +684,7 @@ def get_service_items():
                     "platform": "windows",
                     "urls": fallback_urls,
                     "ports": fallback_ports,
+                    "project_path": str(Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "LocalMongoDB"),
                 }
             )
         elif command_exists("systemctl"):
@@ -638,6 +699,7 @@ def get_service_items():
                     "platform": "linux",
                     "urls": fallback_urls,
                     "ports": fallback_ports,
+                    "project_path": "/opt/localmongodb",
                 }
             )
         else:
@@ -651,6 +713,7 @@ def get_service_items():
                     "platform": "docker",
                     "urls": fallback_urls,
                     "ports": fallback_ports,
+                    "project_path": _resolve_managed_project_path("localmongo-mongodb", "", {}),
                 }
             )
 

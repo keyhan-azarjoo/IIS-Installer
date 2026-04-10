@@ -1001,6 +1001,7 @@ $($addresses -join ", ") {
     --name "$($Script:InstanceName)-mongodb" `
     --label $Script:MongoLabel `
     --label "com.localmongo.role=mongodb" `
+    --label "com.serverinstaller.project_path=$Script:MongoRoot" `
     --restart always `
     --network "$($Script:InstanceName)-net" `
     -p "${mongoPort}:27017" `
@@ -1018,6 +1019,7 @@ $($addresses -join ", ") {
     --name "$($Script:InstanceName)-web" `
     --label $Script:MongoLabel `
     --label "com.localmongo.role=web" `
+    --label "com.serverinstaller.project_path=$Script:MongoRoot" `
     --restart always `
     --network "$($Script:InstanceName)-net" `
     -p "127.0.0.1:${webPort}:8081" `
@@ -1041,6 +1043,7 @@ $($addresses -join ", ") {
     --name "$($Script:InstanceName)-https" `
     --label $Script:MongoLabel `
     --label "com.localmongo.role=https" `
+    --label "com.serverinstaller.project_path=$Script:MongoRoot" `
     --restart always `
     --network "$($Script:InstanceName)-net" `
     -p "${httpsPort}:${httpsPort}" `

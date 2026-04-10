@@ -543,7 +543,7 @@ function Invoke-DockerDeployment {
 
     $runSucceeded = $false
     foreach ($isolation in $runAttempts) {
-        $runArgs = @("run", "-d", "--name", $containerName, "-p", "${HostPort}:8080")
+        $runArgs = @("run", "-d", "--name", $containerName, "-p", "${HostPort}:8080", "--label", "com.serverinstaller.project_path=$targetPath")
         if (-not [string]::IsNullOrWhiteSpace($isolation)) {
             $runArgs += "--isolation=$isolation"
             Write-Host "Starting Docker container with $isolation isolation"
