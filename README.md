@@ -174,48 +174,44 @@ If the artifact is private on GitHub, the installers will prompt for a GitHub to
 
 ## Manual Docker And Nginx Example
 
-If you already have a published Linux build and want to run it manually with Docker and Nginx, this structure works:
+Deploy the .NET API behind Nginx reverse proxy with HTTPS support.
+
+### Directory Structure
 
 ```text
-C:\keyhan\API\weighingSystemApi\
-├── dockerfiles
-└── linux   (contains Api.dll and published app files)
+C:\WeighingSystem\
+ +-- docker-compose.yml
+ +-- nginx.conf
+ +-- certs/
+ |   +-- cert.pem
+ |   `-- key.pem
+ `-- API/
+     +-- Dockerfile
+     `-- linux/      (contains Api.dll etc.)
 ```
 
-### Step 1: Go to `dockerfiles`
+### Step 1: Go to WeighingSystem
 
 ```powershell
-cd C:\keyhan\API\weighingSystemApi\dockerfiles
+cd C:\WeighingSystem
 ```
 
-### Step 2: Create `Dockerfile`
+### Step 2: Create API/Dockerfile
 
-```powershell
-notepad Dockerfile
-```
-
-Paste:
+Create a file named `API/Dockerfile` (no extension):
 
 ```dockerfile
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
 
 WORKDIR /app
-COPY ../linux .
+COPY ../API/linux .
 
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "Api.dll"]
 ```
 
-Save the file without a `.txt` extension.
-
-### Step 3: Create `nginx.conf`
-
-```powershell
-notepad nginx.conf
-```
-
-Paste:
+### Step 3: Create nginx.conf
 
 ```nginx
 events {}
@@ -252,21 +248,15 @@ http {
 }
 ```
 
-### Step 4: Create `docker-compose.yml`
-
-```powershell
-notepad docker-compose.yml
-```
-
-Paste:
+### Step 4: Create docker-compose.yml
 
 ```yaml
 services:
   api:
     build:
       context: ..
-      dockerfile: dockerfiles/Dockerfile
-    container_name: myapi
+      dockerfile: API/Dockerfile
+    container_name: API
     environment:
       - ASPNETCORE_URLS=http://+:8080
     expose:
@@ -275,7 +265,7 @@ services:
 
   nginx:
     image: nginx:latest
-    container_name: nginx
+    container_name: api-nginx
     ports:
       - "8585:80"
       - "8586:443"
@@ -286,49 +276,61 @@ services:
       - api
 ```
 
-### Step 5: Create `certs`
-
-If you need to generate the self-signed certificate again:
+### Step 5: Generate self-signed certificates
 
 ```powershell
 mkdir certs
-docker run --rm -v ${PWD}/certs:/certs alpine sh -c "apk add --no-cache openssl && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /certs/key.pem -out /certs/cert.pem -subj '/CN=192.168.1.182'"
+docker run --rm -v ${PWD}/certs:/certs alpine sh -c "
+apk add --no-cache openssl &&
+openssl req -x509 -nodes -days 365 \
+-newkey rsa:2048 \
+-keyout /certs/key.pem \
+-out /certs/cert.pem \
+-subj '/CN=192.168.1.182'
+"
 ```
 
-### Step 6: Build and run
+### Step 6: Build & Run
 
 ```powershell
 docker compose up -d --build
 ```
 
-### Step 7: Verify containers
+### Step 7: Verify
 
 ```powershell
 docker ps
 ```
 
-You should see both `myapi` and `nginx`.
+You should see both `API` and `api-nginx` containers running.
 
-### Step 8: Test the app
+### Step 8: Test
 
 HTTP:
 
 ```text
-http://192.168.1.182:8585/weatherforecast
+http://192.168.1.182:8585/health
 ```
 
 HTTPS:
 
 ```text
-https://192.168.1.182:8586/weatherforecast
+https://192.168.1.182:8586/health
 ```
 
 ### Notes
 
-- A `404` on `/` is normal if your API does not expose a root endpoint. Test a real route such as `/weatherforecast`.
-- A browser warning on HTTPS is normal because the certificate is self-signed.
-- The request flow is: browser -> Nginx -> `http://api:8080` -> .NET API.
-- You can reuse the same pattern for other published .NET APIs by changing the folder names, DLL name, exposed routes, and ports.
+- `404` on `/` is normal. Use `/health` to verify the API is running.
+- HTTPS browser warning is expected with self-signed certs. Click `Advanced` > `Proceed`.
+
+### Architecture
+
+```text
+Browser -> https://192.168.1.182:8586
+        -> Nginx
+        -> http://api:8080
+        -> .NET API
+```
 
 ## Notes
 

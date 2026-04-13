@@ -100,16 +100,25 @@ Without DNS mapping, use IP URL directly.
 
 ## Manual Docker Setup
 
-If you want to run MinIO manually with Docker and Nginx, this structure works:
+Deploy MinIO object storage behind Nginx with HTTP + HTTPS.
+
+### Directory Structure
 
 ```text
-C:\keyhan\API\S3
+C:\WeighingSystem\S3\
+ +-- docker-compose.yml
+ +-- data/
+ +-- certs/
+ |   +-- public.crt
+ |   `-- private.key
+ `-- nginx/
+     `-- nginx.conf
 ```
 
-### Step 0: Clean everything
+### Step 0: Clean (if re-deploying)
 
 ```powershell
-cd C:\keyhan\API\S3
+cd C:\WeighingSystem\S3
 docker compose down
 Remove-Item -Recurse -Force data, certs, nginx, docker-compose.yml -ErrorAction Ignore
 ```
@@ -122,63 +131,64 @@ mkdir certs
 mkdir nginx
 ```
 
-### Step 2: Generate SSL without installing OpenSSL locally
+### Step 2: Generate SSL certificates
 
 ```powershell
-docker run --rm -v ${PWD}/certs:/certs alpine sh -c "apk add --no-cache openssl && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /certs/private.key -out /certs/public.crt -subj '/CN=localhost'"
+docker run --rm -v ${PWD}/certs:/certs alpine sh -c "
+apk add --no-cache openssl &&
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+-keyout /certs/private.key \
+-out /certs/public.crt \
+-subj '/CN=localhost'
+"
 ```
 
-After this you must have:
+Verify you have `certs/private.key` and `certs/public.crt`.
 
-```text
-certs/private.key
-certs/public.crt
-```
-
-### Step 3: Create `nginx\nginx.conf`
-
-```powershell
-notepad nginx\nginx.conf
-```
-
-Paste:
+### Step 3: Create `nginx/nginx.conf`
 
 ```nginx
 events {}
 
 http {
     server {
-        listen 80;
+        listen 9085;
 
+        # UI
         location / {
             proxy_pass http://minio:9001;
             proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
+        }
+
+        # S3 API
+        location /s3/ {
+            proxy_pass http://minio:9000/;
+            proxy_set_header Host $host;
         }
     }
 
     server {
-        listen 443 ssl;
+        listen 9086 ssl;
 
         ssl_certificate /etc/nginx/certs/public.crt;
         ssl_certificate_key /etc/nginx/certs/private.key;
 
+        # UI
         location / {
             proxy_pass http://minio:9001;
             proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
+        }
+
+        # S3 API
+        location /s3/ {
+            proxy_pass http://minio:9000/;
+            proxy_set_header Host $host;
         }
     }
 }
 ```
 
 ### Step 4: Create `docker-compose.yml`
-
-```powershell
-notepad docker-compose.yml
-```
-
-Paste:
 
 ```yaml
 services:
@@ -200,14 +210,14 @@ services:
       - "9000"
       - "9001"
 
-  nginx:
+  s3-nginx:
     image: nginx:latest
-    container_name: nginx
+    container_name: s3-nginx
     restart: unless-stopped
 
     ports:
-      - "80:80"
-      - "443:443"
+      - "9085:9085"
+      - "9086:9086"
 
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -217,7 +227,7 @@ services:
       - minio
 ```
 
-### Step 5: Run everything
+### Step 5: Run
 
 ```powershell
 docker compose up -d
@@ -228,54 +238,45 @@ docker compose up -d
 HTTP:
 
 ```text
-http://localhost
+http://localhost:9085
 ```
 
 HTTPS:
 
 ```text
-https://localhost
+https://localhost:9086
 ```
 
-### Login
+S3 API:
 
-- Username: `admin`
-- Password: `admin123`
+```text
+http://localhost:9085/s3/
+```
 
-### What you should see
+Login: `admin / admin123`
 
-The MinIO UI sidebar should include:
+You should see the full MinIO console with sidebar: `Buckets`, `Identity`, `Users`, `Access Keys`, `Policies`.
 
-- Buckets
-- Identity
-- Users
-- Access Keys
-- Policies
-
-### If something is wrong
-
-Check logs:
+## Troubleshooting
 
 ```powershell
-docker logs nginx
+docker logs s3-nginx
 docker logs minio
 ```
 
-### Why this works
+## Technical Notes
 
-- MinIO API listens on `9000`.
-- MinIO Console UI listens on `9001`.
-- Nginx handles both HTTP and HTTPS in front of MinIO.
-- This setup proxies the UI through `/` to `http://minio:9001`.
+- MinIO API listens on port `9000`, UI on port `9001`.
+- MinIO cannot serve HTTP + HTTPS together natively. Nginx handles both.
 
-### Optional: Expose the S3 API through Nginx later
+## Architecture
 
-If you also want an API path through the reverse proxy, add this block to `nginx.conf`:
-
-```nginx
-location /s3/ {
-    proxy_pass http://minio:9000;
-}
+```text
+Browser -> https://localhost:9086 (or http://localhost:9085)
+        -> Nginx (9085/9086)
+        -> http://minio:9001 (console UI)
+        -> http://minio:9000 (S3 API)
+        -> MinIO Storage
 ```
 
 ## Known Notes

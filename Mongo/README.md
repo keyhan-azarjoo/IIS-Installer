@@ -17,17 +17,26 @@ Mongo/
 
 ## Manual Docker Setup
 
-This is a clean MongoDB + Mongo Express + Nginx Docker setup with these ports:
+Deploy MongoDB with Mongo Express UI behind Nginx with HTTP + HTTPS.
 
-- HTTP: `8721`
-- HTTPS: `8722`
-- MongoDB: `27017`
+### Directory Structure
+
+```text
+C:\WeighingSystem\MongoDb\
+ +-- docker-compose.yml
+ +-- data/
+ +-- certs/
+ |   +-- public.crt
+ |   `-- private.key
+ `-- nginx/
+     `-- nginx.conf
+```
 
 ### Step 0: Clean start
 
 ```powershell
-mkdir C:\keyhan\API\Mongo -Force
-cd C:\keyhan\API\Mongo
+mkdir C:\WeighingSystem\MongoDb -Force
+cd C:\WeighingSystem\MongoDb
 
 docker compose down
 Remove-Item -Recurse -Force data, certs, nginx, docker-compose.yml -ErrorAction Ignore
@@ -41,19 +50,19 @@ mkdir certs
 mkdir nginx
 ```
 
-### Step 2: Generate SSL
+### Step 2: Generate SSL certificates
 
 ```powershell
-docker run --rm -v ${PWD}/certs:/certs alpine sh -c "apk add --no-cache openssl && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /certs/private.key -out /certs/public.crt -subj '/CN=localhost'"
+docker run --rm -v ${PWD}/certs:/certs alpine sh -c "
+apk add --no-cache openssl &&
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+-keyout /certs/private.key \
+-out /certs/public.crt \
+-subj '/CN=localhost'
+"
 ```
 
-### Step 3: Create `nginx\nginx.conf`
-
-```powershell
-notepad nginx\nginx.conf
-```
-
-Paste:
+### Step 3: Create `nginx/nginx.conf`
 
 ```nginx
 events {}
@@ -85,12 +94,6 @@ http {
 ```
 
 ### Step 4: Create `docker-compose.yml`
-
-```powershell
-notepad docker-compose.yml
-```
-
-Paste:
 
 ```yaml
 services:
@@ -145,43 +148,43 @@ services:
 docker compose up -d
 ```
 
-### Access
+### Step 6: Access
 
-UI:
+UI HTTP:
 
 ```text
 http://localhost:8721
+```
+
+UI HTTPS:
+
+```text
 https://localhost:8722
 ```
 
-### Login
+Login: `admin / admin123`
 
-- Username: `admin`
-- Password: `admin123`
-
-### MongoDB connection string
+### Connection String (for code)
 
 ```text
 mongodb://admin:admin123@localhost:27017
 ```
 
-### Final structure
+## Troubleshooting
 
-```text
-C:\keyhan\API\Mongo
-│
-├── data\
-├── certs\
-│   ├── public.crt
-│   └── private.key
-├── nginx\
-│   └── nginx.conf
-└── docker-compose.yml
+```powershell
+docker logs mongo-db
+docker logs mongo-ui
+docker logs mongo-nginx
 ```
 
-## Result
+## Architecture
 
-- MongoDB running
-- UI available on both HTTP and HTTPS
-- No container conflicts with the selected ports
-- Ready for backend apps such as .NET or Python
+```text
+Browser -> https://localhost:8722 (or http://localhost:8721)
+        -> Nginx (8721/8722)
+        -> http://mongo-express:8081 (Mongo Express UI)
+
+Code -> mongodb://admin:admin123@localhost:27017
+        -> MongoDB (port 27017)
+```
